@@ -318,6 +318,25 @@ The one trap: **borg's LZ4 is the raw block format**, not the frame format —
 *Gate:* for each algorithm and level, borge decompresses borg's output and borg
 decompresses borge's output, over a corpus drawn from the recipedb test data.
 
+> **Done 2026-08-16** (`internal/compress`). Gate green both directions: 22 specs ×
+> 20 corpus entries, including 8 real files from `recipe_vault` and `recipe_joplin`.
+>
+> Scope clarification worth carrying forward: **compressed bytes need not match borg's**
+> and this package does not try to make them. Chunk ids are computed over plaintext and
+> pack names over the pack's own contents, so only the ids, the metadata fields and
+> two-way decompressibility are format-visible. That is what made using Go's zlib and
+> klauspost's zstd safe rather than a risk.
+>
+> Two findings, both from the differential test, both in `docs/DIVERGENCES.md`:
+>
+> - **`--compression auto,...` records no plaintext size.** borg's `Auto.compress`
+>   copies only `ctype`/`clevel`/`csize` out of the inner compressor's metadata. borge's
+>   decompressor must therefore work without a size — this blocked reading anything borg
+>   wrote with `auto`, a commonly recommended setting. Stage 5 and 6 must not assume
+>   `size` is present in object metadata.
+> - **`Auto` crashes on empty input** (`ZeroDivisionError`, every inner compressor).
+>   Latent upstream bug; borge guards it. Worth reporting to borg.
+
 ### 1.3 `crypto/aead` — low-level crypto  ⚠️ **highest-risk item in the port**
 Needed: HMAC-SHA-256 (stdlib), BLAKE3 (`lukechampine.com/blake3`), argon2id
 (`x/crypto/argon2`), ChaCha20-Poly1305 (`x/crypto/chacha20poly1305`), and
