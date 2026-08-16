@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **plan approved, Stage 0 in progress.**
+Status: **Stage 0 complete. Stage 1 (primitives) is next and not started.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -661,7 +661,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 
 | Stage | Description | State | Evidence bundle |
 | --- | --- | --- | --- |
-| 0 | Foundation, licensing, borg-2 venv, format reference | in progress | — |
+| 0 | Foundation, licensing, borg-2 venv, format reference | **done** 2026-08-16 | `borge-stage-0-20260816T163704Z.zip` |
 | 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | not started | — |
 | 2 | `store` (borgstore port, posixfs) | not started | — |
 | 3 | `repoobj` + `repository` + packs + locking | not started | — |
