@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stage 0 complete. Stage 1 (primitives) is next and not started.**
+Status: **Stages 0 and 1.1-1.4 complete. Stage 1.5 (item) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -405,6 +405,37 @@ only revisited in Stage 9 if measurement says so.
 are identical to borg's, verified by dumping boundaries from both. Any single
 differing offset is a hard failure.
 
+> **Done 2026-08-16** (`internal/chunker`). Gate green: **77 boundary cases**
+> byte-exact across fastcdc (nc 0/2/4), buzhash64 (nc 0/2) and buzhash (two seeds),
+> over 11 corpus inputs including 4 MiB of real `deutsche-rezepte` data.
+>
+> The keyed tables match first (`TestGearTableMatchesBorg`), which means the CSPRNG,
+> its rejection sampling and its Fisher-Yates shuffle all reproduce borg exactly — if
+> the table were wrong, every boundary would differ and the comparison would say
+> nothing useful.
+>
+> **Finding: EOF must be flagged only on a zero-length read, never on a short one.**
+> borg's `fill()` sets `eof` only when the reader returns 0 bytes. Using Go's
+> `io.ReadFull` semantics (short read ⇒ EOF) made the *windowed* chunkers emit
+> everything buffered one round early, merging the last few chunks of every file —
+> boundaries identical everywhere else, then a silent divergence in the tail. fastcdc
+> was unaffected, so a test on the default chunker alone would have missed it.
+> `TestShortReadsDoNotChangeBoundaries` now covers it without needing the venv.
+>
+> **Scope:** the three AES-based chunkers (`rabin-aes`, `goldilocks-aes`,
+> `toeplitz-aes`) are **not** ported. They are upstream experiments, none is a default,
+> and each needs its own PHTE kernel. `New` rejects them with an explanation rather
+> than silently substituting another algorithm. Revisit only if a corpus turns up that
+> uses one.
+>
+> Also deferred: the sparse-file reader (`chunkers/reader.pyx`). Boundaries do not
+> depend on it — holes read as zeros either way — but `CH_HOLE` versus `CH_ALLOC`
+> classification does. It belongs with the file-walking code in **stage 6**, where the
+> `fmap`/sparsemap it needs actually exists.
+>
+> Baseline throughput on this machine, for stage 9 to improve on: fastcdc 186 MB/s,
+> buzhash64 134 MB/s (single-threaded, pure Go, no SIMD kernel).
+
 ### 1.5 `item` — item and metadata structs
 `item.pyx`'s `PropDict` machinery becomes plain Go structs with explicit msgpack
 codecs. The subtlety is **surrogate-escaped str**: borg stores POSIX paths that are
@@ -726,7 +757,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 | Stage | Description | State | Evidence bundle |
 | --- | --- | --- | --- |
 | 0 | Foundation, licensing, borg-2 venv, format reference | **done** 2026-08-16 | `borge-stage-0-20260816T163704Z.zip` |
-| 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | not started | — |
+| 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | 1.1-1.4 done, 1.5-1.6 to go | per-substage bundles |
 | 2 | `store` (borgstore port, posixfs) | not started | — |
 | 3 | `repoobj` + `repository` + packs + locking | not started | — |
 | 4 | Keys | not started | — |
