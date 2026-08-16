@@ -112,3 +112,34 @@ func Argon2ID(passphrase, salt []byte, timeCost, memoryCostKiB, parallelism uint
 func Argon2IDDefault(passphrase, salt []byte, outputLen uint32) ([]byte, error) {
 	return Argon2ID(passphrase, salt, Argon2TimeCost, Argon2MemoryCost, Argon2Parallelism, outputLen)
 }
+
+// Blake3Unkeyed is BLAKE3 in its plain (unkeyed) mode, 32-byte digest. It is the id
+// hash for the none-blake3 key mode, where there is no key to hash with.
+func Blake3Unkeyed(data []byte) []byte {
+	h := blake3.New(32, nil)
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+// Blake3UnkeyedTwo hashes two byte strings in sequence, unkeyed. The split is not part
+// of the hash - it exists because the caller has the prefix and the payload separately
+// and joining them would copy the payload.
+func Blake3UnkeyedTwo(a, b []byte) []byte {
+	h := blake3.New(32, nil)
+	h.Write(a)
+	h.Write(b)
+	return h.Sum(nil)
+}
+
+// Blake3KeyedTwo is Blake3Keyed over two byte strings in sequence.
+func Blake3KeyedTwo(key, a, b []byte) ([]byte, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("crypto: blake3 key must be 32 bytes, got %d", len(key))
+	}
+	var k [32]byte
+	copy(k[:], key)
+	h := blake3.New(32, k[:])
+	h.Write(a)
+	h.Write(b)
+	return h.Sum(nil), nil
+}

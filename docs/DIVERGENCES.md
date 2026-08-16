@@ -114,6 +114,20 @@ correctly under either tool. The decision test reports such cases rather than fa
 and requires an exact match for `none` and `lz4`, which have no library-dependent
 behaviour.
 
+**A third consequence, found in stage 3.** borg's MAC modes are deterministic - no
+nonce, no session state - and their docstring notes that two repositories with the same
+key material therefore store byte-identical objects for identical input, "which allows
+deduplicating them on the filesystem level". borge reproduces that exactly for every
+object stored **uncompressed**, which includes the ones where a compressor decided the
+data was not worth compressing. It cannot for a **compressed** payload, because the
+compressed bytes come from a different library.
+
+Measured over the stage 3 corpus, the difference is small and goes both ways: between
+−5 and +12 bytes on objects of a few hundred bytes, and proportionally smaller on
+larger ones. The interoperability that matters is unaffected - each tool reads the
+other's objects, and both agree on the compression *decision* (the stored `ctype`),
+which is the part that is format-visible.
+
 ## 4. Cache and config directories are not shared
 
 **Stage 0 · `docs/PORTING_PLAN.md` §0.5 · by design**
