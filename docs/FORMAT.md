@@ -563,8 +563,8 @@ depends on them starts.
 | --- | --- | --- |
 | ~~1~~ | ~~Exact on-disk serialization of `borghash.HashTableNT`~~ | **Answered 2026-08-16, see §6.1 and §6.2** |
 | ~~2~~ | ~~`borgstore` soft-delete representation on the posixfs backend~~ | **Answered 2026-08-16: a rename to `<nested name>.del`, in place. See §1.3.** |
-| 3 | `storelocking` object naming, contents and the stale-lock timeout rules. | Stage 3 |
-| 4 | `index/` incremental write and merge/compaction algorithm. | Stage 3 |
+| ~~3~~ | ~~`storelocking` object naming, contents and the stale-lock rules~~ | **Answered 2026-08-16: `locks/<sha256 of the content>` holding a JSON record `{exclusive, hostid, processid, threadid, time}`; a lock unrefreshed for 30 minutes is stale and may be removed by anyone. Acquisition is write-then-check, and a loser withdraws and retries — lock objects are immutable, so that is safe.** |
+| ~~4~~ | ~~`index/` incremental write and merge/compaction algorithm~~ | **Answered 2026-08-16: bounded, immutable, content-addressed fragments; keys sorted before serialising so identical entry sets converge on identical objects; an incremental write emits only the entries flagged new; a reader merges *all* fragments or none, and falls back to walking the packs. `index/chunkindex-invalid` marks an interrupted deletion.** |
 | 5 | Exact argon2 parameters in `ARGON2_ARGS`, and the `hash` field's construction in `EncryptedKey`. | Stage 4 |
 | 6 | The `chunk_seed` role in chunker initialisation. | Stage 1.4 |
 

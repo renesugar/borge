@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0, 1 and 2 complete. Stage 3 (`repoobj` + `repository`) is next.**
+Status: **Stages 0-3 complete. Stage 4 (keys: the AEAD modes and key storage) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -630,6 +630,42 @@ Also port the `BORG_ASSERT_ID` policy (`ASSERT_ID_PLACES`, defaults
 index from borg-written packs that matches borg's own; `borg check` (venv) passes on a
 borge-written repository containing raw objects.
 
+> **Done 2026-08-16** (`internal/repoobj`, `internal/crypto/key`,
+> `internal/repository`). Gate green, all four parts:
+>
+> - borg opens a borge-written repository, computes the **same index digest**, and reads
+>   every object back.
+> - borge opens a borg-written repository, computes the same digest, and reads every
+>   object back.
+> - With every `index/` fragment deleted, borge rebuilds the index by walking borg's
+>   packs and gets **the same digest** — the index really is a cache.
+> - **`borg check` passes** on a borge-written repository.
+> - Pack contents are **byte-identical**: same objects, same order, same pack, so the
+>   content-addressed names match.
+>
+> **Finding: borg's object metadata dict is insertion-ordered, not sorted** —
+> `type, size, ctype, clevel, csize`, with `size` second because `DecidingCompressor`
+> sets it before the compressor base adds the rest. A sorted map changed the bytes of
+> every object, which matters because borg's MAC modes are deterministic and advertise
+> byte-identical objects across repositories with the same key material.
+>
+> **How much byte-identity is achievable, precisely:** everything the *envelope*
+> contributes matches exactly — header, AAD, tag, metadata key order — and so does the
+> compression *decision*. A compressed payload cannot match, because the bytes come from
+> a different library; measured, the difference is −5 to +12 bytes. So an object stored
+> uncompressed is byte-identical, one stored compressed is not.
+> See `docs/DIVERGENCES.md` §3.
+>
+> The MAC key modes (`none-*`, `authenticated-*`) were implemented here rather than
+> waiting for stage 4, which is what §7 asks for: they exercise the whole object path
+> with no crypto risk. The AEAD modes still need their session-key derivation and blob
+> handling, and `key.ByName` refuses them with that explanation.
+>
+> The `PackWriter` concurrency invariant is pinned down by tests rather than left to
+> chance: results arrive one pack behind, a store failure surfaces one pack later *and*
+> drops the failed pack's index entries plus anything still buffered, and the async and
+> sync paths produce identical indexes. `make race` covers it.
+
 ---
 
 ## 7. Stage 4 — keys
@@ -857,7 +893,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 | 0 | Foundation, licensing, borg-2 venv, format reference | **done** 2026-08-16 | `borge-stage-0-20260816T163704Z.zip` |
 | 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | **done** 2026-08-16 | per-substage bundles |
 | 2 | `store` (borgstore port, posixfs) | **done** 2026-08-16 | `borge-stage-2-*.zip` |
-| 3 | `repoobj` + `repository` + packs + locking | not started | — |
+| 3 | `repoobj` + `repository` + packs + locking | **done** 2026-08-16 | `borge-stage-3-*.zip` |
 | 4 | Keys | not started | — |
 | 5 | Read path: manifest, archive, extract | not started | — |
 | 6 | Write path: create | not started | — |

@@ -219,6 +219,19 @@ func (c *ChunkIndex) Clear() {
 	c.newCount = 0
 }
 
+// IsNew reports whether a chunk carries the FNew system flag, i.e. is not yet present
+// in the repository's index/ fragments.
+//
+// The flag is masked out of every entry Get hands back, so this is the only way to ask.
+// Persisting the index incrementally is what needs it: only the new entries are written.
+func (c *ChunkIndex) IsNew(id []byte) bool {
+	raw, ok := c.ht.Get(id)
+	if !ok {
+		return false
+	}
+	return decodeEntry(raw).Flags&FNew != 0
+}
+
 // IsPending reports whether a chunk's pack location is still unresolved.
 func (c *ChunkIndex) IsPending(id []byte) bool {
 	e, ok := c.Get(id)
