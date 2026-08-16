@@ -1,0 +1,36 @@
+borge
+Copyright 2026 The borge authors
+
+This product includes software developed as a port of BorgBackup ("borg").
+
+--------------------------------------------------------------------------------
+Portions of this software are derived from BorgBackup (https://github.com/borgbackup/borg)
+
+  Copyright (C) 2015-2026 The Borg Collective (see licenses/borg/AUTHORS)
+  Copyright (C) 2010-2014 Jonas Borgström <jonas@borgstrom.se>
+
+  Licensed under the BSD 3-Clause License. The full license text is reproduced in
+  licenses/borg/LICENSE and the contributor list in licenses/borg/AUTHORS.
+
+  The Go code in this project is a translation of borg's Python and Cython source.
+  It has been modified: it is written in Go, the module and file layout differ, and
+  behaviour differs where noted in the source headers and in docs/PORTING_PLAN.md.
+
+  The name "borg", the name "BorgBackup" and the names of the borg authors are not
+  used to endorse or promote this project. This project is not produced, sponsored
+  or endorsed by the Borg Collective.
+
+--------------------------------------------------------------------------------
+Portions of this software are derived from restic (https://github.com/restic/restic)
+
+  Copyright (c) 2014, Alexander Neumann <alexander@bumpern.de>
+
+  Licensed under the BSD 2-Clause License. The full license text is reproduced in
+  licenses/restic/LICENSE.
+
+  Files derived from restic are marked as such in their header comments. If no
+  such file is present in this distribution, no restic code is currently included.
+
+--------------------------------------------------------------------------------
+Third-party Go module dependencies retain their own licenses. See
+licenses/third-party/ for a generated inventory.

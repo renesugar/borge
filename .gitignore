@@ -1,0 +1,9 @@
+/borge
+/bin/
+/dist/
+/.venv-borg2/
+/tests/evidence/out/
+*.zip
+*.test
+*.prof
+coverage.out
