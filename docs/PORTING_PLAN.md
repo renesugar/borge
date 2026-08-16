@@ -446,6 +446,36 @@ encoding (int nanoseconds ⇄ msgpack ext) and `hlid` hardlink identity.
 *Gate:* every item fixture from borg's test suite round-trips byte-identically;
 a fuzz test over arbitrary byte-sequence paths round-trips.
 
+> **Done 2026-08-16** (`internal/item`). Gate green: **34 fixtures** produced by borg's
+> own `Item`/`ArchiveItem`/`ManifestItem`/`Key`/`EncryptedKey` classes round-trip
+> byte-identically, including non-UTF-8 paths, users, groups and symlink targets.
+>
+> **Surrogate escapes were a non-problem, as stage 1.1 predicted.** A Go string is the
+> wire form, so there is no encode/decode step to get wrong. What did need care was
+> everything around it:
+>
+> - **Absent is not zero.** Every optional field is a pointer, and `ChunksSet` /
+>   `XAttrsSet` flags distinguish an empty list or map from a missing key. Writing
+>   `mode 0` and not writing `mode` are different bytes; conflating them would give
+>   every item mode `0000` on its first rewrite.
+> - **Unknown keys are preserved.** A key written by a newer borg is kept and written
+>   back. Dropping it would silently strip metadata on any rewrite — `recreate`,
+>   `transfer`, a repair — which is losing data while reporting success.
+> - **xattrs must be sorted explicitly.** A Go map iterates in random order, so without
+>   the sort the same item would hash to a different chunk id on every run.
+>
+> **Path sanitisation is the one security boundary in this package** and is tested
+> twice: a table of stated-intent cases, and a differential against borg's own
+> `make_path_safe` over 98 inputs — 72 sanitised identically, 26 rejected by both, no
+> disagreement in either direction. Accepting a path borg rejects would be a
+> path-traversal hole; rejecting one borg accepts would make borge unable to read valid
+> archives. Both directions are asserted, plus an idempotence fuzz target.
+>
+> Note for stage 5: `REQUIRED_ARCHIVE_KEYS` lists `time`, but borg 2 writes
+> `start`/`end` and only borg 1.x archives carry `time`. borge requires
+> `version`/`name`/`item_ptrs`/`command_line` only — requiring `time` would reject
+> every archive borg 2 writes.
+
 ### 1.6 `hashindex` — ChunkIndex
 Port `borghash.HashTableNT` (external package — **check its license first, task 0.8**)
 plus the `ChunkIndex` wrapper. Entry layout is fixed:

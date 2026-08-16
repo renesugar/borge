@@ -10,7 +10,7 @@ LDFLAGS     := -X $(MODULE)/internal/version.Version=$(VERSION)
 BORG2       := tests/borg2/borg2
 
 .PHONY: all build test race cover bench fmt vet lint check spdx layering \
-        borg2 upstream-licenses evidence clean help
+        borg2 upstream-licenses msgpack-fixtures item-fixtures evidence clean help
 
 all: check
 
@@ -80,6 +80,13 @@ borg2:
 ## upstream-licenses: record the borghash/borgstore licenses (plan task 0.8)
 upstream-licenses:
 	./scripts/check-upstream-licenses.sh
+
+## item-fixtures: regenerate the item differential fixtures from the pinned borg
+item-fixtures:
+	@test -x .venv-borg2/bin/python || { echo "run 'make borg2' first"; exit 1; }
+	.venv-borg2/bin/python internal/item/testdata/gen_fixtures.py \
+		> internal/item/testdata/fixtures.txt
+	@echo "regenerated internal/item/testdata/fixtures.txt"
 
 ## msgpack-fixtures: regenerate the msgpack differential fixtures from the pinned borg
 # The fixtures are checked in so the package is testable without the venv; regenerate
