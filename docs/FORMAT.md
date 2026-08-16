@@ -64,7 +64,33 @@ download and a cache can be shared across repositories safely.
 > appear when something is first written to them. borge must not assume they exist,
 > and must not fail if they do not. Verified below.
 
-### 1.2 Repository creation order
+### 1.2 Soft deletion and reserved suffixes
+
+Answers open question #2. borgstore reserves three filename suffixes
+(`borgstore/constants.py`):
+
+| Suffix | Meaning |
+| --- | --- |
+| `.tmp` | a file being written. Rejected by name validation, so it is never mistaken for an object and never appears in a listing. |
+| `.del` | a soft-deleted object. |
+| `.hid` | an internal file users never see. |
+
+**Soft deletion is a rename in place**, not an unlink and not a sidecar: the object at
+`archives/<xx>/<key>` becomes `archives/<xx>/<key>.del`, keeping its nesting position.
+That is what makes `borg undelete` possible, and it means a listing must filter by
+suffix rather than assume everything it sees is live. Live and soft-deleted objects are
+disjoint sets over the same namespace.
+
+Name validation is strict, and applies on the way *out* of a listing as well as in:
+at most 100 bytes, plain ASCII, lowercase, relative, no `..`, no backslash or space,
+never ending in `.tmp`. A name that fails is skipped rather than reported, because the
+directory may hold files that did not come from borg.
+
+> **Listing returns the bare key.** `Store.list` yields each object's own name —
+> `"0123…cdef"` — with neither the namespace nor the nesting path. borg's callers use
+> it directly as a hex object id.
+
+### 1.3 Repository creation order
 
 `Repository.create()` (`repository.py:779-800`): create the store, then store
 `config/readme`, `config/version`, `config/id`, then write an empty chunk index to
@@ -536,7 +562,7 @@ depends on them starts.
 | # | Question | Blocks |
 | --- | --- | --- |
 | ~~1~~ | ~~Exact on-disk serialization of `borghash.HashTableNT`~~ | **Answered 2026-08-16, see §6.1 and §6.2** |
-| 2 | `borgstore` soft-delete representation on the posixfs backend (name mangling? sidecar?). | Stage 2 |
+| ~~2~~ | ~~`borgstore` soft-delete representation on the posixfs backend~~ | **Answered 2026-08-16: a rename to `<nested name>.del`, in place. See §1.3.** |
 | 3 | `storelocking` object naming, contents and the stale-lock timeout rules. | Stage 3 |
 | 4 | `index/` incremental write and merge/compaction algorithm. | Stage 3 |
 | 5 | Exact argon2 parameters in `ARGON2_ARGS`, and the `hash` field's construction in `EncryptedKey`. | Stage 4 |

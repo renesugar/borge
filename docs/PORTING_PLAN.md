@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0 and 1 complete. Stage 2 (the `store` layer) is next.**
+Status: **Stages 0, 1 and 2 complete. Stage 3 (`repoobj` + `repository`) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -550,6 +550,31 @@ byte-identical. A `GoogleDrive`-backed run (rclone mount, `/home/renes/GoogleDri
 exercises the high-latency path even though the network backends are not ported yet —
 it is a filesystem, and it is where naive per-object I/O will show up first.
 
+> **Done 2026-08-16** (`internal/store`). Gate green: 21 objects across all seven
+> namespaces lay out identically on disk, both read directions work including range
+> reads, listings agree, and soft-delete/undelete interoperate in both directions —
+> borge soft-deletes and borg undeletes, and the reverse.
+>
+> **Finding: `Store.List` yields the *bare key*, not a namespaced name.** borgstore's
+> recursion returns each directory entry's own name, so both the namespace and the
+> nesting path fall away: `"0123…cdef"`, not `"packs/01/0123…cdef"`. borg's callers
+> use the listed name directly as an object id, so any code ported from borg depends
+> on it.
+>
+> **The GoogleDrive part of the gate could not run.** The rclone mount is in
+> `/proc/mounts` but every operation on it fails with `EIO`, including listing the
+> root — the backing service is not reachable. `TestHighLatencyFilesystem` skips with
+> that reason and honours `BORGE_SLOW_FS_DIR`, so it runs as soon as the mount works.
+>
+> What that test was *for* is measured deterministically instead, since the real
+> concern is operation count rather than the network. Walking 40 object headers in one
+> pack costs **40 backend loads without the pack cache and 0 with it**; at a 5 ms
+> simulated round trip that is 108 ms against 1 ms. This is the mechanism the plan
+> calls load-bearing for restore performance, and it now has a number.
+>
+> Not ported: the `sftp`, `rest`, `s3` and `rclone` backends (stage 8), and the quota
+> tracking, which borg does not use for local repositories.
+
 ---
 
 ## 6. Stage 3 — `repoobj` and `repository`
@@ -817,7 +842,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 | --- | --- | --- | --- |
 | 0 | Foundation, licensing, borg-2 venv, format reference | **done** 2026-08-16 | `borge-stage-0-20260816T163704Z.zip` |
 | 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | **done** 2026-08-16 | per-substage bundles |
-| 2 | `store` (borgstore port, posixfs) | not started | — |
+| 2 | `store` (borgstore port, posixfs) | **done** 2026-08-16 | `borge-stage-2-*.zip` |
 | 3 | `repoobj` + `repository` + packs + locking | not started | — |
 | 4 | Keys | not started | — |
 | 5 | Read path: manifest, archive, extract | not started | — |
