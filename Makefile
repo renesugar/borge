@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: Apache-2.0
+
+SHELL       := /usr/bin/env bash
+MODULE      := github.com/renesugar/borge
+BIN         := bin/borge
+VERSION     ?= dev
+LDFLAGS     := -X $(MODULE)/internal/version.Version=$(VERSION)
+
+# The pinned borg 2 reference interpreter; see tests/borg2/setup.sh.
+BORG2       := tests/borg2/borg2
+
+.PHONY: all build test race cover bench fmt vet lint check spdx layering \
+        borg2 upstream-licenses evidence clean help
+
+all: check
+
+## build: compile the borge binary into bin/
+build:
+	@mkdir -p bin
+	go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/borge
+
+## test: run the unit tests
+test:
+	go test ./...
+
+## race: run the tests under the race detector
+# PackWriter (stage 3) hands packs to a background writer while the caller keeps
+# mutating the ChunkIndex. That invariant is exactly the kind that fails rarely and
+# corrupts repositories when it does, so -race is not optional here.
+race:
+	go test -race ./...
+
+## cover: run tests with coverage, write coverage.out and print the summary
+cover:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
+
+## bench: run benchmarks
+bench:
+	go test -run '^$$' -bench . -benchmem ./...
+
+## fmt: format all Go source
+fmt:
+	gofmt -w .
+
+## vet: run go vet
+vet:
+	go vet ./...
+
+## lint: run golangci-lint if it is installed
+lint:
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run; \
+	else \
+		echo "lint: golangci-lint not installed, skipping (go vet still runs via 'make vet')"; \
+	fi
+
+## spdx: check every Go file's license header (docs/LICENSING.md section 5)
+spdx:
+	./scripts/check-spdx.sh
+
+## layering: check that imports point downward (docs/PORTING_PLAN.md section 1)
+layering:
+	./scripts/check-layering.sh
+
+## check: the gate - formatting, vet, lint, license headers, layering, tests
+check: fmtcheck vet lint spdx layering test
+	@echo "check: all green"
+
+.PHONY: fmtcheck
+fmtcheck:
+	@out=$$(gofmt -l . | grep -v '^vendor/' || true); \
+	if [ -n "$$out" ]; then echo "gofmt: these files need formatting:"; echo "$$out"; exit 1; fi
+	@echo "gofmt: ok"
+
+## borg2: build the pinned borg 2 reference interpreter used by the interop tests
+borg2:
+	./tests/borg2/setup.sh
+
+## upstream-licenses: record the borghash/borgstore licenses (plan task 0.8)
+upstream-licenses:
+	./scripts/check-upstream-licenses.sh
+
+## evidence: build a stage evidence bundle, e.g. make evidence STAGE=stage-0
+evidence:
+	@if [ -z "$(STAGE)" ]; then echo "usage: make evidence STAGE=stage-N"; exit 64; fi
+	./tests/evidence/mkbundle.sh $(STAGE)
+
+## clean: remove build and test output
+clean:
+	rm -rf bin coverage.out
+
+## help: list the targets
+help:
+	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'

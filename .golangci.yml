@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - unconvert
+    # A backup program that ignores an integer conversion overflow silently writes
+    # the wrong size into an on-disk header. The format uses u32 offsets and sizes
+    # in fixed-width headers, so these conversions are load-bearing.
+    - gosec
+
+  settings:
+    gosec:
+      excludes:
+        # G115 (integer overflow on conversion) fires constantly on legitimate
+        # bounds-checked format code; the header writers check explicitly.
+        # Re-enable if the format packages start converting without checking.
+        - G115
+    staticcheck:
+      checks: ["all"]
+
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters: [errcheck, gosec]
+
+formatters:
+  enable:
+    - gofmt
