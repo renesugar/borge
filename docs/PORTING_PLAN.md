@@ -262,7 +262,7 @@ For each borg module, in order:
 | 0.5 | Makefile: `build test lint fmt vet cover bench evidence`. `golangci-lint` config. |
 | 0.6 | CI-equivalent local script: build, `go vet`, `go test ./...`, SPDX header check, import-layering check. |
 | 0.7 | **Pinned borg 2 venv.** `tests/borg2/setup.sh` creates `.venv-borg2` from the pinned checkout, records `pip freeze` to `tests/borg2/requirements.lock`, exposes `tests/borg2/borg2` as a wrapper. Needs `borghash`, `borgstore[rest,blake3]~=0.6.0`, `msgpack`, `argon2-cffi`, `pyzstd`/`backports-zstd`. |
-| 0.8 | **License check on `borghash` and `borgstore`** (LICENSING.md §6). Record findings in `licenses/`. Blocking for Stage 1.6 and Stage 2. |
+| 0.8 | **License check on `borghash` and `borgstore`** (LICENSING.md §6). Record findings in `licenses/`. Blocking for Stage 1.6 and Stage 2. **Resolved 2026-08-16: both are BSD-3-Clause (borghash 0.2.0, borgstore 0.6.1, © Thomas Waldmann) — porting permitted.** |
 | 0.9 | `tests/evidence/mkbundle.sh`. |
 | 0.10 | Format reference doc `docs/FORMAT.md`: transcribe the repo layout, object envelope, key types and compression ids from the pinned borg source, with file:line citations. This is the artifact every later stage checks itself against. |
 
@@ -687,7 +687,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 | --- | --- | --- |
 | **AES-OCB in pure Go** | Interop failure or, worse, a silent crypto bug | RFC 7253 vectors + borg vectors + independent review; ChaCha20-Poly1305 fallback (§7) |
 | Upstream borg 2 format still moving | Interop gate invalidated mid-port | Pin the commit; rebase deliberately with a reviewed diff |
-| `borghash`/`borgstore` license unknown | Cannot port those components | Task 0.8, blocking; reimplement from format description if needed |
+| ~~`borghash`/`borgstore` license unknown~~ | ~~Cannot port those components~~ | **Closed 2026-08-16**: both BSD-3-Clause, porting permitted (LICENSING.md §6) |
 | Surrogate-escaped path encoding | Silent path corruption on non-UTF-8 filenames | Fuzz round-trip in Stage 1.5; synthetic corpus in Stage 7 |
 | `PackWriter` concurrency ported wrong | Rare, load-dependent repository corruption | Preserve the "index touched only by the calling goroutine" invariant; `-race` in CI |
 | Chunker boundary drift | Total dedup loss, invisible until the repo is huge | Byte-exact boundary differential test (Stage 1.4) |

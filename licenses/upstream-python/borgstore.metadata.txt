@@ -1,0 +1,7 @@
+Name: borgstore
+Version: 0.6.1
+License: <unset>
+License-Expression: BSD-3-Clause
+License-File: LICENSE.rst
+Home-page: <unset>
+Project-URL: Homepage, https://github.com/borgbackup/borgstore

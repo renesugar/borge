@@ -21,6 +21,20 @@ Portions of this software are derived from BorgBackup (https://github.com/borgba
   or endorsed by the Borg Collective.
 
 --------------------------------------------------------------------------------
+Portions of this software are derived from borghash (https://github.com/borgbackup/borghash)
+and from borgstore (https://github.com/borgbackup/borgstore)
+
+  Copyright (C) 2024-2026 Thomas Waldmann <tw@waldmann-edv.de>
+
+  Both are licensed under the BSD 3-Clause License. The full license texts are
+  reproduced in licenses/upstream-python/borghash.LICENSE.rst and
+  licenses/upstream-python/borgstore.LICENSE.rst.
+
+  borghash provides borg's chunk index hash table and borgstore provides borg's
+  object store layer; both were split out of borg into separate packages. The
+  corresponding Go code in this project is a translation of their source.
+
+--------------------------------------------------------------------------------
 Portions of this software are derived from restic (https://github.com/restic/restic)
 
   Copyright (c) 2014, Alexander Neumann <alexander@bumpern.de>

@@ -47,6 +47,39 @@ fi
 
 echo "setup.sh: borg checkout at pinned commit ${PINNED:0:12}"
 
+# borg derives its version from git tags via setuptools_scm, and src/borg/__init__.py
+# asserts the result is a real semver - a checkout with no reachable version tag yields
+# "0.1.dev<N>+g<sha>" and borg refuses to start at all.
+#
+# A fork cloned without tags hits exactly that. The fix is to fetch the upstream tags
+# rather than to invent a version, so the version borg reports is the true distance from
+# the last release - which is what the evidence bundles record.
+nearest=$(git -C "$BORG_SRC" describe --tags --abbrev=0 --match '[0-9]*' 2>/dev/null || true)
+if [ -n "$nearest" ]; then
+    echo "setup.sh: version from git tags: $(git -C "$BORG_SRC" describe --tags --match '[0-9]*')"
+    # setuptools_scm derives the version itself; make sure nothing overrides it.
+    unset SETUPTOOLS_SCM_PRETEND_VERSION SETUPTOOLS_SCM_PRETEND_VERSION_FOR_BORGBACKUP
+else
+    # Fallback: no version tags reachable. Take the version from the top heading of
+    # CHANGES.rst and hand it to setuptools_scm. borg computes __version_tuple__ from
+    # parse_version(...).release, so a beta suffix like "2.0.0b23" passes its assertion:
+    # .release is (2, 0, 0), all ints. This is a guess, so say so loudly.
+    BORG_VERSION="${BORGE_BORG_VERSION:-$(sed -n 's/^Version \(2\.[0-9A-Za-z.]*\).*/\1/p' "$BORG_SRC/CHANGES.rst" | head -n 1)}"
+    [ -n "$BORG_VERSION" ] || die "no version tags in $BORG_SRC and no 2.x heading in its CHANGES.rst (set BORGE_BORG_VERSION)"
+    export SETUPTOOLS_SCM_PRETEND_VERSION="$BORG_VERSION"
+    export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_BORGBACKUP="$BORG_VERSION"
+    cat >&2 <<EOF
+setup.sh: WARNING - no version tags are reachable in $BORG_SRC, so the version is a
+guess taken from CHANGES.rst: $BORG_VERSION. It will not show the distance from the
+last release. To get the real version, fetch the upstream tags:
+
+  git -C $BORG_SRC remote add upstream https://github.com/borgbackup/borg.git  # if needed
+  git -C $BORG_SRC fetch --tags upstream
+
+then re-run this script.
+EOF
+fi
+
 python3 -m venv "$VENV"
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
@@ -64,7 +97,12 @@ python -m pip install --quiet "borghash" "borgstore[rest,blake3]~=0.6.0"
 python -m pip install --quiet -e "$BORG_SRC"
 
 python -m pip freeze --exclude-editable > "$HERE/requirements.lock"
-git -C "$BORG_SRC" rev-parse HEAD > "$HERE/borg-commit.txt"
+{
+    git -C "$BORG_SRC" rev-parse HEAD
+    echo "# source:  $BORG_SRC"
+    echo "# describe: $(git -C "$BORG_SRC" describe --tags --match '[0-9]*' 2>/dev/null || echo '<no tags>')"
+    echo "# built:   $("$VENV/bin/python" -c 'import borg; print(borg.__version__)' 2>/dev/null || echo '<unknown>')"
+} > "$HERE/borg-commit.txt"
 
 cat > "$HERE/borg2" <<EOF
 #!/usr/bin/env bash
@@ -78,5 +116,16 @@ exec "$VENV/bin/borg" "\$@"
 EOF
 chmod +x "$HERE/borg2"
 
-echo "setup.sh: $("$HERE/borg2" --version)"
+# Verify, and fail loudly if it does not work: a venv that installs cleanly but cannot
+# run is worse than none, because every later interop failure gets blamed on borge.
+if ! reported=$("$HERE/borg2" --version 2>&1); then
+    printf 'setup.sh: the borg2 wrapper does not run:\n%s\n' "$reported" >&2
+    exit 1
+fi
+case "$reported" in
+    "borg 2."*) ;;
+    *) die "expected a borg 2.x interpreter, got: $reported" ;;
+esac
+
+echo "setup.sh: $reported"
 echo "setup.sh: wrote $HERE/requirements.lock, $HERE/borg-commit.txt, $HERE/borg2"

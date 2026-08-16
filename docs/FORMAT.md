@@ -59,6 +59,11 @@ download and a cache can be shared across repositories safely.
 
 `Repository.acceptable_repo_versions = (4,)` (`repository.py:749`).
 
+> **Namespaces are created lazily.** A freshly created repository contains only
+> `config/`, `index/` and `locks/` — `archives/`, `cache/`, `keys/` and `packs/`
+> appear when something is first written to them. borge must not assume they exist,
+> and must not fail if they do not. Verified below.
+
 ### 1.2 Repository creation order
 
 `Repository.create()` (`repository.py:779-800`): create the store, then store
@@ -447,7 +452,34 @@ malfunctions during `check --repair`.
 
 ---
 
-## 10. Open questions
+## 10. Verified against a live repository
+
+The claims above are read from source, which is how a format document acquires
+plausible-looking mistakes. These were additionally checked against the bytes of a
+repository created by the pinned interpreter
+(`borg 2.0.0b23.dev377+g114bd1e94`, `repo-create --encryption=none-sha256`), 2026-08-16:
+
+| Claim | §  | Result |
+| --- | --- | --- |
+| A new repository contains only `config/`, `index/`, `locks/` | 1 | confirmed — `archives/`, `cache/`, `keys/`, `packs/` are absent until written |
+| `config/` holds exactly `readme`, `version`, `id`, `manifest` | 1.1 | confirmed |
+| `config/readme` is borg's text verbatim | 1.1 | confirmed — `"This is a Borg Backup repository.\nSee https://borgbackup.readthedocs.io/\n"` |
+| `config/version` is `"4"` | 1.1 | confirmed |
+| `config/id` is 64 lowercase hex characters | 1.1 | confirmed |
+| Header is 49 bytes, `"<8sB32sII"`, magic `BORG_OBJ` | 2.1 | confirmed on `config/manifest` |
+| New objects are written at version `0x02` | 2.2 | confirmed |
+| `MANIFEST_ID` is 32 zero bytes | 8 | confirmed — the manifest's `chunk_id` field is all zeroes |
+| Object size is exactly `49 + meta_size + data_size` | 2.1 | confirmed — 436 = 49 + 75 + 312 |
+| `index/` objects are named by the SHA-256 of their content | 1 | confirmed — file name equals `sha256sum` of the file |
+
+Key-mode names were confirmed the hard way, by an argument-parser rejection:
+`repo-create --encryption` accepts exactly `aes256-ocb`, `chacha20-poly1305`,
+`authenticated-sha256`, `authenticated-blake3`, `none-sha256`, `none-blake3`.
+Note there is **no plain `none`** in borg 2 — the borg 1.x spelling
+`--encryption=none` is an error. The `-i/--id-hash` option selects the id hash
+separately, matching the §5 point that the type byte identifies only the ciphersuite.
+
+## 11. Open questions
 
 Tracked here rather than in code comments, so they are visible before the stage that
 depends on them starts.

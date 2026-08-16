@@ -1,0 +1,4 @@
+114bd1e944c4ade6e512be20b36bcdd6398ad78e
+# source:  /home/renes/projects/borg
+# describe: 2.0.0b22-377-g114bd1e94
+# built:   2.0.0b23.dev377+g114bd1e94

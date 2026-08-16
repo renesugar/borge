@@ -7,3 +7,4 @@
 *.test
 *.prof
 coverage.out
+/tests/borg2/borg2

@@ -121,11 +121,31 @@ A CI check enforces that every `.go` file has an SPDX line, and that any file wh
 header claims an upstream origin names a path that exists in the pinned upstream
 checkout.
 
-## 6. Note on `borghash` and `borgstore`
+## 6. `borghash` and `borgstore` — resolved
 
-`borg` 2 has moved two components into separate PyPI packages that `borge` must
-also port: `borghash` (the `ChunkIndex` hash table) and `borgstore` (the object
-store layer). Both are Borg Collective projects. **Their licenses must be checked
-and recorded separately before their code is ported** — do not assume they match
-`borg`'s BSD-3. This is an explicit Stage 0 task; if either turns out to be
-copyleft, `borge` implements that component from the format description instead.
+`borg` 2 has moved two components into separate PyPI packages that `borge` must also
+port: `borghash` (the `ChunkIndex` hash table, borge Stage 1.6) and `borgstore` (the
+object store layer, borge Stage 2). Both are Borg Collective projects, but that is not
+the same as knowing their license, so Stage 0 task 0.8 checked rather than assumed.
+
+**Finding (2026-08-16), from the installed distributions themselves:**
+
+| Package | Version | `License-Expression` | License text |
+| --- | --- | --- | --- |
+| `borghash` | 0.2.0 | `BSD-3-Clause` | `licenses/upstream-python/borghash.LICENSE.rst` |
+| `borgstore` | 0.6.1 | `BSD-3-Clause` | `licenses/upstream-python/borgstore.LICENSE.rst` |
+
+Both are copyright (C) Thomas Waldmann, BSD 3-Clause — the same license as `borg`
+itself. **Porting their code is therefore permitted**, on the same terms and with the
+same obligations as the rest of the port: preserve the notice, mark the derived files,
+and name the upstream source in the header (§5, using the `Apache-2.0 AND BSD-3-Clause`
+expression).
+
+The copyright holder differs from `borg`'s, so their license texts are reproduced
+separately under `licenses/upstream-python/` rather than being folded into
+`licenses/borg/`, and `NOTICE` credits them in their own section.
+
+Re-run `scripts/check-upstream-licenses.sh` if either package is ever upgraded; it
+records the metadata and copies the shipped license files, and fails if a copyleft
+license appears. Had either been copyleft, the fallback was to implement that
+component from the on-disk format description instead of porting it.

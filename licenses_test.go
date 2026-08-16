@@ -46,6 +46,11 @@ func TestUpstreamLicensesArePresent(t *testing.T) {
 		"borg/LICENSE":   "Redistribution and use in source and binary forms",
 		"borg/AUTHORS":   "Borg",
 		"restic/LICENSE": "BSD 2-Clause License",
+		// borghash and borgstore were split out of borg into separate packages and
+		// have a different copyright holder, so they need their own notices even
+		// though they carry the same BSD-3-Clause license. See LICENSING.md section 6.
+		"upstream-python/borghash.LICENSE.rst":  "Thomas Waldmann",
+		"upstream-python/borgstore.LICENSE.rst": "Thomas Waldmann",
 	}
 	for name, marker := range want {
 		body, err := UpstreamLicense(name)
@@ -102,6 +107,8 @@ func TestWriteAllIncludesEverything(t *testing.T) {
 		"NOTICE",
 		"licenses/borg/LICENSE",
 		"licenses/restic/LICENSE",
+		"licenses/upstream-python/borghash.LICENSE.rst",
+		"licenses/upstream-python/borgstore.LICENSE.rst",
 		"Jonas Borgström",
 	} {
 		if !strings.Contains(out, want) {
