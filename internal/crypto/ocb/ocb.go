@@ -73,13 +73,20 @@ type ocb struct {
 	//	l[0]    = L_0  = double(L_$)
 	//	l[i]    = L_i  = double(L_{i-1})
 	//
-	// l is grown on demand. l[i] is consumed at block number 2^i, so a message of n
-	// blocks needs indices up to log2(n) - 32 entries covers any message that fits in
-	// memory.
+	// The whole table is computed once, in New, rather than grown on demand. Growing it
+	// lazily would make Seal and Open *write* to the receiver, and an AEAD that mutates
+	// itself cannot be shared between goroutines - which is exactly what the key layer
+	// does with it. Precomputing costs 64 doublings (no block cipher calls) and makes
+	// this value immutable after construction, hence safe to use concurrently.
 	lStar   [BlockSize]byte
 	lDollar [BlockSize]byte
-	l       [][BlockSize]byte
+	l       [lTableSize][BlockSize]byte
 }
+
+// lTableSize is how many L_i values are precomputed. L_i is consumed at block number
+// 2^i, so 64 entries cover any message up to 2^64 blocks - unreachable, since a message
+// has to fit in memory.
+const lTableSize = 64
 
 // New returns an OCB3 AEAD using the given block cipher, with a 16-byte tag and a
 // 12-byte nonce - borg's parameters.
@@ -107,20 +114,18 @@ func NewWithSizes(block cipher.Block, nonceSize, tagSize int) (cipher.AEAD, erro
 	var zero [BlockSize]byte
 	o.block.Encrypt(o.lStar[:], zero[:])
 	o.lDollar = double(o.lStar)
-	o.l = append(o.l, double(o.lDollar))
+	o.l[0] = double(o.lDollar)
+	for i := 1; i < lTableSize; i++ {
+		o.l[i] = double(o.l[i-1])
+	}
 	return o, nil
 }
 
 func (o *ocb) NonceSize() int { return o.nonceSize }
 func (o *ocb) Overhead() int  { return o.tagSize }
 
-// getL returns L_i, extending the precomputed table as needed.
-func (o *ocb) getL(i int) [BlockSize]byte {
-	for len(o.l) <= i {
-		o.l = append(o.l, double(o.l[len(o.l)-1]))
-	}
-	return o.l[i]
-}
+// getL returns L_i from the precomputed table.
+func (o *ocb) getL(i int) [BlockSize]byte { return o.l[i] }
 
 // double implements the doubling operation of RFC 7253 section 2: a left shift by one
 // bit in GF(2^128), reducing modulo the polynomial x^128 + x^7 + x^2 + x + 1 when the

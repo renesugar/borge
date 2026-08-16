@@ -386,9 +386,18 @@ func ByName(name string, cryptKey, idKey []byte) (Key, error) {
 		return NewAuthenticatedSHA256(cryptKey, idKey)
 	case "authenticated-blake3":
 		return NewAuthenticatedBlake3(cryptKey, idKey)
-	case "aes256-ocb", "chacha20-poly1305", "blake3-aes256-ocb", "blake3-chacha20-poly1305":
-		return nil, fmt.Errorf("key: %s is not implemented yet (stage 4); "+
-			"internal/crypto has the cipher, the key derivation and blob handling are missing", name)
+	// The AEAD modes. borg's --encryption name is not unique on its own (aes256-ocb is
+	// both the sha256 and the blake3 class, selected by --id-hash), so borge's canonical
+	// mode names carry the id hash, and borg's bare names map to the sha256 variant -
+	// which is what borg's own --id-hash default does.
+	case "aes256-ocb", "sha256-aes256-ocb":
+		return NewAESOCB(cryptKey, idKey)
+	case "chacha20-poly1305", "sha256-chacha20-poly1305":
+		return NewCHPO(cryptKey, idKey)
+	case "blake3-aes256-ocb":
+		return NewBlake3AESOCB(cryptKey, idKey)
+	case "blake3-chacha20-poly1305":
+		return NewBlake3CHPO(cryptKey, idKey)
 	default:
 		return nil, fmt.Errorf("key: unknown mode %q", name)
 	}
