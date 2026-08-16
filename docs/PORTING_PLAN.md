@@ -364,6 +364,33 @@ format-visible and must match exactly.
 *Gate:* RFC test vectors pass; every AEAD blob borg writes decrypts under borge and
 vice versa, for each key type.
 
+> **Done 2026-08-16** (`internal/crypto`, `internal/crypto/ocb`). Gate green.
+> **The AES-OCB risk is now bounded, and the fallback in point 4 above is not needed.**
+>
+> OCB3 was written from scratch against RFC 7253 and checks out against:
+>
+> - **All 16 primary RFC 7253 vectors.**
+> - **All 9 RFC 7253 appendix A iterative vectors** — AES-128/192/256 × tag lengths
+>   128/96/64. Each chains 384 encryptions covering every plaintext and
+>   associated-data length from 0 to 127 bytes, so one 16-byte comparison pins down
+>   every partial-block case. AES-256 with a 128-bit tag is borg's own configuration.
+> - **OpenSSL, via borg**, across 2 suites × 5 header/aad-offset combinations × 17
+>   payload sizes — and not merely interoperably: the envelopes are **byte-identical**.
+>   Unlike compression, that is achievable here because both AEADs are deterministic
+>   given (key, iv, plaintext, aad), so any difference at all would mean a real
+>   disagreement about the format.
+> - Tamper tests in both directions, an opaque-error test (a distinguishable error is a
+>   decryption oracle), and three fuzz targets.
+>
+> Independent review is still worth having before Stage 7, but it is now a
+> double-check rather than the only thing standing between the port and a silent
+> crypto bug.
+>
+> One trap worth recording: RFC 7253 appendix A's key is **not** all zeros —
+> `K = zeros(KEYLEN-8) || num2str(TAGLEN,8)`, so the last key byte is the tag length in
+> bits. Getting that wrong makes all nine vectors fail while the implementation is
+> perfectly correct, which is a good way to waste an afternoon chasing a phantom bug.
+
 ### 1.4 `chunker` — content-defined chunking
 Port, in this order: `fastcdc` (borg 2's **default**, `CHUNKER_PARAMS = FASTCDC_PARAMS`),
 `buzhash` (borg 1 compat, still selectable), `buzhash64`, `fixed`, then the AES-based
@@ -722,7 +749,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| **AES-OCB in pure Go** | Interop failure or, worse, a silent crypto bug | RFC 7253 vectors + borg vectors + independent review; ChaCha20-Poly1305 fallback (§7) |
+| ~~**AES-OCB in pure Go**~~ | ~~Interop failure or, worse, a silent crypto bug~~ | **Downgraded 2026-08-16**: all 16 primary + all 9 appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across every suite and size tested. The ChaCha20-Poly1305 fallback is not needed. Independent review before Stage 7 remains worthwhile as a double-check. |
 | Upstream borg 2 format still moving | Interop gate invalidated mid-port | Pin the commit; rebase deliberately with a reviewed diff |
 | ~~`borghash`/`borgstore` license unknown~~ | ~~Cannot port those components~~ | **Closed 2026-08-16**: both BSD-3-Clause, porting permitted (LICENSING.md §6) |
 | Surrogate-escaped path encoding | Silent path corruption on non-UTF-8 filenames | Fuzz round-trip in Stage 1.5; synthetic corpus in Stage 7 |
