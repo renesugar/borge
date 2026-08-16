@@ -8,3 +8,4 @@
 *.prof
 coverage.out
 /tests/borg2/borg2
+/internal/*/testdata/fuzz/

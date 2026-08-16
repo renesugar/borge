@@ -47,7 +47,11 @@ for f in "${files[@]}"; do
             ;;
         "Apache-2.0 AND BSD-3-Clause"|"Apache-2.0 AND BSD-2-Clause")
             # Ported. Must name a source file, and that file must exist upstream.
-            src=$(printf '%s\n' "$header" | sed -n 's|.*\b\(src/borg/[A-Za-z0-9_/.-]*\).*|\1|p;s|.*\b\(internal/[A-Za-z0-9_/.-]*\.go\).*|\1|p' | head -n 1)
+            # The path must end in an alphanumeric so a sentence-final period is not
+            # swallowed into it ("...msgpack.py." would then not exist upstream).
+            src=$(printf '%s\n' "$header" | sed -n \
+                -e 's|.*\b\(src/borg/[A-Za-z0-9_/.-]*[A-Za-z0-9]\).*|\1|p' \
+                -e 's|.*\b\(internal/[A-Za-z0-9_/.-]*\.go\).*|\1|p' | head -n 1)
             if [ -z "$src" ]; then
                 note "$f: SPDX declares upstream code but the header names no upstream source file"
                 continue

@@ -81,6 +81,16 @@ borg2:
 upstream-licenses:
 	./scripts/check-upstream-licenses.sh
 
+## msgpack-fixtures: regenerate the msgpack differential fixtures from the pinned borg
+# The fixtures are checked in so the package is testable without the venv; regenerate
+# them only when the pin moves, and review the diff - a changed fixture means borg's
+# encoding changed, which is a format change, not a test update.
+msgpack-fixtures:
+	@test -x .venv-borg2/bin/python || { echo "run 'make borg2' first"; exit 1; }
+	.venv-borg2/bin/python internal/msgpackx/testdata/gen_fixtures.py \
+		> internal/msgpackx/testdata/fixtures.txt
+	@echo "regenerated internal/msgpackx/testdata/fixtures.txt"
+
 ## evidence: build a stage evidence bundle, e.g. make evidence STAGE=stage-0
 evidence:
 	@if [ -z "$(STAGE)" ]; then echo "usage: make evidence STAGE=stage-N"; exit 64; fi
