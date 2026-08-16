@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0 and 1.1-1.4 complete. Stage 1.5 (item) is next.**
+Status: **Stages 0 and 1 complete. Stage 2 (the `store` layer) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -489,6 +489,35 @@ table exists precisely to control memory and locality. Benchmark it in Stage 9.
 *Gate:* borge reads an index written by borg and vice versa; property test against a
 reference `map[[32]byte]entry` over a million randomized operations.
 
+> **Done 2026-08-16** (`internal/hashindex`). Gate green both directions across entry
+> counts spanning several table rebuilds (0 … 50,000), plus a full loop — borg writes,
+> borge reads and rewrites, borg reads again — and a header comparison field by field.
+> The 1,000,000-operation property test passes.
+>
+> **Open question #1 is answered.** The serialised format is:
+> `"BORGHASH"` (8) ‖ version u32 LE (=1) ‖ meta_size u32 LE ‖ JSON metadata ‖
+> *used* × (key ‖ value). The JSON names the key/value sizes, the byte order, the
+> namedtuple field names and their Python `struct` formats, the capacity and the entry
+> count. Verified against a real `index/` file from a borg 2.0.0b23 repository and
+> transcribed into `docs/FORMAT.md`.
+>
+> **Byte-identical output is deliberately not required here** (unlike the crypto
+> envelope, where it is). Entries are written in the table's internal bucket order,
+> which depends on capacity and insertion history, so matching borg's bytes would mean
+> reproducing its whole resize history for no benefit — the reader inserts each entry
+> by key, so any order round-trips to the same index. The differential test compares an
+> order-independent digest of the entry set, and separately requires the *header* to
+> match field for field, since that is what borg would reject.
+>
+> **The "not a Go map" claim, measured** (`TestMemoryFootprint`): at 1,623,610 entries,
+> 143 MB against 185 MB for `map[[32]byte]Entry` — a 1.29x saving. Real but modest, and
+> the package comment now says so rather than implying more. The stronger reason to
+> port the structure is that a kv index is a stable 32-bit handle for a 256-bit key,
+> which is what borg's `k_to_idx`/`idx_to_k` abbreviation depends on.
+>
+> Baseline for stage 9: `Set` 1043 ns/op, `Get` 413 ns/op at 1M entries (dominated by
+> cache misses on the 143 MB working set, as expected).
+
 **Stage gate:** every 1.x sub-gate green; `go test ./internal/...` clean; a
 differential test binary that exercises all five against the borg-2 venv passes.
 
@@ -787,7 +816,7 @@ verifies); the change is justified by benchmark JSON in the evidence bundle.
 | Stage | Description | State | Evidence bundle |
 | --- | --- | --- | --- |
 | 0 | Foundation, licensing, borg-2 venv, format reference | **done** 2026-08-16 | `borge-stage-0-20260816T163704Z.zip` |
-| 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | 1.1-1.4 done, 1.5-1.6 to go | per-substage bundles |
+| 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | **done** 2026-08-16 | per-substage bundles |
 | 2 | `store` (borgstore port, posixfs) | not started | — |
 | 3 | `repoobj` + `repository` + packs + locking | not started | — |
 | 4 | Keys | not started | — |

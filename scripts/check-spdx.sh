@@ -14,6 +14,10 @@ cd "$(dirname "$0")/.."
 
 BORG_SRC="${BORGE_BORG_SRC:-/home/renes/projects/borg}"
 RESTIC_SRC="${BORGE_RESTIC_SRC:-/home/renes/projects/restic}"
+# borghash and borgstore are separate Borg Collective packages (also BSD-3-Clause, see
+# docs/LICENSING.md section 6). Their sources live in the pinned venv, not in the borg
+# checkout, so files ported from them cite e.g. "borghash/HashTable.pyx".
+PYPKG_SRC="${BORGE_PYPKG_SRC:-$(echo "$PWD"/.venv-borg2/lib/python*/site-packages)}"
 
 fail=0
 note() { printf '%s\n' "$*" >&2; fail=1; }
@@ -51,21 +55,28 @@ for f in "${files[@]}"; do
             # swallowed into it ("...msgpack.py." would then not exist upstream).
             src=$(printf '%s\n' "$header" | sed -n \
                 -e 's|.*\b\(src/borg/[A-Za-z0-9_/.-]*[A-Za-z0-9]\).*|\1|p' \
+                -e 's|.*\b\(borghash/[A-Za-z0-9_.-]*\.pyx\).*|\1|p' \
+                -e 's|.*\b\(borgstore/[A-Za-z0-9_/.-]*\.py\).*|\1|p' \
                 -e 's|.*\b\(internal/[A-Za-z0-9_/.-]*\.go\).*|\1|p' | head -n 1)
             if [ -z "$src" ]; then
                 note "$f: SPDX declares upstream code but the header names no upstream source file"
                 continue
             fi
-            case "$spdx" in
-                *BSD-3-Clause) root="$BORG_SRC"; who=borg ;;
-                *)             root="$RESTIC_SRC"; who=restic ;;
+            case "$src" in
+                borghash/*|borgstore/*) root="$PYPKG_SRC"; who="python package" ;;
+                *)
+                    case "$spdx" in
+                        *BSD-3-Clause) root="$BORG_SRC"; who=borg ;;
+                        *)             root="$RESTIC_SRC"; who=restic ;;
+                    esac
+                    ;;
             esac
             if [ ! -d "$root" ]; then
                 echo "check-spdx: warning: $who checkout not at $root, skipping existence check for $f" >&2
             elif [ ! -e "$root/$src" ]; then
                 note "$f: header cites $who file '$src', which does not exist in $root"
             fi
-            if ! printf '%s\n' "$header" | grep -q 'licenses/'; then
+            if ! printf '%s\n' "$header" | grep -qE 'licenses/|licenses/upstream-python'; then
                 note "$f: ported file must point at the upstream license (licenses/borg/LICENSE or licenses/restic/LICENSE)"
             fi
             ;;

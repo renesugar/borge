@@ -335,6 +335,55 @@ The underlying table is `borghash.HashTableNT` — an external package.
 `UNKNOWN_INT32` / `UNKNOWN_BYTES32` (`constants.py`) are the placeholders for pack
 location fields that are not yet known.
 
+### 6.1 Serialised form of `index/<HASH>`
+
+Answers open question #1. From `borghash/HashTableNT.pyx` (borghash 0.2.0), verified
+against a real `index/` file written by borg 2.0.0b23:
+
+```
+"BORGHASH"      8 bytes, magic
+version         uint32 little-endian, currently 1
+meta_size       uint32 little-endian
+meta            meta_size bytes of UTF-8 JSON
+body            used x (key[key_size] || value[value_size])
+```
+
+The JSON metadata, in the order borghash writes it:
+
+```json
+{"key_size": 32, "value_size": 48, "byte_order": "little",
+ "value_type_name": "ChunkIndexEntry",
+ "value_type_fields": ["flags", "size", "pack_id", "obj_offset", "obj_size"],
+ "value_format_name": "ChunkIndexEntryFormatT",
+ "value_format_fields": ["flags", "size", "pack_id", "obj_offset", "obj_size"],
+ "value_format": ["I", "I", "32s", "I", "I"],
+ "capacity": 1000, "used": 0}
+```
+
+A value is the Python `struct` format `"<II32sII"`: 48 bytes, little-endian, no
+padding.
+
+**Entry order is not part of the format.** Entries are written in the hash table's
+internal bucket order, which depends on the capacity and on insertion history. The
+reader inserts each entry by key, so any order produces the same index — two
+implementations need not agree on it, and borge does not try to.
+
+### 6.2 The table structure
+
+`borghash.HashTable` stores only uint32 *indices* into separate dense key and value
+arrays, rather than the keys and values themselves. Bucket sentinels: `0xFFFFFFFF`
+free, `0xFFFFFFFE` tombstone, everything at or above `0xFFFFFF00` reserved.
+
+There is **no hash function**: the keys are chunk ids and therefore already uniformly
+random, so the first four bytes are read as a big-endian uint32 and reduced modulo the
+capacity. Collisions are resolved by linear probing.
+
+Growth parameters: initial and minimum capacity 1000, max load factor 0.5 (counting
+tombstones), min load factor 0.10, grow 2.0x, shrink 0.4x, key/value array growth 1.3x.
+A table resize drops all tombstones; the key/value arrays never shrink, because a kv
+index has to stay stable — it is what `k_to_idx`/`idx_to_k` hand out as an abbreviated
+form of a 256-bit key.
+
 At the reference scale (recipedb: 1,623,610 unique chunks) this table holds ~130 MB of
 entries. That is why it is an open-addressed table with a fixed value layout and not a
 `map[[32]byte]entry`; reproduce the structure, not just the semantics.
@@ -486,7 +535,7 @@ depends on them starts.
 
 | # | Question | Blocks |
 | --- | --- | --- |
-| 1 | Exact on-disk serialization of `borghash.HashTableNT` (header, capacity, load factor, tombstones) — it is in the `borghash` package, not in borg. | Stage 1.6 |
+| ~~1~~ | ~~Exact on-disk serialization of `borghash.HashTableNT`~~ | **Answered 2026-08-16, see §6.1 and §6.2** |
 | 2 | `borgstore` soft-delete representation on the posixfs backend (name mangling? sidecar?). | Stage 2 |
 | 3 | `storelocking` object naming, contents and the stale-lock timeout rules. | Stage 3 |
 | 4 | `index/` incremental write and merge/compaction algorithm. | Stage 3 |
