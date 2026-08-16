@@ -230,56 +230,93 @@ func TestHighLatencyFilesystem(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
-	backend, err := NewPosixFS(filepath.Join(dir, "repo"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cacheBackend, err := NewPosixFS(filepath.Join(t.TempDir(), "cache"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cacheBackend.Create(); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := New(backend, map[string]NamespaceConfig{
-		"config/": {Levels: []int{0}},
-		"packs/":  {Levels: []int{1}, Cache: CacheWritethrough},
-	}, cacheBackend)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Create(); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Open(); err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-
-	start := time.Now()
 	name := "packs/" + strings.Repeat("ab", 32)
 	value := bytes.Repeat([]byte{0x5A}, 100000)
-	if err := s.Store(name, value); err != nil {
+
+	// The same workload with and without the pack cache. The uncached run does fewer
+	// reads because each one is a real round trip over the mount; the figure reported
+	// is per read, so the two are comparable.
+	const cachedReads, uncachedReads = 50, 10
+
+	open := func(subdir string, withCache bool) (*Store, func()) {
+		backend, err := NewPosixFS(filepath.Join(dir, subdir), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cache Backend
+		mode := CacheOff
+		if withCache {
+			cb, err := NewPosixFS(filepath.Join(t.TempDir(), "cache"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cb.Create(); err != nil {
+				t.Fatal(err)
+			}
+			cache, mode = cb, CacheWritethrough
+		}
+		s, err := New(backend, map[string]NamespaceConfig{
+			"config/": {Levels: []int{0}},
+			"packs/":  {Levels: []int{1}, Cache: mode},
+		}, cache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Create(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Open(); err != nil {
+			t.Fatal(err)
+		}
+		return s, func() { _ = s.Close() }
+	}
+
+	// --- with the pack cache ---
+	cached, closeCached := open("cached", true)
+	defer closeCached()
+
+	start := time.Now()
+	if err := cached.Store(name, value); err != nil {
 		t.Fatalf("store on %s: %v", base, err)
 	}
-	stored := time.Since(start)
+	storeTime := time.Since(start)
 
 	start = time.Now()
-	for i := 0; i < 50; i++ {
-		if _, err := s.Load(name, int64(i*49), 49, false); err != nil {
-			t.Fatalf("range read on %s: %v", base, err)
+	for i := 0; i < cachedReads; i++ {
+		if _, err := cached.Load(name, int64(i*49), 49, false); err != nil {
+			t.Fatalf("cached range read on %s: %v", base, err)
 		}
 	}
-	read := time.Since(start)
+	cachedPerRead := time.Since(start) / cachedReads
 
-	got, err := s.Load(name, 0, -1, false)
+	got, err := cached.Load(name, 0, -1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, value) {
 		t.Error("content differs after a round trip over the high-latency mount")
 	}
-	t.Logf("%s: stored 100 kB in %v, 50 cached header reads in %v",
-		base, stored.Round(time.Millisecond), read.Round(time.Millisecond))
+
+	// --- without it ---
+	uncached, closeUncached := open("uncached", false)
+	defer closeUncached()
+	if err := uncached.Store(name, value); err != nil {
+		t.Fatalf("store on %s: %v", base, err)
+	}
+
+	start = time.Now()
+	for i := 0; i < uncachedReads; i++ {
+		if _, err := uncached.Load(name, int64(i*49), 49, false); err != nil {
+			t.Fatalf("uncached range read on %s: %v", base, err)
+		}
+	}
+	uncachedPerRead := time.Since(start) / uncachedReads
+
+	t.Logf("%s: stored 100 kB in %v", base, storeTime.Round(time.Millisecond))
+	t.Logf("%s: per object-header read: %v uncached, %v cached (%.0fx)",
+		base, uncachedPerRead.Round(time.Microsecond), cachedPerRead.Round(time.Microsecond),
+		float64(uncachedPerRead)/float64(cachedPerRead))
+	if uncachedPerRead < cachedPerRead {
+		t.Errorf("the cache made reads slower on %s: %v vs %v", base, cachedPerRead, uncachedPerRead)
+	}
 }

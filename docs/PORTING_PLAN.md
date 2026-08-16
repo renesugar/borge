@@ -561,16 +561,30 @@ it is a filesystem, and it is where naive per-object I/O will show up first.
 > use the listed name directly as an object id, so any code ported from borg depends
 > on it.
 >
-> **The GoogleDrive part of the gate could not run.** The rclone mount is in
-> `/proc/mounts` but every operation on it fails with `EIO`, including listing the
-> root — the backing service is not reachable. `TestHighLatencyFilesystem` skips with
-> that reason and honours `BORGE_SLOW_FS_DIR`, so it runs as soon as the mount works.
+> **The GoogleDrive part of the gate ran** (after the rclone mount was restored — on
+> the first attempt every operation on it failed with `EIO`, including listing the
+> root). `TestHighLatencyFilesystem` honours `BORGE_SLOW_FS_DIR` and skips with a
+> specific reason when the mount is unusable.
 >
-> What that test was *for* is measured deterministically instead, since the real
-> concern is operation count rather than the network. Walking 40 object headers in one
-> pack costs **40 backend loads without the pack cache and 0 with it**; at a 5 ms
-> simulated round trip that is 108 ms against 1 ms. This is the mechanism the plan
-> calls load-bearing for restore performance, and it now has a number.
+> Measured on the real mount:
+>
+> | | |
+> | --- | --- |
+> | store one 100 kB object | **2.673 s** |
+> | one object-header read, uncached | **2.889 ms** |
+> | one object-header read, cached | **115 µs** (**25×** faster) |
+>
+> **A single object write costs 2.7 seconds on this mount.** That is the number that
+> matters for stage 10, and it is far worse than the 5 ms per operation the simulated
+> test assumed. It says the restore-side problem the whole project is aimed at is
+> dominated by *operation count*, not bandwidth: 118,866 files in one directory at
+> anything like this cost is hopeless no matter how fast the chunker is. Pack-oriented
+> restore (read each pack once, sort extraction by `(pack_id, obj_offset)`) is
+> therefore the right thing to try first in stage 9, before any format change.
+>
+> The same effect is also pinned down deterministically, so it is checked on every run
+> without needing the network: walking 40 object headers in one pack costs **40 backend
+> loads without the pack cache and 0 with it**.
 >
 > Not ported: the `sftp`, `rest`, `s3` and `rclone` backends (stage 8), and the quota
 > tracking, which borg does not use for local repositories.
