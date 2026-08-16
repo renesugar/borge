@@ -38,6 +38,13 @@ type oracle struct {
 
 func startOracle(t *testing.T) *oracle {
 	t.Helper()
+	if testing.Short() {
+		// The full corpus takes minutes, and under -race several more. The evidence
+		// bundle runs the race pass with -short for that reason; the normal (non-race)
+		// pass still runs everything, which is where these tests actually earn their
+		// keep - there is no concurrency in this package for -race to find.
+		t.Skip("skipping the borg differential corpus in short mode")
+	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)

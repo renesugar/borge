@@ -69,7 +69,10 @@ echo "mkbundle: running checks"
 echo "mkbundle: running tests"
 { go test ./... 2>&1 || echo "[go test exited $?]"; }               > "$OUT/go-test.txt"
 { go test -json ./... 2>&1 || true; }                               > "$OUT/go-test.json"
-{ go test -race ./... 2>&1 || echo "[go test -race exited $?]"; }   > "$OUT/go-test-race.txt"
+# -short for the race pass only: the differential corpora take minutes on their own and
+# far longer under -race, and they exercise no concurrency for -race to find. The full
+# (non-race) run above still covers them.
+{ go test -race -short ./... 2>&1 || echo "[go test -race exited $?]"; } > "$OUT/go-test-race.txt"
 
 # --- build inputs ------------------------------------------------------------------
 cp -f go.mod "$OUT/" 2>/dev/null || true

@@ -25,6 +25,9 @@ import (
 
 func pythonOracle(t *testing.T) string {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping the borg differential oracle in short mode")
+	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
