@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check`, `diff` and `export-tar` done. `prune`, `recreate`, `check --repair` and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check`, `diff`, `export-tar` and `prune` done. `recreate`, `check --repair`, `repo-compress`, `import-tar` and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -1059,6 +1059,25 @@ Everything needed for feature parity, once correctness is established.
 > so, because the user believes they have a faithful copy. Verified by GNU tar itself
 > reading and extracting the output, with hard links emitted as tar link entries rather
 > than second copies.
+
+> **`prune` done 2026-08-17** (`internal/manifest/prune.go`, `internal/cli/prune.go`).
+>
+> A rule is not "keep the last N archives" — it is "keep one archive from each of the last
+> N *periods*". Seven backups taken in one afternoon satisfy `--keep-daily=7` with a single
+> archive. Period keys are computed in **local time**, as borg's are: a user in UTC+13
+> whose backups run at 20:00 would otherwise find them all landing in the next UTC day.
+>
+> **A real bug the differential test caught.** A rule's quota counts only the archives *it*
+> keeps: one already kept by a finer rule does **not** consume a coarser rule's budget. So
+> `--keep-daily=7 --keep-monthly=6` keeps seven days *and* six further months. borge
+> counted them, which is a plausible reading and a wrong one — it made coarser rules stop
+> short and silently discard older history. Two of five policies disagreed with borg before
+> the fix; all five agree after it.
+>
+> Pruning is a **soft** delete, so a misread rule is recoverable until a compaction runs,
+> and the command says so. An empty policy is refused outright rather than confirmed: with
+> no rules every archive would be pruned, which is never what anybody meant to type.
+> `@PROT`-tagged archives are never pruned and never consume a quota.
 
 - `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`,
   `repo-space`, `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`,

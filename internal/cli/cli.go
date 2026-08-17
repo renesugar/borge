@@ -96,6 +96,7 @@ var commands = []command{
 	{"delete", "soft-delete archives", cmdDelete},
 	{"undelete", "restore soft-deleted archives", cmdUndelete},
 	{"check", "verify a repository and its archives", cmdCheck},
+	{"prune", "apply a retention policy to the archives", cmdPrune},
 	{"compact", "reclaim the space of unreferenced chunks", cmdCompact},
 }
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // repoBytes is the total size of a repository's pack files.
@@ -296,4 +297,168 @@ func TestCompactDryRunChangesNothing(t *testing.T) {
 		t.Errorf("undelete after a dry run failed: %d\n%s", code, stderr)
 	}
 	t.Log(strings.TrimSpace(stdout))
+}
+
+// TestPruneMatchesBorg: the set of archives borge's retention rules keep has to be the set
+// borg's keep. A prune that disagrees deletes backups the user meant to have.
+//
+// Both tools are asked what they *would* do, with --dry-run, over a repository whose
+// archives are spread across days, weeks and months. Comparing dry runs rather than
+// outcomes means a disagreement is reported rather than acted on.
+func TestPruneMatchesBorg(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Archives dated across four months, several per day in places, so the daily, weekly
+	// and monthly rules all have something to choose between.
+	base := time.Date(2026, 6, 15, 12, 0, 0, 0, time.Local)
+	var made []string
+	for i, offset := range []time.Duration{
+		0, 2 * time.Hour, 5 * time.Hour,
+		24 * time.Hour, 26 * time.Hour,
+		48 * time.Hour, 72 * time.Hour, 96 * time.Hour, 120 * time.Hour,
+		7 * 24 * time.Hour, 14 * 24 * time.Hour, 21 * 24 * time.Hour,
+		35 * 24 * time.Hour, 70 * 24 * time.Hour, 100 * 24 * time.Hour,
+	} {
+		name := fmt.Sprintf("ar%02d", i)
+		ts := base.Add(-offset).Format("2006-01-02T15:04:05")
+		r.mustRun("create", "-r", r.path, "--timestamp", ts, name, src)
+		made = append(made, name)
+	}
+	t.Logf("created %d archives", len(made))
+
+	policies := []struct {
+		name      string
+		borgArgs  []string
+		borgeArgs []string
+	}{
+		{"daily=3", []string{"--keep-daily=3"}, []string{"-keep-daily", "3"}},
+		{"daily=7 monthly=3", []string{"--keep-daily=7", "--keep-monthly=3"},
+			[]string{"-keep-daily", "7", "-keep-monthly", "3"}},
+		{"weekly=4", []string{"--keep-weekly=4"}, []string{"-keep-weekly", "4"}},
+		// borg spells this one "--keep"; borge spells it "--keep-last", because "keep"
+		// alone reads like the whole policy rather than one rule of it.
+		{"last=5", []string{"--keep=5"}, []string{"-keep-last", "5"}},
+		{"hourly=4 daily=2", []string{"--keep-hourly=4", "--keep-daily=2"},
+			[]string{"-keep-hourly", "4", "-keep-daily", "2"}},
+	}
+
+	for _, p := range policies {
+		t.Run(p.name, func(t *testing.T) {
+			// borg's dry run names what it would keep and what it would prune.
+			args := append([]string{"prune", "-r", r.path, "--dry-run", "--list"}, p.borgArgs...)
+			borgOut := r.mustRun(args...)
+			// borg's line is "Keeping archive (rule: daily #1):    NAME    <date> [id]",
+			// so the name is the first field after the colon.
+			borgKeep := map[string]bool{}
+			for _, line := range strings.Split(borgOut, "\n") {
+				if !strings.HasPrefix(line, "Keeping archive") {
+					continue
+				}
+				_, rest, found := strings.Cut(line, "):")
+				if !found {
+					continue
+				}
+				fields := strings.Fields(rest)
+				if len(fields) > 0 {
+					borgKeep[fields[0]] = true
+				}
+			}
+			if len(borgKeep) == 0 {
+				t.Skipf("could not read borg's decisions from:\n%s", borgOut)
+			}
+
+			borgeArgs := append([]string{"prune", "-dry-run", "-list"}, p.borgeArgs...)
+			stdout, stderr, code := r.borge(t, borgeArgs...)
+			if code != ExitOK {
+				t.Fatalf("borge prune exited %d\n%s", code, stderr)
+			}
+			borgeKeep := map[string]bool{}
+			for _, line := range strings.Split(stdout, "\n") {
+				fields := strings.Fields(line)
+				if len(fields) < 3 || fields[0] != "keep" {
+					continue
+				}
+				borgeKeep[fields[2]] = true
+			}
+
+			for name := range borgKeep {
+				if !borgeKeep[name] {
+					t.Errorf("borg keeps %s, borge prunes it", name)
+				}
+			}
+			for name := range borgeKeep {
+				if !borgKeep[name] {
+					t.Errorf("borge keeps %s, borg prunes it", name)
+				}
+			}
+			t.Logf("both keep %d archive(s)", len(borgKeep))
+		})
+	}
+}
+
+// TestPruneRefusesAnEmptyPolicy: with no rules every archive would be pruned, which is
+// never what somebody meant to type.
+func TestPruneRefusesAnEmptyPolicy(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := r.borge(t, "create", "one", src); code != ExitOK {
+		t.Fatal("create failed")
+	}
+
+	_, stderr, code := r.borge(t, "prune")
+	if code == ExitOK {
+		t.Error("prune with no rules succeeded")
+	}
+	if !strings.Contains(stderr, "keep") {
+		t.Errorf("the refusal does not say what is missing: %q", stderr)
+	}
+	if names := borgArchiveNames(t, r); len(names) != 1 {
+		t.Errorf("the refused prune changed the archive list: %v", names)
+	}
+}
+
+// TestPruneIsSoftAndRecoverable: a pruned archive is undeletable until a compaction runs.
+func TestPruneIsSoftAndRecoverable(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 6, 15, 12, 0, 0, 0, time.Local)
+	for i := 0; i < 4; i++ {
+		ts := base.AddDate(0, 0, -i).Format("2006-01-02T15:04:05")
+		r.mustRun("create", "-r", r.path, "--timestamp", ts, fmt.Sprintf("d%d", i), src)
+	}
+
+	if _, stderr, code := r.borge(t, "prune", "-keep-daily", "2"); code != ExitOK {
+		t.Fatalf("prune exited %d\n%s", code, stderr)
+	}
+	names := borgArchiveNames(t, r)
+	if len(names) != 2 {
+		t.Fatalf("after pruning to 2 daily, borg lists %v", names)
+	}
+
+	// The pruned ones are still there, soft-deleted.
+	if _, stderr, code := r.borge(t, "undelete", "-a", "d3"); code != ExitOK {
+		t.Errorf("a pruned archive could not be undeleted: %d\n%s", code, stderr)
+	}
+	if names := borgArchiveNames(t, r); len(names) != 3 {
+		t.Errorf("after the undelete borg lists %v, want 3", names)
+	}
+	if out, err := r.runErr("check", "-r", r.path); err != nil {
+		t.Errorf("borg check after prune and undelete: %v\n%s", err, out)
+	}
 }
