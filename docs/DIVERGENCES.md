@@ -181,3 +181,36 @@ mean a printed key whose QR codes a borg installation might not scan back, which
 risk with no upside. The numbered-line format, which is what a human types back in, *is*
 ported — and `TestPaperKeyMatchesBorg` asserts that borge's printout is byte-identical to
 borg's, line for line.
+
+## 7. POSIX ACLs are written without libacl
+
+**Stage 5 · `internal/archive/acl_linux.go` · by design**
+
+borg calls libacl through Cython to parse an ACL's text form and set it. borge writes the
+kernel's binary ACL representation to the `system.posix_acl_access` and
+`system.posix_acl_default` extended attributes directly, because that is all libacl does
+underneath — it is a text parser and a struct packer, not a privileged interface. Avoiding
+it keeps borge free of cgo, which §0.4 of the plan asks for.
+
+The stage 5 gate compares ACLs between borg's and borge's extraction of the same archive,
+so the two representations are checked against each other rather than assumed equivalent.
+
+What is **not** supported: NFSv4 ACLs (`acl_nfs4`), which borg stores on FreeBSD in a
+different format entirely. borge counts them in `ExtractStats.SkippedACL` rather than
+failing, so a Linux restore of a FreeBSD archive still works and reports the omission
+instead of hiding it. Restoring them belongs with FreeBSD support, which §0.6 puts after
+1.0.
+
+## 8. bsdflags are not restored yet
+
+**Stage 5 · not implemented · to be closed before the stage 7 gate**
+
+`item.bsdflags` (the Linux inode flags reachable through `FS_IOC_SETFLAGS`: immutable,
+append-only, nodump, and so on) are read into the item structure and preserved on a
+round trip, but extraction does not apply them. Nothing in the stage 5 corpus carries
+one, so the gate does not currently measure it.
+
+This is a real gap, not a decision, and it is listed here so it is not mistaken for one.
+It needs an ioctl and has to run *last* of all attribute restoration — the immutable flag
+makes every other change impossible — which is why it is a separate piece of work rather
+than a line in `restoreAttrs`.
