@@ -333,3 +333,89 @@ func (r *Repository) RebuildChunkIndex() error {
 	}
 	return r.WriteFullChunkIndex()
 }
+
+// TransformPack rewrites one pack, passing every object through a transform.
+//
+// # Why a whole-pack rewrite rather than object-by-object replacement
+//
+// Replacing an object individually leaves the old copy in its pack as bytes no index entry
+// covers. Compaction deliberately preserves such bytes - they may be the only remaining
+// copy of something, see borg #8572 - so the old copies would never be reclaimed and a
+// recompression would make the repository *larger*. Rewriting the pack in one go leaves no
+// stale copy to reclaim.
+//
+// Every object in the pack is carried forward, including any the index does not know
+// about: this is a re-encoding, not a garbage collection, and deciding that an unindexed
+// object is expendable is not this operation's call to make.
+//
+// The old pack is deleted only after the new one is durable, so an interruption leaves the
+// data twice rather than not at all.
+func (r *Repository) TransformPack(packID []byte, transform func(id, obj []byte) ([]byte, error)) (changed bool, err error) {
+	if !r.opened {
+		return false, fmt.Errorf("repository: not open")
+	}
+	reader := NewPackReader(r.store, packID)
+
+	type object struct {
+		id   []byte
+		data []byte
+	}
+	var objects []object
+	anyChanged := false
+
+	if err := reader.IterHeaders(func(e PackEntry) bool {
+		data, readErr := reader.Read(e.Offset, e.Size)
+		if readErr != nil {
+			err = readErr
+			return false
+		}
+		original := append([]byte(nil), data...)
+		out, tErr := transform(e.ChunkID, original)
+		if tErr != nil {
+			err = tErr
+			return false
+		}
+		if len(out) != len(original) || string(out) != string(original) {
+			anyChanged = true
+		}
+		objects = append(objects, object{id: append([]byte(nil), e.ChunkID...), data: out})
+		return true
+	}); err != nil {
+		return false, err
+	}
+	if err != nil {
+		return false, err
+	}
+	if !anyChanged {
+		// Nothing to do. Rewriting anyway would churn the store and invalidate every
+		// client's cached index for no gain.
+		return false, nil
+	}
+
+	chunks, err := r.Chunks()
+	if err != nil {
+		return false, err
+	}
+	for _, o := range objects {
+		// Drop the old location first, so the writer records the new one rather than
+		// leaving the entry pointing into the pack that is about to go.
+		chunks.Delete(o.id)
+		results, err := r.packWriter.Add(o.id, o.data)
+		if err != nil {
+			return false, err
+		}
+		if err := chunks.Add(o.id, uint32(len(o.data))); err != nil {
+			return false, err
+		}
+		if err := chunks.UpdatePackInfo(results); err != nil {
+			return false, err
+		}
+	}
+	if err := r.Flush(); err != nil {
+		return false, err
+	}
+	if err := r.store.Delete(PackName(packID), false); err != nil && !isNotFound(err) {
+		return false, err
+	}
+	return true, nil
+}

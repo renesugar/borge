@@ -171,6 +171,9 @@ func New(k key.Key) (*RepoObj, error) {
 // SetCompressor selects the compressor used by Format.
 func (r *RepoObj) SetCompressor(c compress.Compressor) { r.compressor = c }
 
+// Compressor is the compressor objects are written with.
+func (r *RepoObj) Compressor() compress.Compressor { return r.compressor }
+
 // SetAssertIDPlace attributes subsequent reads to a place, for the BORG_ASSERT_ID
 // policy. Commands that are a trust boundary for the id/content invariant - transfer,
 // re-chunking, check --repair - set their own.

@@ -96,8 +96,10 @@ var commands = []command{
 	{"delete", "soft-delete archives", cmdDelete},
 	{"undelete", "restore soft-deleted archives", cmdUndelete},
 	{"check", "verify a repository and its archives", cmdCheck},
+	{"recreate", "rewrite archives: re-chunk, recompress or drop files", cmdRecreate},
 	{"prune", "apply a retention policy to the archives", cmdPrune},
 	{"compact", "reclaim the space of unreferenced chunks", cmdCompact},
+	{"repo-compress", "recompress everything already stored", cmdRepoCompress},
 }
 
 // Run dispatches a command line. It never panics on bad input; every failure becomes an

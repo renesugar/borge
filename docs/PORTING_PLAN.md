@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar` and `prune` done. `recreate`, `repo-compress`, `import-tar` and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `prune`, `recreate` and `repo-compress` done. `import-tar`, `analyze`, `benchmark`, `find`, `debug *` and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -1078,6 +1078,31 @@ Everything needed for feature parity, once correctness is established.
 > and the command says so. An empty policy is refused outright rather than confirmed: with
 > no rules every archive would be pruned, which is never what anybody meant to type.
 > `@PROT`-tagged archives are never pruned and never consume a quota.
+
+> **`recreate` and `repo-compress` done 2026-08-17.**
+>
+> `recreate` rewrites archives: exclude paths already stored, or re-chunk. Excluding a
+> path from *future* backups does nothing about the copies already in the repository —
+> recreate is what removes them. Re-chunking reads at the `rechunk` assert-id place, since
+> fresh ids computed from re-read plaintext would otherwise launder a chunk whose content
+> did not match its id.
+>
+> **A finding that cost a test rewrite.** `recreate --compression` *appears* to work and
+> changes nothing: a chunk's id is the hash of its **plaintext**, so compression lives
+> below the id, a recompressed chunk has the same id, and every chunk-writing path
+> deduplicates it away. borg behaves identically and says nothing. borge refuses the flag
+> and points at `repo-compress`.
+>
+> That is why `repo-compress` rewrites **whole packs** rather than replacing objects.
+> Replacing one object leaves the old copy as bytes no index entry covers, and compaction
+> deliberately preserves those (borg #8572) — so an object-at-a-time recompression made
+> the repository **41% larger** before this was fixed. Rewriting the pack leaves no stale
+> copy: measured 58.8% smaller on text that separates lz4 from zstd,19, with a second run
+> a no-op.
+>
+> Choosing that test corpus mattered. The first version used trivially repetitive data,
+> which lz4 compresses almost as well as zstd — it passed on a 19-byte margin out of 8324
+> while the code was doing nothing at all.
 
 - `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`,
   `repo-space`, `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`,
