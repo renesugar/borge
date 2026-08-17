@@ -20,7 +20,11 @@ that no longer matches the code is a bug in the plan, not a historical record to
 
 If you change behaviour that borg also has, you owe an entry in `DIVERGENCES.md`. If you
 finish a piece of a stage, you owe a note in `PORTING_PLAN.md` saying what you found — not
-just what you built.
+just what you built — **and an update to the stage tracker in its §14**.
+
+The tracker is the table a new reader trusts before anything else, which is exactly why it
+has to be right: it once claimed stages 4 through 10 were "not started" while four of them
+had shipped evidence bundles. Updating it is part of finishing a stage, not a postscript.
 
 ---
 

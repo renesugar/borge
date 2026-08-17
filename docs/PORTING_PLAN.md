@@ -1756,19 +1756,37 @@ pathological-directory scenario shows per-file restore cost flat against directo
 
 ## 14. Stage tracker
 
+Kept current. A tracker that says "not started" about work that shipped days ago is worse
+than no tracker: it is the document a new reader trusts first.
+
 | Stage | Description | State | Evidence bundle |
 | --- | --- | --- | --- |
 | 0 | Foundation, licensing, borg-2 venv, format reference | **done** 2026-08-16 | `borge-stage-0-20260816T163704Z.zip` |
-| 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | **done** 2026-08-16 | per-substage bundles |
-| 2 | `store` (borgstore port, posixfs) | **done** 2026-08-16 | `borge-stage-2-*.zip` |
-| 3 | `repoobj` + `repository` + packs + locking | **done** 2026-08-16 | `borge-stage-3-*.zip` |
-| 4 | Keys | not started | — |
-| 5 | Read path: manifest, archive, extract | not started | — |
-| 6 | Write path: create | not started | — |
-| 7 | **Interoperability gate** | not started | — |
-| 8 | Remaining commands + remote backends | not started | — |
-| 9 | Performance baseline vs borg | not started | — |
+| 1 | Primitives: msgpack, compress, crypto, chunker, item, hashindex | **done** 2026-08-16 | per-substage: `stage-1.1` … `stage-1.6` |
+| 2 | `store` (borgstore port, posixfs) | **done** 2026-08-16 | `borge-stage-2-20260816T212000Z.zip`, plus `stage-2-googledrive` |
+| 3 | `repoobj` + `repository` + packs + locking | **done** 2026-08-16 | `borge-stage-3-20260816T215557Z.zip` |
+| 4 | Keys | **done** 2026-08-16 | `borge-stage-4-20260817T021409Z.zip` |
+| 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
+| 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
+| 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve` and the remote backends remain | not yet bundled |
+| 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
+
+**On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
+not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see
+§2). The gate itself passed both times. `stage-7-clean` is the one to cite: no failure
+anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
+
+**What "in progress" means for stage 8.** The command list is gated by
+`tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
+reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
+the other two are `serve` and an undecided `transfer`.
+
+**What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been
+changed as a result. The three pure-Go fixes (zstd encoder reuse, chunker reuse,
+`subtle.XORBytes`) and the pipelining work are all still to do, and the `tests/bench/`
+harness §12 describes has not been built.
 
 ## 15. Deferred (post-1.0)
 
@@ -1783,10 +1801,12 @@ pathological-directory scenario shows per-file restore cost flat against directo
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | ~~**AES-OCB in pure Go**~~ | ~~Interop failure or, worse, a silent crypto bug~~ | **Downgraded 2026-08-16**: all 16 primary + all 9 appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across every suite and size tested. The ChaCha20-Poly1305 fallback is not needed. Independent review before Stage 7 remains worthwhile as a double-check. |
-| Upstream borg 2 format still moving | Interop gate invalidated mid-port | Pin the commit; rebase deliberately with a reviewed diff |
+| **Upstream borg 2 checkout moving** — *materialised 2026-08-17* | Interop gate silently invalidated: every differential test failed at once with a traceback inside borg, which reads as a borge regression | Pin the commit; rebase deliberately with a reviewed diff. **Neither `borg --version` nor `borg-commit.txt` notices the checkout moving** — both are baked in at install time — so `mkbundle.sh` now reads the borg tree's real `HEAD` and warns on mismatch. See §0.1. |
 | ~~`borghash`/`borgstore` license unknown~~ | ~~Cannot port those components~~ | **Closed 2026-08-16**: both BSD-3-Clause, porting permitted (LICENSING.md §6) |
 | Surrogate-escaped path encoding | Silent path corruption on non-UTF-8 filenames | Fuzz round-trip in Stage 1.5; synthetic corpus in Stage 7 |
 | `PackWriter` concurrency ported wrong | Rare, load-dependent repository corruption | Preserve the "index touched only by the calling goroutine" invariant; `-race` in CI |
 | Chunker boundary drift | Total dedup loss, invisible until the repo is huge | Byte-exact boundary differential test (Stage 1.4) |
 | Scope creep across 10 stages | Never finishing | Explicit non-goals (§0.6); one stage at a time; ask before advancing |
 | Usage limits interrupting work | Lost context, broken tree | Stage/task granularity, always-committable state, evidence bundles (§2) |
+| **Pure-Go performance shortfall** | Pressure to take a cgo dependency, which would forfeit the `CGO_ENABLED=0` cross-compilation that §12.3's mobile case depends on | Measured 2026-08-17 (§12.2): three of the four largest gaps are borge's own bugs and cost nothing to fix. Take those and the pipeline first, re-measure, and only then consider `avo`-generated assembly — which is still pure Go. A C library is the last resort, not the first. |
+| **A stale plan** | The tracker said stages 4–10 were "not started" while 4–7 had shipped evidence bundles; a new reader trusts that table first | The tracker (§14) is part of finishing a stage, not a postscript. AGENTS.md says so. |
