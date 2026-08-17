@@ -312,3 +312,46 @@ place — its profiling is Go's `pprof`. Porting it would mean writing a Python 
 serialiser to convert a file borge never creates.
 
 Recorded here rather than left as an unexplained gap in the subcommand list.
+
+## 15. No tcsh completions
+
+**Stage 8 · `internal/cli/completion.go` · a missing feature, stated rather than hidden**
+
+borg generates completion scripts for bash, zsh, tcsh and fish through `shtab`. borge
+generates bash, zsh and fish, and refuses tcsh with an explanation.
+
+tcsh matches completions by word *position* and by option *name across all subcommands at
+once*. borg's own documentation records what that costs: an archive name is only completed
+if no options precede it, and `--sort-by` has to offer the union of the sort keys valid for
+every command that has one. For borge's twenty-seven commands the result would complete the
+wrong thing more often than the right one.
+
+`borge completion tcsh` therefore exits with an error saying so, rather than either
+generating something misleading or reporting "unknown shell" — which would be untrue, since
+borg supports it and the omission is deliberate.
+
+## 16. borge's zstd and lzma levels are coarser than borg's
+
+**Stage 8 · `internal/compress/codecs.go` · measured, not estimated**
+
+borge compresses with `klauspost/compress`, whose zstd encoder has four levels where
+libzstd has twenty-two. `internal/compress/codecs.go` maps the range onto them, so several
+distinct borg levels are one borge level. `borge benchmark cpu --compressing` shows it
+directly:
+
+```
+zstd,10 (2MiB)   10.00 MiB   0.612s   17.1 MB/s  (4.5x)
+zstd,16 (2MiB)   10.00 MiB   2.406s    4.4 MB/s  (4.8x)
+zstd,22 (2MiB)   10.00 MiB   1.768s    5.9 MB/s  (4.8x)
+```
+
+`zstd,16` and `zstd,22` produce identically sized output; so do `lzma,0`, `lzma,6` and
+`lzma,9`. The compression *ratio* column exists in borge's benchmark and not in borg's for
+exactly this reason: measuring only throughput would have shown borge as **faster** than
+borg at `zstd,22` when what is actually happening is that it does less work.
+
+**This costs no interoperability.** The compression level is not part of the format: the
+stored `clevel` byte records the level the user asked for, decompression does not consult
+it, and borg reads borge's objects and vice versa. What it costs is compression the user
+asked for and did not get, which is worth being able to see rather than discovering from a
+repository that is larger than expected.

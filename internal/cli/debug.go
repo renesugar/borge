@@ -49,19 +49,24 @@ import (
 // and neither should ever appear in a script that is not deliberately breaking things.
 
 // debugCommands is the dispatch table for "borge debug <name>".
-var debugCommands = []command{
-	{"info", "show system information for a bug report", cmdDebugInfo},
-	{"dump-archive-items", "write each item metadata stream chunk to a file", cmdDebugDumpArchiveItems},
-	{"dump-archive", "write an archive's metadata and items as JSON", cmdDebugDumpArchive},
-	{"dump-manifest", "write the repository manifest as JSON", cmdDebugDumpManifest},
-	{"dump-repo-objs", "write every repository object's plaintext to a file", cmdDebugDumpRepoObjs},
-	{"search-repo-objs", "search the repository objects for a byte sequence", cmdDebugSearchRepoObjs},
-	{"get-obj", "write one repository object, as stored, to a file", cmdDebugGetObj},
-	{"put-obj", "store a file as a repository object under a given id", cmdDebugPutObj},
-	{"delete-obj", "remove objects from the repository", cmdDebugDeleteObj},
-	{"id-hash", "compute the chunk id of a file's contents", cmdDebugIDHash},
-	{"parse-obj", "split an object file into its metadata and its plaintext", cmdDebugParseObj},
-	{"format-obj", "build an object file from metadata and a plaintext", cmdDebugFormatObj},
+//
+// A function rather than a package variable, to match benchmarkCommands and so that
+// completion.go can treat every command group the same way.
+func debugCommands() []command {
+	return []command{
+		{"info", "show system information for a bug report", cmdDebugInfo},
+		{"dump-archive-items", "write each item metadata stream chunk to a file", cmdDebugDumpArchiveItems},
+		{"dump-archive", "write an archive's metadata and items as JSON", cmdDebugDumpArchive},
+		{"dump-manifest", "write the repository manifest as JSON", cmdDebugDumpManifest},
+		{"dump-repo-objs", "write every repository object's plaintext to a file", cmdDebugDumpRepoObjs},
+		{"search-repo-objs", "search the repository objects for a byte sequence", cmdDebugSearchRepoObjs},
+		{"get-obj", "write one repository object, as stored, to a file", cmdDebugGetObj},
+		{"put-obj", "store a file as a repository object under a given id", cmdDebugPutObj},
+		{"delete-obj", "remove objects from the repository", cmdDebugDeleteObj},
+		{"id-hash", "compute the chunk id of a file's contents", cmdDebugIDHash},
+		{"parse-obj", "split an object file into its metadata and its plaintext", cmdDebugParseObj},
+		{"format-obj", "build an object file from metadata and a plaintext", cmdDebugFormatObj},
+	}
 }
 
 func cmdDebug(e *Env, args []string) int {
@@ -70,7 +75,7 @@ func cmdDebug(e *Env, args []string) int {
 		return ExitOK
 	}
 	name := args[0]
-	for _, c := range debugCommands {
+	for _, c := range debugCommands() {
 		if c.name == name {
 			return c.run(e, args[1:])
 		}
@@ -82,7 +87,7 @@ func cmdDebug(e *Env, args []string) int {
 
 func printDebugUsage(w io.Writer) {
 	var b strings.Builder
-	for _, c := range debugCommands {
+	for _, c := range debugCommands() {
 		fmt.Fprintf(&b, "  %-20s %s\n", c.name, c.summary)
 	}
 	fmt.Fprintf(w, "usage: borge debug <command> [options]\n\n"+

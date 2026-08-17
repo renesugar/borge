@@ -44,6 +44,11 @@ type Env struct {
 	Stdin  io.Reader
 	// Getenv resolves environment variables. Nil means os.Getenv.
 	Getenv func(string) (string, bool)
+
+	// captureFlags, when set, receives every FlagSet a command builds. It is how
+	// "borge completion" enumerates a command's options without keeping a second copy
+	// of them; see internal/cli/completion.go.
+	captureFlags func(*flag.FlagSet)
 }
 
 func (e *Env) lookup(name string) (string, bool) {
@@ -81,33 +86,41 @@ type command struct {
 //
 // It is a list rather than a map so the help has a sensible order: alphabetical would put
 // "delete" before "extract", which is not how anybody thinks about a backup tool.
-var commands = []command{
-	{"repo-create", "create a new repository", cmdRepoCreate},
-	{"repo-list", "list the archives in a repository", cmdRepoList},
-	{"repo-info", "show information about a repository", cmdRepoInfo},
-	{"list", "list the contents of an archive", cmdList},
-	{"info", "show information about an archive", cmdInfo},
-	{"create", "create an archive from paths", cmdCreate},
-	{"extract", "extract an archive", cmdExtract},
-	{"diff", "report what changed between two archives", cmdDiff},
-	{"export-tar", "write an archive as a tar stream", cmdExportTar},
-	{"import-tar", "create an archive from a tar stream", cmdImportTar},
-	{"rename", "rename an archive", cmdRename},
-	{"tag", "add or remove an archive's tags", cmdTag},
-	{"delete", "soft-delete archives", cmdDelete},
-	{"undelete", "restore soft-deleted archives", cmdUndelete},
-	{"check", "verify a repository and its archives", cmdCheck},
-	{"recreate", "rewrite archives: re-chunk, recompress or drop files", cmdRecreate},
-	{"prune", "apply a retention policy to the archives", cmdPrune},
-	{"compact", "reclaim the space of unreferenced chunks", cmdCompact},
-	{"repo-compress", "recompress everything already stored", cmdRepoCompress},
-	{"find", "search for paths across archives", cmdFind},
-	{"break-lock", "remove the repository's locks", cmdBreakLock},
-	{"with-lock", "run a command with the repository lock held", cmdWithLock},
-	{"analyze", "report where the repository's space goes", cmdAnalyze},
-	{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
-	{"version", "print the client and server versions", cmdVersion},
-	{"debug", "low-level repository inspection (dangerous)", cmdDebug},
+//
+// It is a function rather than a package variable because "benchmark crud" measures the
+// real commands by running them through Run, so the table reaches a command that reaches
+// the table. That is fine at run time and is a cycle Go refuses to order at initialisation.
+func commands() []command {
+	return []command{
+		{"repo-create", "create a new repository", cmdRepoCreate},
+		{"repo-list", "list the archives in a repository", cmdRepoList},
+		{"repo-info", "show information about a repository", cmdRepoInfo},
+		{"list", "list the contents of an archive", cmdList},
+		{"info", "show information about an archive", cmdInfo},
+		{"create", "create an archive from paths", cmdCreate},
+		{"extract", "extract an archive", cmdExtract},
+		{"diff", "report what changed between two archives", cmdDiff},
+		{"export-tar", "write an archive as a tar stream", cmdExportTar},
+		{"import-tar", "create an archive from a tar stream", cmdImportTar},
+		{"rename", "rename an archive", cmdRename},
+		{"tag", "add or remove an archive's tags", cmdTag},
+		{"delete", "soft-delete archives", cmdDelete},
+		{"undelete", "restore soft-deleted archives", cmdUndelete},
+		{"check", "verify a repository and its archives", cmdCheck},
+		{"recreate", "rewrite archives: re-chunk, recompress or drop files", cmdRecreate},
+		{"prune", "apply a retention policy to the archives", cmdPrune},
+		{"compact", "reclaim the space of unreferenced chunks", cmdCompact},
+		{"repo-compress", "recompress everything already stored", cmdRepoCompress},
+		{"find", "search for paths across archives", cmdFind},
+		{"break-lock", "remove the repository's locks", cmdBreakLock},
+		{"with-lock", "run a command with the repository lock held", cmdWithLock},
+		{"analyze", "report where the repository's space goes", cmdAnalyze},
+		{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
+		{"version", "print the client and server versions", cmdVersion},
+		{"debug", "low-level repository inspection (dangerous)", cmdDebug},
+		{"benchmark", "measure this build's speed", cmdBenchmark},
+		{"completion", "print a shell completion script", cmdCompletion},
+	}
 }
 
 // Run dispatches a command line. It never panics on bad input; every failure becomes an
@@ -118,7 +131,7 @@ func Run(e *Env, args []string) int {
 		return ExitOK
 	}
 	name := args[0]
-	for _, c := range commands {
+	for _, c := range commands() {
 		if c.name == name {
 			return c.run(e, args[1:])
 		}
@@ -131,7 +144,7 @@ func Run(e *Env, args []string) int {
 // Commands lists the implemented subcommands, for the top-level help.
 func Commands() []string {
 	var out []string
-	for _, c := range commands {
+	for _, c := range commands() {
 		out = append(out, fmt.Sprintf("  %-12s %s", c.name, c.summary))
 	}
 	return out
@@ -164,6 +177,9 @@ func (c *commonFlags) register(fs *flag.FlagSet) {
 func newFlagSet(e *Env, name string) *flag.FlagSet {
 	fs := flag.NewFlagSet("borge "+name, flag.ContinueOnError)
 	fs.SetOutput(e.Stderr)
+	if e.captureFlags != nil {
+		e.captureFlags(fs)
+	}
 	return fs
 }
 
