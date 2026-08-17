@@ -430,6 +430,64 @@ func (l *Lock) Refresh() error {
 // Exclusive reports whether this is an exclusive lock.
 func (l *Lock) Exclusive() bool { return l.exclusive }
 
+// HeldLock describes a lock currently in the repository, for reporting.
+type HeldLock struct {
+	// Key is the lock object's name within locks/.
+	Key string
+	// Exclusive distinguishes a writer's lock from a reader's.
+	Exclusive bool
+	// Host and PID identify the holder. Host is the "<hostname>@<nodeid>" form borg uses.
+	Host string
+	PID  int
+	// Time is when the lock was last written or refreshed.
+	Time time.Time
+	// Stale reports that the holder has not refreshed within the stale period, so the
+	// lock would be removed by the next client that tried to acquire one.
+	Stale bool
+}
+
+// ListLocks reports the locks a repository currently holds, without removing any.
+//
+// Acquiring a lock removes stale ones as a side effect, because a crashed client must not
+// block the repository forever. Reporting must not: "break-lock told me there were no
+// locks" is a very different claim from "break-lock silently removed two". So this reads
+// and classifies, and leaves removal to BreakLock.
+func ListLocks(s *store.Store) ([]HeldLock, error) {
+	names, err := s.ListNames("locks", false)
+	if err != nil {
+		if errors.Is(err, store.ErrObjectNotFound) {
+			return nil, nil // the namespace is created lazily
+		}
+		return nil, err
+	}
+
+	var out []HeldLock
+	for _, key := range names {
+		value, err := s.Load("locks/"+key, 0, -1, false)
+		if err != nil {
+			if errors.Is(err, store.ErrObjectNotFound) {
+				continue // released under us, which is normal
+			}
+			return nil, err
+		}
+		var rec lockRecord
+		if err := json.Unmarshal(value, &rec); err != nil {
+			return nil, fmt.Errorf("repository: locks/%s could not be read (%w); "+
+				"if no borg or borge is running, remove the stale lock", key, err)
+		}
+		at, err := parseLockTime(rec.Time)
+		if err != nil {
+			return nil, fmt.Errorf("repository: locks/%s has an unreadable timestamp %q; "+
+				"if no borg or borge is running, remove the stale lock", key, rec.Time)
+		}
+		out = append(out, HeldLock{
+			Key: key, Exclusive: rec.Exclusive, Host: rec.HostID, PID: rec.ProcessID,
+			Time: at, Stale: time.Since(at) > defaultLockStale,
+		})
+	}
+	return out, nil
+}
+
 // BreakLock removes every lock in the repository.
 //
 // It is the manual escape hatch for a lock left behind by a killed client, and it is

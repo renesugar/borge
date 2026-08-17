@@ -4,9 +4,10 @@
 // authenticated encryption. It is a Go port of BorgBackup; see the README and
 // docs/LICENSING.md for provenance and license obligations.
 //
-// The read-only commands are implemented (docs/PORTING_PLAN.md stage 5). The commands
-// that write to a repository arrive with stage 6; until then borge deliberately refuses
-// to do anything to a repository rather than doing it wrong.
+// Repositories are read and written in borg 2's own format, and the interoperability
+// gate (docs/PORTING_PLAN.md stage 7) checks both tools against each other on real
+// corpora. The remote backends - sftp, rest, s3, rclone - are not implemented yet, so a
+// repository has to be reachable as a local path.
 package main
 
 import (
@@ -42,8 +43,8 @@ borge is a port of BorgBackup (https://github.com/borgbackup/borg) and is not
 produced, sponsored or endorsed by the Borg Collective. Run "borge --license"
 for the full attribution.
 
-The commands that write to a repository are not implemented yet; see
-docs/PORTING_PLAN.md for the staged plan.
+Repositories must be local paths for now: the remote backends are not
+implemented yet. See docs/PORTING_PLAN.md for the staged plan.
 `
 
 func main() {

@@ -101,6 +101,10 @@ var commands = []command{
 	{"prune", "apply a retention policy to the archives", cmdPrune},
 	{"compact", "reclaim the space of unreferenced chunks", cmdCompact},
 	{"repo-compress", "recompress everything already stored", cmdRepoCompress},
+	{"find", "search for paths across archives", cmdFind},
+	{"break-lock", "remove the repository's locks", cmdBreakLock},
+	{"with-lock", "run a command with the repository lock held", cmdWithLock},
+	{"version", "print the client and server versions", cmdVersion},
 }
 
 // Run dispatches a command line. It never panics on bad input; every failure becomes an

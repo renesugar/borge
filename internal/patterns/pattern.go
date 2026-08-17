@@ -271,7 +271,15 @@ type fullPathPattern struct {
 // wanting anything else.
 func (m *Matcher) AddIncludePaths(paths []string) error {
 	for _, p := range paths {
-		pattern, err := NewPattern(StylePathPrefix, p, true)
+		// StylePathPrefix is the *fallback*, not the style. borg parses a leading "xx:"
+		// off a positional path just as it does off a --pattern, so "borge list ARCHIVE
+		// sh:**/*.jpg" is a shell pattern and only a bare path is a prefix.
+		//
+		// Forcing the prefix style here made every styled positional path match nothing at
+		// all: not an error, just an empty result, on list, extract, diff and export-tar
+		// alike. Found while writing the tests for `find`, which is the command whose
+		// documentation makes the most of the styles.
+		pattern, err := ParsePattern(p, StylePathPrefix, true)
 		if err != nil {
 			return err
 		}

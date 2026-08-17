@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate` and `repo-compress` done. `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`, shell completions and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock` and `version` done. `analyze`, `benchmark`, `debug *`, `repo-space`, shell completions and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -1150,9 +1150,42 @@ Everything needed for feature parity, once correctness is established.
 > all six entry types are present with populated mode/mtime/target/size — two empty structs
 > would otherwise agree and prove nothing.
 
-- `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`, `import-tar`,
-  `repo-space`, `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`,
-  shell completions.
+> **`find`, `break-lock`, `with-lock` and `version` done 2026-08-17.**
+>
+> `find` answers "which archives contain this file?". There is no path index, so it reads
+> the item stream of every selected archive — the same cost as a `list` loop in the shell,
+> but with the archive ordering, the pattern styles and the soft-delete handling right.
+> Newest first, because the question behind it is nearly always "when did it last exist".
+>
+> **The bug it uncovered was not in `find`.** Writing its tests showed `sh:**/file1.txt`
+> matching nothing — and then showed `list` doing the same. `Matcher.AddIncludePaths`
+> passed every positional path to `NewPattern(StylePathPrefix, …)`, where borg passes it to
+> `parse_pattern(p, PathPrefixPattern)` — a **fallback**, not a style. So a positional path
+> carrying `sh:`, `re:`, `fm:`, `pp:` or `pf:` was read as a literal path starting with
+> those characters, and matched nothing at all on `list`, `extract`, `diff` and
+> `export-tar` alike. No error, no warning: an empty result indistinguishable from a
+> correct "no such file". Fixed to `ParsePattern(p, StylePathPrefix, true)`, and pinned by
+> a differential test over all six styles — with a second test asserting the patterns are
+> not *all* empty, since two empty lists agree.
+>
+> `break-lock` breaks unconditionally, as borg does; refusing on a heuristic would block
+> the one case it exists for. What it adds is saying **what** is being broken: a stale lock
+> was going to be removed anyway, while a lock refreshed a minute ago means somebody is
+> probably still running, which now yields `ExitWarning`. The test has borg take the lock,
+> so it also checks borge reads borg's lock records.
+>
+> `with-lock` refreshes the lock on a ticker while the command runs, and returns **the
+> command's** exit code — a wrapper that swallows it makes `borge with-lock … && …`
+> silently wrong. The shutdown waits for the refresher to stop: closing the channel only
+> ends the *next* iteration, so without the wait a refresh in flight would touch the lock
+> while the deferred `Close` released it. Checked under `-race`.
+>
+> `version` prints `<client> / <server>` even though borge has no remote backends and the
+> two are the same value — the shape is what scripts parse, and adding the second field
+> later would break them then. `--json` also reports the pinned borg commit and repository
+> format version, which is what answers "can this build read that repository?".
+
+- `analyze`, `benchmark`, `debug *`, `repo-space`, shell completions.
 - Remote store backends: `sftp`, `rest` (+ `borge serve --rest`), `s3`, `rclone`.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.

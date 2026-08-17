@@ -245,3 +245,22 @@ a Go port that decodes it as `int64` **cannot read such an archive at all**.
 
 Found by the stage 7 Google Drive corpus, which exists in the corpus list for its I/O
 latency and turned out to be the only one that could surface this.
+
+## 11. `break-lock` reports what it broke, and warns on a live lock
+
+**Stage 8 · `internal/cli/lock.go` · an addition, not a behaviour change**
+
+borg's `break-lock` removes every lock and says nothing about them. borge removes exactly
+the same locks — refusing on a heuristic would block the one situation the command exists
+for — but prints who held each one and when it was last refreshed, and exits with a
+**warning** rather than success if any lock was still live.
+
+A stale lock was going to be removed by the next client anyway, so breaking it is free. A
+lock refreshed a minute ago means another client is very likely still running, and
+breaking that one invites two writers into one repository. Both cases exit 0 in borg, so a
+script cannot tell them apart; here the second exits 1.
+
+This is a divergence in **exit code**, which is the kind that can break a caller. It is
+recorded rather than quietly adopted: a script that runs `borge break-lock` unconditionally
+and checks `$?` will now see a failure where borg gave success, and that is the intended
+signal, not a bug.

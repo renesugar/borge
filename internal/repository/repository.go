@@ -521,6 +521,39 @@ func (r *Repository) Close() error {
 	return firstErr
 }
 
+// ListLocks reports the locks currently held on this repository, without removing any.
+// Open the repository with NoLock to inspect locks you do not want to compete with.
+func (r *Repository) ListLocks() ([]HeldLock, error) {
+	return ListLocks(r.store)
+}
+
+// BreakLock removes every lock on this repository, including any this process holds.
+//
+// It is the escape hatch for a lock left by a killed client, and it is unconditionally
+// destructive: if another client really is running, this invites two writers into one
+// repository. The caller decides; see cmdBreakLock.
+func (r *Repository) BreakLock() error {
+	if err := BreakLock(r.store); err != nil {
+		return err
+	}
+	// Our own lock object is gone now, so releasing it on Close would look for something
+	// that is not there. Forgetting it here keeps Close quiet.
+	r.lock = nil
+	return nil
+}
+
+// RefreshLock rewrites the lock's timestamp, so a long operation is not declared stale
+// underneath itself.
+//
+// A repository opened without a lock has nothing to refresh, which is not an error: the
+// caller asked for no lock and got none.
+func (r *Repository) RefreshLock() error {
+	if r.lock == nil {
+		return nil
+	}
+	return r.lock.Refresh()
+}
+
 func (r *Repository) releaseLock() {
 	if r.lock != nil {
 		// Ignore a missing lock: Close also runs while unwinding an error, and if the

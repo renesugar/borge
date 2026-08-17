@@ -53,6 +53,13 @@ func (p *patternFlags) register(fs *flag.FlagSet) {
 	fs.Var(&p.patternsFrom, "patterns-from", "read include/exclude patterns from a file (repeatable)")
 }
 
+// any reports whether any pattern option was given. A command that would otherwise match
+// everything uses it to tell "no filter asked for" from "a filter that matches all".
+func (p *patternFlags) any() bool {
+	return len(p.excludes) > 0 || len(p.excludeFrom) > 0 ||
+		len(p.pattern) > 0 || len(p.patternsFrom) > 0
+}
+
 // matcher builds the pattern matcher from the flags and the positional paths.
 func (p *patternFlags) matcher(paths []string) (*patterns.Matcher, error) {
 	m := patterns.NewMatcher(true)
