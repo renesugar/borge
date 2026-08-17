@@ -220,6 +220,17 @@ type ListOptions struct {
 	Newer, Older time.Time
 }
 
+// IsZero reports whether no filter or ordering was asked for, so this is the plain
+// "every archive" list.
+//
+// A command whose meaning is repository-wide uses it to refuse an archive filter rather
+// than silently applying one: "shared between names" and "unreferenced" are only true
+// statements about the whole repository.
+func (o ListOptions) IsZero() bool {
+	return len(o.Match) == 0 && !o.Deleted && len(o.SortBy) == 0 && !o.Reverse &&
+		o.First == 0 && o.Last == 0 && o.Newer.IsZero() && o.Older.IsZero()
+}
+
 // List returns the archives matching the options, sorted.
 //
 // Every filter defaults to "do not filter", so a zero ListOptions produces the complete

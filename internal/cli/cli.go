@@ -104,6 +104,8 @@ var commands = []command{
 	{"find", "search for paths across archives", cmdFind},
 	{"break-lock", "remove the repository's locks", cmdBreakLock},
 	{"with-lock", "run a command with the repository lock held", cmdWithLock},
+	{"analyze", "report where the repository's space goes", cmdAnalyze},
+	{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
 	{"version", "print the client and server versions", cmdVersion},
 }
 

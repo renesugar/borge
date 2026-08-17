@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock` and `version` done. `analyze`, `benchmark`, `debug *`, `repo-space`, shell completions and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze` and `repo-space` done. `benchmark`, `debug *`, shell completions and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -1185,7 +1185,48 @@ Everything needed for feature parity, once correctness is established.
 > later would break them then. `--json` also reports the pinned borg commit and repository
 > format version, which is what answers "can this build read that repository?".
 
-- `analyze`, `benchmark`, `debug *`, `repo-space`, shell completions.
+> **`analyze` and `repo-space` done 2026-08-17.**
+>
+> `analyze` answers the question an archive listing cannot: "the repository is 400 GB, what
+> would I delete to shrink it?" Deduplication means the archives do not add up — a chunk
+> shared by twenty archives is stored once, and deleting nineteen frees nothing — so every
+> figure is about **chunks**, each counted exactly once. The default mode reports what a set
+> of archives costs and what deleting the whole set would actually free; `--by-name`
+> decomposes the entire repository, giving each name its exclusive size with everything
+> shared between names in its own row.
+>
+> **Checked against borg, number for number**, on a corpus built so that the shared and
+> unreferenced buckets are both non-empty — a comparison where they were zero would agree
+> without testing them. The exclusive figure is additionally checked against reality:
+> delete the set, compact, and confirm the repository actually shrank by about that much.
+>
+> `--by-name` refuses archive filters, as borg does: "shared" and "unreferenced" are only
+> true statements about the whole repository.
+>
+> Hot spots (`chunks added or removed between consecutive archives, by directory`) answer a
+> different question — not what is big, but what keeps *changing*, which is what makes a
+> repository grow when nothing gets bigger. Its test deliberately makes the churning
+> directory much **smaller** than the stable one, so a report that merely ranked by size
+> would name the wrong directory and fail.
+>
+> **Cost divergence:** borg reads a per-archive references cache written by `compact`, so
+> unchanged archives are never opened. borge has no such cache yet and re-reads every
+> archive's item stream. Same answer, longer wait.
+>
+> `repo-space` manages the emergency reserve — a pile of incompressible bytes held back so
+> that a repository which fills its filesystem is not wedged, since the operations that free
+> space (`prune`, `delete`, `compact`) all need a lock, and locking is a write. Filled from
+> the random source rather than with zeroes: a reserve that a compressing filesystem stores
+> in no space reserves nothing. Reserving **replaces** rather than accumulates, or a cron
+> job reserving after each backup would fill the disk it protects. Tested in both directions
+> against borg, since both tools manage the same `config/space-reserve.N` objects and a
+> naming disagreement would mean `--free` silently freeing nothing in an emergency.
+>
+> This also added `internal/cli/size.go`: borg's `parse_file_size` and `format_file_size`,
+> including that suffixes are **decimal** (`1G` is 10^9, not 2^30) and that `BORG_UNITS`
+> selects si/iec/raw. The two tools have to agree on the size of a reservation they share.
+
+- `benchmark`, `debug *`, shell completions.
 - Remote store backends: `sftp`, `rest` (+ `borge serve --rest`), `s3`, `rclone`.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.
