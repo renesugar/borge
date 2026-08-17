@@ -1,7 +1,7 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze` and `repo-space` done. `benchmark`, `debug *`, shell completions and the remote backends remain.**
-Last updated: 2026-08-16.
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space` and `debug *` done. `benchmark`, shell completions and the remote backends remain.**
+Last updated: 2026-08-17.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
 be edited as facts are learned — when a stage's reality diverges from what is written
@@ -1168,6 +1168,14 @@ Everything needed for feature parity, once correctness is established.
 > a differential test over all six styles — with a second test asserting the patterns are
 > not *all* empty, since two empty lists agree.
 >
+> **The emptiness guard earned its place on 2026-08-17.** The path-anchored patterns in
+> that test were written as `pp:media` and `pf:media/renes`, which matched because borg
+> archives an absolute source path with the leading slash removed and `TMPDIR` pointed at
+> `/media/renes/HD2/borge-tmp`. With that disk unmounted the temporary directory moved to
+> `/tmp` and both patterns matched nothing — which the *comparison* accepted happily, since
+> borg matched nothing either. Only the guard failed. The patterns are now derived from the
+> archived tree, so the test measures the same thing wherever it runs.
+>
 > `break-lock` breaks unconditionally, as borg does; refusing on a heuristic would block
 > the one case it exists for. What it adds is saying **what** is being broken: a stale lock
 > was going to be removed anyway, while a lock refreshed a minute ago means somebody is
@@ -1226,7 +1234,49 @@ Everything needed for feature parity, once correctness is established.
 > including that suffixes are **decimal** (`1G` is 10^9, not 2^30) and that `BORG_UNITS`
 > selects si/iec/raw. The two tools have to agree on the size of a reservation they share.
 
-- `benchmark`, `debug *`, shell completions.
+> **`debug *` done 2026-08-17** (`internal/cli/debug.go`, `internal/cli/pydump.go`).
+>
+> Twelve subcommands: `info`, `dump-archive-items`, `dump-archive`, `dump-manifest`,
+> `dump-repo-objs`, `search-repo-objs`, `get-obj`, `put-obj`, `delete-obj`, `id-hash`,
+> `parse-obj`, `format-obj`. borg's thirteenth, `convert-profile`, writes a CPython
+> `marshal` file and is recorded as DIVERGENCES #14 rather than ported.
+>
+> **These are the port's own debugging tools**, which is why they were worth the effort of
+> matching borg exactly. When `borge list` and `borg list` disagree about an archive, the
+> way to find out which is wrong is to dump the same object with both and diff — and that
+> only works if the dumps are comparable. So `pydump.go` reproduces `prepare_dump_dict`
+> *and* enough of CPython's json encoder to be byte-identical: `ensure_ascii` escaping,
+> `", "` separators, insertion order for the dicts borg builds and sorted order for the
+> ones it decodes (`StableDict.items()` sorts).
+>
+> The awkward part is the bytes/str split. A chunk id and a filename are both `bytes` on
+> the wire; borg shows the one that decodes as UTF-8 as text and marks the other with
+> U+007F plus hex. A filename that is *not* UTF-8 — which Linux allows — reaches Python as
+> a surrogate-escaped `str` and comes out as `\udcXX`, and borge reproduces that from the
+> raw Go string. All three dumps are compared against borg byte for byte, over a tree built
+> to contain a non-UTF-8 name, a CJK name, an emoji, a hard link, a symlink and a binary
+> xattr value — the comparison asserts each of those is present in *borg's own* output
+> first, since a tree of ASCII files would agree while testing none of it.
+>
+> **Two borg bugs are not reproduced** (DIVERGENCES #13), both the same cause: a negative
+> Python slice index read as an offset from the end. One blanks the context before a search
+> hit near the start of a large object; the other reports every hit twice for a one-byte
+> search term.
+>
+> `delete-obj` needed `Repository.DeleteObject`, which rewrites the object's pack without
+> it. Its test works out pack membership **from the bytes on disk** — searching each pack
+> file for the stored object borg's `get-obj` produced — rather than asking borge's chunk
+> index, since the index is the thing under test. It then asserts the fullest pack held at
+> least three objects before deleting from it: the round-trip test could not show this,
+> because the object it deletes was put there by itself and has no neighbours to lose.
+> Mutation-checked by making the rewrite drop the survivors, which fails the test.
+>
+> `put-obj` and `delete-obj` take the **exclusive** lock where borg takes a shared one.
+> They rewrite the chunk index at close and two concurrent writers would lose one of the
+> two objects; for commands that exist to corrupt a repository deliberately, refusing to
+> run alongside another borge is the safer default.
+
+- `benchmark`, shell completions.
 - Remote store backends: `sftp`, `rest` (+ `borge serve --rest`), `s3`, `rclone`.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.

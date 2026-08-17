@@ -10,6 +10,7 @@
 package repository
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -302,6 +303,56 @@ func (r *Repository) rewritePack(packHex string, liveIDs [][]byte, chunks *hashi
 		return 0, err
 	}
 	return moved, nil
+}
+
+// DeleteObject removes a single object from the repository.
+//
+// # Why this is expensive
+//
+// The store deletes whole objects, and an object here is a *pack* holding many chunks. So
+// removing one chunk means rewriting its pack without it: a read and a write of everything
+// else that pack holds. That is why nothing on the ordinary path does this - deleting an
+// archive drops a pointer and leaves the chunks for a later compaction, which amortises
+// one rewrite over many deletions.
+//
+// It exists for "borge debug delete-obj", where the point is to remove one specific object
+// now, usually to reproduce the damage a check or a repair is meant to handle.
+//
+// The full chunk index is written back, because an incremental write cannot express a
+// removal and the next process must not be told the object is still there.
+func (r *Repository) DeleteObject(id []byte) error {
+	if !r.opened {
+		return errors.New("repository: not open")
+	}
+	if err := r.Flush(); err != nil {
+		return err
+	}
+	chunks, err := r.Chunks()
+	if err != nil {
+		return err
+	}
+	entry, ok := chunks.Get(id)
+	if !ok {
+		return &ObjectNotFoundError{ID: append([]byte(nil), id...)}
+	}
+	packHex := hex.EncodeToString(entry.PackID[:])
+
+	// Everything else the index puts in this pack has to be carried over. An indexed
+	// object left out here would keep its bytes nowhere and its index entry pointing at a
+	// pack that no longer exists.
+	var keep [][]byte
+	chunks.Iterate(func(other []byte, e hashindex.Entry) bool {
+		if e.PackID == entry.PackID && !bytes.Equal(other, id) {
+			keep = append(keep, append([]byte(nil), other...))
+		}
+		return true
+	})
+
+	if _, err := r.rewritePack(packHex, keep, chunks); err != nil {
+		return err
+	}
+	chunks.Delete(id)
+	return r.WriteFullChunkIndex()
 }
 
 func mustHex(s string) []byte {

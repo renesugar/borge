@@ -264,3 +264,51 @@ This is a divergence in **exit code**, which is the kind that can break a caller
 recorded rather than quietly adopted: a script that runs `borge break-lock` unconditionally
 and checks `$?` will now see a failure where borg gave success, and that is the intended
 signal, not a bug.
+
+## 12. `debug delete-obj` exits with a warning when it could not delete something
+
+**Stage 8 · `internal/cli/debug.go` · exit code**
+
+borg prints `object <id> not found.` or `object id <id> is invalid.`, carries on with the
+rest of the list, and exits 0. borge prints the same lines and carries on for the same
+reason — a list of ids usually comes from another tool, and abandoning the remainder
+because one entry was wrong is not helpful — but exits **1**.
+
+The command's whole purpose is to make a specific object stop existing. A script that
+deletes a list and gets exit 0 has no way to learn that half the list was never there,
+which for a command used to build corruption corpora means the corpus is silently not the
+one that was asked for.
+
+## 13. `debug search-repo-objs` shows the bytes before a hit near the start of an object
+
+**Stage 8 · `internal/cli/debug.go` · borg bug, not reproduced**
+
+Two of borg's slice indices go negative and are then read by Python as offsets from the
+end of the buffer:
+
+- `data[offset - context : offset]` in `print_finding`. When the hit is closer to the start
+  than the 32-byte context and the object is *larger* than the context, the start index
+  wraps past the stop index and the context before the hit prints as `b''`.
+- `last_data[-(len(wanted) - 1):]` when stitching two objects together to catch a hit that
+  straddles them. For a one-byte search term that is `last_data[-0:]`, which is the whole
+  of the previous object rather than nothing, so every hit in it is reported twice.
+
+borge clamps in both places: the context before a hit is the bytes that are actually there,
+and a one-byte term is reported once. Everything else about the finding lines — their
+format, the hex, the Python `b'...'` renderings — is reproduced exactly, so a diff between
+the two tools' output stays readable.
+
+The leading number on a finding line is the object's position in a scan whose order is the
+chunk index's, and the two implementations do not promise to agree on it.
+
+## 14. `debug convert-profile` is not implemented
+
+**Stage 8 · nothing to port**
+
+borg's `debug convert-profile` reads a borg profile (msgpack) and writes a **Python
+`marshal`** file for `pstats` to open. The output format is a CPython implementation detail
+with no reader outside CPython, and borge produces no borg profiles to convert in the first
+place — its profiling is Go's `pprof`. Porting it would mean writing a Python bytecode
+serialiser to convert a file borge never creates.
+
+Recorded here rather than left as an unexplained gap in the subcommand list.

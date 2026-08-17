@@ -168,8 +168,30 @@ func (a *Archive) ItemStreamIDs() ([][]byte, error) {
 
 // Items calls fn for each item in the archive, in stream order.
 //
-// Returning false from fn stops the iteration; that is not an error.
+// Returning ErrStopIteration from fn stops the iteration; that is not an error.
 func (a *Archive) Items(fn func(*item.Item) error) error {
+	return a.RawItems(func(v any) error {
+		m, isMap := v.(*msgpackx.Map)
+		if !isMap {
+			return fmt.Errorf("archive: item stream holds a %T, want a map", v)
+		}
+		it, err := item.DecodeItem(m)
+		if err != nil {
+			return err
+		}
+		return fn(it)
+	})
+}
+
+// RawItems calls fn for each item as the decoded msgpack value, before it becomes an Item.
+//
+// Decoding to an Item is lossy in one direction that matters for debugging: a key borge
+// does not know about is dropped. `debug dump-archive` exists to show what is *actually*
+// in the repository - including a field written by a newer borg, which is exactly the case
+// somebody reaches for the command to investigate - so it reads the stream through here.
+//
+// Returning ErrStopIteration from fn stops the iteration; that is not an error.
+func (a *Archive) RawItems(fn func(any) error) error {
 	ids, err := a.ItemStreamIDs()
 	if err != nil {
 		return err
@@ -195,15 +217,7 @@ func (a *Archive) Items(fn func(*item.Item) error) error {
 			if !ok {
 				break // the rest of this item is in the next chunk
 			}
-			m, isMap := v.(*msgpackx.Map)
-			if !isMap {
-				return fmt.Errorf("archive: item stream holds a %T, want a map", v)
-			}
-			it, err := item.DecodeItem(m)
-			if err != nil {
-				return err
-			}
-			if err := fn(it); err != nil {
+			if err := fn(v); err != nil {
 				if errors.Is(err, ErrStopIteration) {
 					return nil
 				}

@@ -107,6 +107,7 @@ var commands = []command{
 	{"analyze", "report where the repository's space goes", cmdAnalyze},
 	{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
 	{"version", "print the client and server versions", cmdVersion},
+	{"debug", "low-level repository inspection (dangerous)", cmdDebug},
 }
 
 // Run dispatches a command line. It never panics on bad input; every failure becomes an
