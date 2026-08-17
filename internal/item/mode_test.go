@@ -3,6 +3,7 @@
 package item
 
 import (
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -43,6 +44,9 @@ for a in sys.argv[1:]:
     print(stat.filemode(int(a)))
 `
 	cmd := exec.Command("python3", append([]string{"-c", script}, args...)...)
+	// No __pycache__ in the tree, and unbuffered so a failure's output is not lost. See
+	// AGENTS.md; every CPython invocation in this repository sets both.
+	cmd.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("python3: %v\n%s", err, out)

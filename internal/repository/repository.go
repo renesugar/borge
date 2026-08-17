@@ -308,6 +308,9 @@ func (r *Repository) IDString() string { return hex.EncodeToString(r.id) }
 // Version is the repository format version.
 func (r *Repository) Version() int { return r.version }
 
+// Path is where this repository lives on disk.
+func (r *Repository) Path() string { return r.path }
+
 // Store exposes the underlying object store, for the namespaces the repository does not
 // wrap (archives/, keys/, config/manifest).
 func (r *Repository) Store() *store.Store { return r.store }

@@ -199,8 +199,16 @@ func cmdCreate(e *Env, args []string) int {
 		e.errorf("create needs an archive name and at least one path")
 		return ExitError
 	}
-	name := fs.Arg(0)
+	name, err := e.expand(fs.Arg(0))
+	if err != nil {
+		return e.fail(err)
+	}
 	paths := fs.Args()[1:]
+
+	comm, err := e.expand(*comment)
+	if err != nil {
+		return e.fail(err)
+	}
 
 	compressor, err := compress.FromSpec(*compression)
 	if err != nil {
@@ -315,7 +323,7 @@ func cmdCreate(e *Env, args []string) int {
 	cwd, _ := os.Getwd()
 	meta, id, err := b.Save(archive.SaveOptions{
 		Name:        name,
-		Comment:     *comment,
+		Comment:     comm,
 		CommandLine: commandLine(args),
 		CWD:         cwd,
 	})

@@ -54,7 +54,11 @@ func cmdDelete(e *Env, args []string) int {
 	}
 	defer o.Close()
 
-	infos, err := o.manifest.Archives.List(sel.options())
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
+	infos, err := o.manifest.Archives.List(opts)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -119,7 +123,10 @@ func cmdUndelete(e *Env, args []string) int {
 	}
 	defer o.Close()
 
-	opts := sel.options()
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
 	opts.Deleted = true
 	infos, err := o.manifest.Archives.List(opts)
 	if err != nil {
@@ -166,7 +173,11 @@ func cmdRename(e *Env, args []string) int {
 		e.errorf("rename needs the old archive and the new name")
 		return ExitError
 	}
-	oldName, newName := fs.Arg(0), fs.Arg(1)
+	oldName := fs.Arg(0)
+	newName, err := e.expand(fs.Arg(1))
+	if err != nil {
+		return e.fail(err)
+	}
 
 	return e.rewriteArchive(common, oldName, func(meta *item.ArchiveItem) error {
 		meta.Name = newName

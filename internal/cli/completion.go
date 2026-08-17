@@ -131,6 +131,8 @@ func subcommandsOf(name string) []command {
 		return debugCommands()
 	case "benchmark":
 		return benchmarkCommands()
+	case "key":
+		return keyCommands()
 	}
 	return nil
 }
@@ -152,6 +154,13 @@ func describeCLI(e *Env) []cmdSpec {
 				Flags:   flagsOf(e, c.run, []string{sub.name}),
 				Archive: archiveTakingSubcommands[c.name+" "+sub.name],
 			})
+		}
+		// "help" takes a topic rather than a subcommand, but for a completion script the
+		// two are the same thing: a word from a fixed list in the first position.
+		if c.name == "help" {
+			for _, t := range helpTopics() {
+				spec.Sub = append(spec.Sub, cmdSpec{Name: t.name, Summary: t.summary})
+			}
 		}
 		out = append(out, spec)
 	}

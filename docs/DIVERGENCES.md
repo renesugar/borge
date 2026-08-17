@@ -355,3 +355,74 @@ stored `clevel` byte records the level the user asked for, decompression does no
 it, and borg reads borge's objects and vice versa. What it costs is compression the user
 asked for and did not get, which is worth being able to see rather than discovering from a
 repository that is larger than expected.
+
+## 17. Archive names are stored literally: no placeholder substitution
+
+**Stage 8 · not implemented · a gap, not a decision**
+
+borg substitutes placeholders in an archive name when the archive is created: `{now}`,
+`{utcnow}`, `{hostname}`, `{fqdn}`, `{user}`, `{pid}`, `{borgversion}`, and the
+`{now:%Y-%m-%d}` format form. borge stores the name exactly as given.
+
+So this, which is the standard borg cron idiom:
+
+```
+borge create -r REPO '{hostname}-{now:%Y-%m-%d}' ~
+```
+
+creates an archive literally called `{hostname}-{now:%Y-%m-%d}`.
+
+**Nothing warns.** Archive names need not be unique, so a nightly job would keep working
+and would simply accumulate archives all sharing one literal name; it surfaces the day
+somebody tries to name one of them. Retention still works, because `prune` sorts on the
+stored timestamp rather than on the name.
+
+The workaround is the shell:
+
+```
+borge create -r REPO "$(hostname)-$(date +%Y-%m-%d)" ~
+```
+
+Found while writing `borge help placeholders` — the topic was drafted describing borg's
+behaviour, because borg has the feature, and running the command showed borge does not.
+`TestHelpPlaceholdersTopicIsTrue` now checks the claim against the behaviour, so the topic
+cannot quietly become false when this is implemented.
+
+## 18. `repo-delete` does not remove a directory that holds anything else
+
+**Stage 8 · `internal/cli/repo_delete.go` · deliberate**
+
+borg's `repo-delete` calls `store.destroy()`, which removes the repository directory
+outright. borge removes only the namespaces a repository owns — `archives/`, `cache/`,
+`config/`, `index/`, `keys/`, `locks/`, `packs/` — and then removes the directory only if
+nothing else is left in it.
+
+If something else is there, the repository is still fully deleted, the leftover is named
+on stderr, and the exit code is **1** rather than 0.
+
+The case this protects: a repository created inside a directory that also holds other
+things. `borge repo-delete -r ~/backups` where the user also keeps notes in `~/backups`
+should cost them the backups they asked to delete and nothing else. The command is already
+the one irreversible operation in borge; widening its blast radius to "whatever else was
+in that directory" is not a reasonable default.
+
+The exit code is the visible part of the divergence: a script that deletes a repository in
+such a directory and checks `$?` will now see 1 where borg gave 0.
+
+## 19. `key import` defaults to where the repository's keys already are
+
+**Stage 8 · `internal/cli/key.go` · deliberate**
+
+Without `--key-location`, borg imports a key into the storage its key *class* defaults to,
+which for every encrypted mode is `repokey`. borge instead looks at where this
+repository's existing keys live and matches that, falling back to `repokey` when there are
+none to look at.
+
+The difference only shows on a repository whose keys are deliberately kept **outside** it.
+Importing a key there with borg's default puts a copy in `keys/` inside the repository —
+next to the data it protects, which is the arrangement the user chose a keyfile to avoid.
+Silently undoing that during a recovery, when the user is already having a bad day, is the
+wrong default.
+
+`--key-location repokey|keyfile` overrides it in both tools, and the two agree whenever it
+is given.

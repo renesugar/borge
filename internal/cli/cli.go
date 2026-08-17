@@ -23,10 +23,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/manifest"
+	"github.com/renesugar/borge/internal/placeholders"
 	"github.com/renesugar/borge/internal/repository"
+	"github.com/renesugar/borge/internal/version"
 )
 
 // Exit codes.
@@ -49,6 +52,14 @@ type Env struct {
 	// "borge completion" enumerates a command's options without keeping a second copy
 	// of them; see internal/cli/completion.go.
 	captureFlags func(*flag.FlagSet)
+
+	// placeholders are the {now}/{hostname} substitutions, resolved on first use.
+	placeholders     placeholders.Values
+	placeholdersOnce sync.Once
+
+	// prompted is a passphrase typed at the terminal, kept for the rest of this command
+	// so a second unlock does not ask again. Never written anywhere.
+	prompted *string
 }
 
 func (e *Env) lookup(name string) (string, bool) {
@@ -93,6 +104,7 @@ type command struct {
 func commands() []command {
 	return []command{
 		{"repo-create", "create a new repository", cmdRepoCreate},
+		{"repo-delete", "delete a repository and everything in it", cmdRepoDelete},
 		{"repo-list", "list the archives in a repository", cmdRepoList},
 		{"repo-info", "show information about a repository", cmdRepoInfo},
 		{"list", "list the contents of an archive", cmdList},
@@ -116,10 +128,12 @@ func commands() []command {
 		{"with-lock", "run a command with the repository lock held", cmdWithLock},
 		{"analyze", "report where the repository's space goes", cmdAnalyze},
 		{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
+		{"key", "manage the repository's keys", cmdKey},
 		{"version", "print the client and server versions", cmdVersion},
 		{"debug", "low-level repository inspection (dangerous)", cmdDebug},
 		{"benchmark", "measure this build's speed", cmdBenchmark},
 		{"completion", "print a shell completion script", cmdCompletion},
+		{"help", "explain patterns, selectors, placeholders, compression and the environment", cmdHelp},
 	}
 }
 
@@ -185,13 +199,54 @@ func newFlagSet(e *Env, name string) *flag.FlagSet {
 
 // resolveRepo works out which repository to act on.
 func (e *Env) resolveRepo(given string) (string, error) {
-	if given != "" {
-		return given, nil
+	path := given
+	if path == "" {
+		if v, ok := e.lookupBorg("REPO"); ok && v != "" {
+			path = v
+		}
 	}
-	if v, ok := e.lookupBorg("REPO"); ok && v != "" {
-		return v, nil
+	if path == "" {
+		return "", errors.New("no repository given; pass -r or set BORGE_REPO")
 	}
-	return "", errors.New("no repository given; pass -r or set BORGE_REPO")
+	// A repository path may carry placeholders, as borg's may: "-r /backups/{hostname}"
+	// is how one BORGE_REPO setting serves a fleet.
+	return e.expand(path)
+}
+
+// placeholderValues is the substitution set for this process, taken once.
+//
+// Once, because every placeholder in one command has to agree with the others: a name
+// built from {now} and {unixtime} must not straddle a second boundary, and two archives
+// created by one command must not be filed under two different days.
+func (e *Env) placeholderValues() placeholders.Values {
+	e.placeholdersOnce.Do(func() {
+		e.placeholders = placeholders.Default(version.Version)
+	})
+	return e.placeholders
+}
+
+// expand substitutes placeholders in a user-supplied string.
+//
+// An unknown placeholder is an error rather than a literal; see the package comment. The
+// affected arguments are the ones borg substitutes: archive names, comments, archive
+// selectors and the repository path.
+func (e *Env) expand(text string) (string, error) {
+	if !strings.ContainsAny(text, "{}") {
+		return text, nil // the overwhelmingly common case, and it cannot fail
+	}
+	return e.placeholderValues().Expand(text)
+}
+
+// expandAll is expand over a slice, for the repeatable options.
+func (e *Env) expandAll(texts []string) ([]string, error) {
+	out := make([]string, len(texts))
+	for i, t := range texts {
+		var err error
+		if out[i], err = e.expand(t); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // passphrase resolves the repository passphrase.
@@ -200,6 +255,9 @@ func (e *Env) resolveRepo(given string) (string, error) {
 // a command; those arrive with the write path, because a read-only command that hangs
 // waiting for a passphrase in a script is worse than one that says where to put it.
 func (e *Env) passphrase() string {
+	if e.prompted != nil {
+		return *e.prompted
+	}
 	if v, ok := e.lookupBorg("PASSPHRASE"); ok {
 		return v
 	}
@@ -226,12 +284,9 @@ func (e *Env) openRepo(path string, exclusive bool, ops ...manifest.Operation) (
 	if err != nil {
 		return nil, err
 	}
-	k, _, err := repo.Unlock(e.passphrase())
+	k, _, err := e.unlockWithPrompt(repo)
 	if err != nil {
 		repo.Close()
-		if errors.Is(err, key.ErrPassphraseWrong) {
-			return nil, fmt.Errorf("%w (set BORGE_PASSPHRASE or BORG_PASSPHRASE)", err)
-		}
 		return nil, err
 	}
 	m, err := manifest.Load(repo, k, ops...)

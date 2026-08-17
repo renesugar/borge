@@ -9,3 +9,11 @@
 coverage.out
 /tests/borg2/borg2
 /internal/*/testdata/fuzz/
+
+# Python bytecode. The repo runs CPython in three places - the borg 2 reference
+# interpreter, the fixture generators, and the differential tests that compare against
+# CPython's own strftime and stat - and every one of them is invoked with
+# PYTHONDONTWRITEBYTECODE=1 so these never appear. Ignored anyway: a stray __pycache__
+# committed into a Go repository is noise nobody looks at twice.
+__pycache__/
+*.py[cod]

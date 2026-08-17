@@ -37,9 +37,6 @@ declare -A deferred=(
     [webdav]="non-goal for 1.0 (PORTING_PLAN 0.6)"
     [serve]="stage 8 remote backends (PORTING_PLAN 0.6, 11): not yet implemented"
     [transfer]="non-goal for 1.0 from borg 1.x (PORTING_PLAN 0.6); borg2-to-borg2 transfer is NOT yet decided"
-    [key]="NOT IMPLEMENTED: the library exists and is gated (PORTING_PLAN 1.3) but no CLI command"
-    [repo-delete]="NOT IMPLEMENTED: no record anywhere in the plan"
-    [help]="NOT IMPLEMENTED: borg's extra help topics"
 )
 
 borg_commands() {
@@ -123,10 +120,13 @@ echo "absent, recorded:     $explained"
 echo "absent, unexplained:  $unexplained"
 
 # The recorded-but-not-done ones are listed again, because "recorded" is not "finished"
-# and a summary line of "0 unexplained" reads like completeness otherwise.
+# and a summary line of "0 unexplained" reads like completeness otherwise. Only the ones
+# that are still absent: an entry left in the table after the command was written would
+# otherwise report finished work as a gap.
 echo
 echo "Of the recorded absences, these are gaps rather than decisions:"
 for c in "${!deferred[@]}"; do
+    [ -n "${have[$c]:-}" ] && continue
     case "${deferred[$c]}" in
         NOT\ IMPLEMENTED*|*NOT\ yet\ decided*) printf '  %-14s %s\n' "$c" "${deferred[$c]}" ;;
     esac

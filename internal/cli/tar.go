@@ -55,7 +55,15 @@ func cmdImportTar(e *Env, args []string) int {
 		e.errorf("import-tar needs an archive name and an input file (or - for stdin)")
 		return ExitError
 	}
-	name, source := fs.Arg(0), fs.Arg(1)
+	source := fs.Arg(1)
+	name, err := e.expand(fs.Arg(0))
+	if err != nil {
+		return e.fail(err)
+	}
+	comm, err := e.expand(*comment)
+	if err != nil {
+		return e.fail(err)
+	}
 
 	compressor, err := compress.FromSpec(*compression)
 	if err != nil {
@@ -126,7 +134,7 @@ func cmdImportTar(e *Env, args []string) int {
 	status := ExitOK
 	st, id, err := archive.ImportTar(m, in, archive.ImportTarOptions{
 		Name:          name,
-		Comment:       *comment,
+		Comment:       comm,
 		ChunkerParams: params,
 		ChunkSeed:     chunkSeed,
 		Compressor:    compressor,

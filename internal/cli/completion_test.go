@@ -40,8 +40,8 @@ func TestCompletionSeesEveryCommandsFlags(t *testing.T) {
 	// The command groups build no FlagSet of their own; they dispatch straight to a
 	// subcommand. "completion" takes a shell and nothing else. Everything else has at
 	// least the repository flags, so an empty list means the probe stopped seeing them.
-	groups := map[string]bool{"debug": true, "benchmark": true}
-	noOptions := map[string]bool{"completion": true}
+	groups := map[string]bool{"debug": true, "benchmark": true, "key": true}
+	noOptions := map[string]bool{"completion": true, "help": true}
 	for _, c := range spec {
 		switch {
 		case groups[c.Name]:
@@ -176,7 +176,10 @@ func TestCompletionCoversEveryCommandGroup(t *testing.T) {
 		var out, errOut strings.Builder
 		e := &Env{Stdout: &out, Stderr: &errOut, Getenv: func(string) (string, bool) { return "", false }}
 		code := c.run(e, nil)
-		looksLikeGroup := code == ExitOK && strings.Contains(out.String(), "<command>")
+		// A group's usage line is "usage: borge <name> <command>". Matching "<command>"
+		// anywhere was too loose: "help" prints it while pointing at other commands.
+		looksLikeGroup := code == ExitOK &&
+			strings.Contains(out.String(), "usage: borge "+c.name+" <command>")
 		listed := subcommandsOf(c.name) != nil
 		if looksLikeGroup && !listed {
 			t.Errorf("%q looks like a command group but subcommandsOf does not know it, so its "+
@@ -267,6 +270,14 @@ func TestZshAndFishCompletionMentionEveryCommand(t *testing.T) {
 		// An option from deep in the table, to show the per-command options were emitted.
 		if !strings.Contains(script, "chunker-params") {
 			t.Errorf("the %s script has no per-command options", shell)
+		}
+		// help takes a topic rather than a subcommand, and the completion has to offer
+		// those too - they are a fixed list in the first position, which is exactly what a
+		// completion is for.
+		for _, topic := range helpTopicNames() {
+			if !strings.Contains(script, topic) {
+				t.Errorf("the %s script does not offer the %q help topic", shell, topic)
+			}
 		}
 	}
 

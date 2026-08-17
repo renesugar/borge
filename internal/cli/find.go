@@ -73,7 +73,10 @@ func cmdFind(e *Env, args []string) int {
 
 	// Newest first unless asked otherwise: see the note above. listSelectors.reverse is
 	// relative to the manifest's own oldest-first order, so it is inverted here.
-	opts := sel.options()
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
 	opts.Reverse = !opts.Reverse
 	infos, err := o.manifest.Archives.List(opts)
 	if err != nil {

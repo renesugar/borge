@@ -66,7 +66,10 @@ func cmdAnalyze(e *Env, args []string) int {
 		return ExitError
 	}
 
-	opts := sel.options()
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
 	if *byName && !opts.IsZero() {
 		// The decomposition is inherently repository-wide: "shared" and "unreferenced" can
 		// only be decided by looking at every archive, so a filter would silently change

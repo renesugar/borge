@@ -14,6 +14,15 @@
 
 set -euo pipefail
 
+# PYTHONDONTWRITEBYTECODE keeps __pycache__ out of both this repository and the borg
+# checkout that gets pip-installed in editable mode - the latter is somebody else's
+# working tree and borge has no business leaving build droppings in it.
+# PYTHONUNBUFFERED so progress appears immediately when this script's output is
+# redirected to a log; without it CPython block-buffers stdout and a long install looks
+# stalled. See AGENTS.md.
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONUNBUFFERED=1
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 

@@ -121,12 +121,9 @@ func (e *Env) openRepoRaw(path string, exclusive bool) (*openedRaw, error) {
 	if err != nil {
 		return nil, err
 	}
-	k, _, err := repo.Unlock(e.passphrase())
+	k, _, err := e.unlockWithPrompt(repo)
 	if err != nil {
 		repo.Close()
-		if errors.Is(err, key.ErrPassphraseWrong) {
-			return nil, fmt.Errorf("%w (set BORGE_PASSPHRASE or BORG_PASSPHRASE)", err)
-		}
 		return nil, err
 	}
 	ro, err := repoobj.New(k)

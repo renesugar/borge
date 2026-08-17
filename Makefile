@@ -96,7 +96,8 @@ upstream-licenses:
 ## item-fixtures: regenerate the item differential fixtures from the pinned borg
 item-fixtures:
 	@test -x .venv-borg2/bin/python || { echo "run 'make borg2' first"; exit 1; }
-	.venv-borg2/bin/python internal/item/testdata/gen_fixtures.py \
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+		.venv-borg2/bin/python internal/item/testdata/gen_fixtures.py \
 		> internal/item/testdata/fixtures.txt
 	@echo "regenerated internal/item/testdata/fixtures.txt"
 
@@ -106,7 +107,8 @@ item-fixtures:
 # encoding changed, which is a format change, not a test update.
 msgpack-fixtures:
 	@test -x .venv-borg2/bin/python || { echo "run 'make borg2' first"; exit 1; }
-	.venv-borg2/bin/python internal/msgpackx/testdata/gen_fixtures.py \
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+		.venv-borg2/bin/python internal/msgpackx/testdata/gen_fixtures.py \
 		> internal/msgpackx/testdata/fixtures.txt
 	@echo "regenerated internal/msgpackx/testdata/fixtures.txt"
 

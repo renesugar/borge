@@ -47,7 +47,26 @@ echo "mkbundle: collecting evidence for stage '$STAGE'"
     echo "go:             $(go version)"
     if [ -x "$ROOT/tests/borg2/borg2" ]; then
         echo "borg2:          $("$ROOT/tests/borg2/borg2" --version 2>&1 | head -1)"
-        echo "borg2 commit:   $(cat "$ROOT/tests/borg2/borg-commit.txt" 2>/dev/null || echo '-')"
+        echo "borg2 pinned:   $(head -1 "$ROOT/tests/borg2/borg-commit.txt" 2>/dev/null || echo '-')"
+        # The version string and the recorded pin are both baked in at install time, so
+        # neither notices the borg checkout moving underneath. On 2026-08-17 it moved:
+        # the source went to a newer commit while the compiled Cython extension stayed
+        # behind, and "borg --version" happily kept reporting the pinned commit it was
+        # no longer running. An evidence bundle that records a borg version it did not
+        # actually test against is worse than one that records nothing, so the working
+        # tree's real HEAD is read here and a mismatch is stated loudly.
+        BORG_SRC="$(sed -n 's/^# source:  *//p' "$ROOT/tests/borg2/borg-commit.txt" 2>/dev/null || true)"
+        if [ -n "$BORG_SRC" ] && [ -d "$BORG_SRC/.git" ]; then
+            actual="$(git -C "$BORG_SRC" rev-parse HEAD 2>/dev/null || echo '<unknown>')"
+            pinned="$(head -1 "$ROOT/tests/borg2/borg-commit.txt" 2>/dev/null)"
+            echo "borg2 actual:   $actual"
+            dirty="$(git -C "$BORG_SRC" status --porcelain 2>/dev/null | head -5)"
+            [ -n "$dirty" ] && echo "borg2 tree:     MODIFIED - $(echo "$dirty" | tr '\n' ' ')"
+            if [ "$actual" != "$pinned" ]; then
+                echo "borg2 WARNING:  the borg checkout is NOT at the pinned commit;"
+                echo "                every differential result in this bundle is suspect"
+            fi
+        fi
     else
         echo "borg2:          <not built>"
     fi

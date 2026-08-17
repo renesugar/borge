@@ -106,7 +106,11 @@ func cmdCheck(e *Env, args []string) int {
 		}
 	}
 	if !*repositoryOnly {
-		if err := c.checkArchives(sel.options()); err != nil {
+		opts, err := sel.options(e)
+		if err != nil {
+			return e.fail(err)
+		}
+		if err := c.checkArchives(opts); err != nil {
 			return e.fail(err)
 		}
 	}

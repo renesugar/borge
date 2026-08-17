@@ -77,7 +77,11 @@ func cmdPrune(e *Env, args []string) int {
 	}
 	defer o.Close()
 
-	infos, err := o.manifest.Archives.List(sel.options())
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
+	infos, err := o.manifest.Archives.List(opts)
 	if err != nil {
 		return e.fail(err)
 	}

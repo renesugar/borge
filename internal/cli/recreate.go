@@ -107,7 +107,10 @@ func cmdRecreate(e *Env, args []string) int {
 		filter = func(it *item.Item) bool { return matcher.Match(it.Path) }
 	}
 
-	selector := sel.options()
+	selector, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
 	if selector.Match == nil && fs.NArg() > 0 {
 		selector.Match = []string{fs.Arg(0)}
 	}

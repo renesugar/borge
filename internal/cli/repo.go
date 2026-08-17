@@ -80,7 +80,21 @@ func (s *listSelectors) register(fs *flag.FlagSet) {
 	fs.BoolVar(&s.deleted, "deleted", false, "list soft-deleted archives instead")
 }
 
-func (s *listSelectors) options() manifest.ListOptions {
+// options builds the listing options, substituting placeholders in the selector as borg
+// does for --match-archives: "borge delete -a 'sh:{hostname}-*'" is the point of it.
+//
+// It takes the Env and returns an error for that one reason. The alternative - expanding
+// at each call site - is eight places to remember, and the ninth would be the bug.
+func (s *listSelectors) options(e *Env) (manifest.ListOptions, error) {
+	match, err := e.expand(s.match)
+	if err != nil {
+		return manifest.ListOptions{}, err
+	}
+	s.match = match
+	return s.rawOptions(), nil
+}
+
+func (s *listSelectors) rawOptions() manifest.ListOptions {
 	opts := manifest.ListOptions{
 		First:   s.first,
 		Last:    s.last,
@@ -121,7 +135,11 @@ func cmdRepoList(e *Env, args []string) int {
 	}
 	defer o.Close()
 
-	infos, err := o.manifest.Archives.List(sel.options())
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
+	infos, err := o.manifest.Archives.List(opts)
 	if err != nil {
 		return e.fail(err)
 	}

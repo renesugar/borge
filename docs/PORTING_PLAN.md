@@ -1,7 +1,11 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark` and `completion` done: **28 of borg's 36 commands**. `key`, `repo-delete` and `help` are still missing, and the remote backends (`serve`, sftp/rest/s3/rclone) with them. `mount`/`umount`/`webdav` are §0.6 non-goals.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark`, `completion`, `key`, `repo-delete` and `help` done: **31 of borg's 36 commands**, with `tests/evidence/command-coverage.sh` as the gate. What remains: `serve` and the remote backends, and a decision on borg2-to-borg2 `transfer`. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified.** `mount`/`umount`/`webdav` are §0.6 non-goals.**
 Last updated: 2026-08-17.
+
+`AGENTS.md` at the repository root orients a new agent on how to build, test and check
+the repo, and on the working habits that have actually caught bugs here. Read it before
+touching anything; read this plan for why the code is the shape it is.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
 be edited as facts are learned — when a stage's reality diverges from what is written
@@ -44,6 +48,30 @@ Why borg 2 and not the borg 1.2.8 installed at `/usr/bin/borg`:
   `golang.org/x/crypto`. Borg 1's AES-CTR + HMAC-SHA-256 envelope with the manual
   nonce ledger does not.
 - The port source of truth is the checkout that exists on this machine.
+
+> **The pin came loose on 2026-08-17** and it is worth recording how it showed up, because
+> the symptom pointed at borge. The checkout at `/home/renes/projects/borg` moved from
+> `114bd1e9` to `aa39d832` at 20:33 UTC. The virtualenv installs borg in *editable* mode, so
+> the new Python source was picked up immediately while the compiled Cython extensions were
+> not rebuilt — and `borg repo-info` began failing with
+> `ImportError: cannot import name hostid` from `platform/posix.pyx`. Every differential
+> test failed at once, in borge's test output, with a traceback inside borg.
+>
+> Two things made it harder to see than it should have been. `borg --version` still
+> reported `2.0.0b23.dev377+g114bd1e94` — setuptools_scm baked that string at install time,
+> so it names the pinned commit it is no longer running. And `tests/borg2/borg-commit.txt`
+> is likewise written once at setup. **Neither notices the checkout moving.**
+>
+> `mkbundle.sh` now reads the borg working tree's real `HEAD`, records it as
+> `borg2 actual:`, notes a modified tree, and prints a loud warning when it differs from the
+> pin — an evidence bundle that records a borg version it did not actually test against is
+> worse than one that records nothing. The stage-7-clean bundle of 19:26 UTC predates the
+> drift by 66 minutes and is unaffected.
+>
+> Restoring the pin is `git -C /home/renes/projects/borg checkout 114bd1e9` followed by
+> `make borg2`. Per this section, moving to a newer upstream commit is a deliberate,
+> reviewed rebase with its own diff review — not something to absorb by rebuilding at
+> whatever HEAD happens to be.
 
 **Consequence for testing:** interop testing needs a borg 2 interpreter, which is not
 `/usr/bin/borg` (1.2.8). Stage 0 builds one in a pinned virtualenv. The existing
@@ -1325,17 +1353,50 @@ Everything needed for feature parity, once correctness is established.
 > Current state: 28 implemented, 8 absent with a recorded reason, 0 unexplained. Of the
 > eight, three are non-goals (`mount`, `umount`, `webdav`, §0.6) and five are work:
 
-- **`key`** — export, import, change-passphrase, add, remove, paperkey. The library is
-  done and was gated at §1.3, including the byte-identical paper key; only the CLI
-  command is missing. This is the largest of the gaps and the most surprising, since
-  §1.3's gate text names `borge key export` as passing — it passes as a *library* test.
-- **`repo-delete`** — deleting a repository. Recorded nowhere in this plan before now.
-- **`help`** — borg's extra help topics (`patterns`, `match-archives`, `placeholders`,
-  `compression`). Small, and the topics are documentation borge has to write anyway.
 - **`serve`** and the remote store backends: `sftp`, `rest`, `s3`, `rclone`.
 - **`transfer`** between two borg 2 repositories. §0.6 rules out transfer *from borg 1.x*
   because it depends on the borg 1 reader; it says nothing about borg 2 to borg 2, which
   is a decision still to make rather than one already taken.
+- **Archive-name placeholders**, which are not a command and so are invisible to the
+  coverage gate — see DIVERGENCES #17 and the note below.
+
+> **`key`, `repo-delete` and `help` done 2026-08-17**, closing the three gaps the coverage
+> gate found.
+>
+> **`key`** is seven subcommands over a library that was already finished and gated at
+> §1.3: `list`, `export`, `import`, `change-passphrase`, `change-location`, `add`,
+> `remove`. Every one is checked against borg in both directions, because a key is the one
+> thing in a repository that cannot be regenerated — a borge-written key borg cannot read
+> is data loss with the repository still intact. `key list` output is byte-identical to
+> borg's; so is the plain export and the QR HTML page; the paper key's *data* lines are
+> identical and only its instruction line differs. The paper key is tested as the last
+> resort it is: export it, take the keyfile away, confirm borg can no longer open the
+> repository, restore from the printout, confirm borg can.
+>
+> Two commands need a *second* passphrase, and borge does not prompt anywhere — so
+> `BORGE_NEW_PASSPHRASE` is required and its absence is an error. Proceeding with an empty
+> passphrase would leave a repository unprotected while reporting success. **Prompting is
+> still missing across the whole CLI** and is now the most user-visible gap; it needs
+> terminal handling and belongs in its own change.
+>
+> **`repo-delete`** is the only irreversible command in borge, so most of its tests are
+> about what it refuses. It will not touch a path that is not a repository — `borge
+> repo-delete -r ~` must not be a way to lose a home directory to a typo — and it removes
+> only the namespaces a repository owns, leaving (and naming) anything else in the
+> directory. DIVERGENCES #18.
+>
+> **`help`** carries borg's five topics rewritten for borge, because a copy would be wrong
+> in every one: different environment variables, fewer chunkers, coarser compression
+> levels. They are pinned by `TestHelpEnvironmentTopicListsEveryVariable`, which scans the
+> source for the variables the code reads and fails if the topic omits one — **or documents
+> one nothing reads**. It found two on its first run (`BORGE_CONFIG_DIR`, `BORGE_BASE_DIR`).
+>
+> **And the placeholders topic was wrong when first written.** It was drafted from borg's,
+> describing `{now}` and `{hostname}` substitution — and borge has none: `borge create
+> '{hostname}-{now}'` creates an archive with that literal name, silently. Caught by
+> running the command rather than by review. The topic now says so, and
+> `TestHelpPlaceholdersTopicIsTrue` checks the claim against the behaviour so it cannot
+> quietly become false once placeholders are implemented.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.
 
@@ -1456,6 +1517,122 @@ DIVERGENCES #16.
 Two of these three are ordinary bugs with ordinary fixes; only the first is an argument for
 cgo. None were visible from the interop gate, which is the point of having stage 9 at all.
 
+### 12.2 Can borge be fast without cgo? Measured 2026-08-17
+
+The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
+there? Measured on this machine (i5-9300H, AVX2, no AVX-512), with the scratch benchmarks
+described in each row.
+
+**Three of the four largest wins are borge's own bugs, not missing libraries.**
+
+| finding | measured | fix | needs cgo |
+|---|---|---|---|
+| a fresh zstd encoder per chunk | **183.7 → 871.8 MB/s (4.7x)** | reuse one encoder | no |
+| a fresh chunker per file | 1.75–4.35 ms per file | `Reset(io.Reader)` | no |
+| OCB's byte-at-a-time XOR | 50.2 → 72.6 MB/s (1.45x) | `crypto/subtle.XORBytes` | no |
+| OCB's per-call AES ceiling | capped at ~154 MB/s | batched AES | no, but needs assembly |
+
+**1. `compress.Zstd.Compress` calls `zstd.NewWriter` on every chunk.** A klauspost encoder
+allocates window buffers and starts goroutines at construction; the library is designed to
+have one encoder reused, and `EncodeAll` on a reused encoder is safe for concurrent use.
+Reusing it is 4.7x on a 2 MiB buffer and the output is unchanged. This is the single
+largest win available and the cheapest to take. It also explains the CLI benchmark's
+`zstd,3` at 26.1 MB/s against borg's 120.8: with 10 MiB split into small pieces,
+construction dominated entirely.
+
+**2. The chunker, already recorded in §12.1.** Same shape of bug: per-item construction of
+something meant to be built once.
+
+**3. OCB's `xorBytes` is a byte loop**, called three times per 16-byte block.
+`crypto/subtle.XORBytes` is assembly on every architecture Go supports. Verified
+byte-identical against the current implementation across the block-boundary cases.
+
+**4. And then OCB hits a wall that is not borge's fault.** A bare
+`cipher.Block.Encrypt` on one 16-byte block costs **103.6 ns** — about 154 MB/s — because
+Go's single-block API cannot pipeline AES-NI, whose instructions have ~4-cycle latency and
+1-cycle throughput. Stdlib AES-GCM reaches **560 MB/s** on the same CPU precisely because
+its assembly does eight blocks at once. So *any* OCB written against `cipher.Block` is
+capped near 154 MB/s, against borg's OpenSSL-backed 860 MB/s.
+
+Breaking that ceiling in pure Go means a batched AES-ECB primitive, which the standard
+library does not expose. The options, in increasing order of commitment: generate AES-NI /
+ARMv8-crypto assembly with `mmcloughlin/avo`; adopt a third-party pure-Go AES exposing a
+bulk API; or reconsider the default mode (see §12.3).
+
+**What is not a problem.** `lukechampine.com/blake3`, which borge already uses, measured
+**930 MB/s at 2 MiB and 1199 MB/s at 64 MiB against `zeebo/blake3`'s 724 and 708** — the
+suggested replacement is 1.3–1.7x *slower* here, despite advertising wider SIMD coverage,
+because this CPU has AVX2 and not AVX-512. Digests are identical, so the swap would be
+safe; it would also be a regression. Re-measure before adopting it for an ARM or AVX-512
+target rather than taking the claim.
+
+**The remaining gap to borg is parallelism, not implementation quality.** borg
+multi-threads BLAKE3 above a size threshold and hands zstd its own thread pool; borge is
+serial everywhere. That is what step 2 below already exists to fix, and fixing it lifts
+hashing, compression and encryption together rather than one at a time.
+
+### 12.3 Desktop and mobile
+
+The goal: a laptop or phone app points borge at a directory — possibly a cloud mount — and
+writes a backup to the cloud or a USB drive. What that needs, and where borge stands:
+
+- **No cgo.** Already true: `CGO_ENABLED=0 go build ./...` succeeds today, and the port
+  reaches the OS through `golang.org/x/sys/unix` rather than through C. This is what makes
+  `android/arm64` and `ios/arm64` cross-compilation a `go build` away, and it is worth
+  protecting — a cgo AES would cost exactly this property. See §12.4.
+- **Encryption mode matters more on ARM than on x86.** ChaCha20-Poly1305 already measures
+  332 MB/s against borg's 435 — 1.3x, because Go's implementation is assembly end to end —
+  while AES-OCB is 17x behind. On a phone, ChaCha20-Poly1305 is the better default
+  regardless of borge's OCB work, and borge is *already* near parity there. **This makes the
+  mobile question largely independent of the OCB ceiling.**
+- **Memory has to be bounded.** The pack writer buffers whole packs, the chunk index is
+  held in memory, and `analyze` walks every archive. A phone needs `BORGE_PACK_MAX_SIZE`
+  and an index that can spill. Not yet measured; it belongs in this stage's scenarios.
+- **High-latency storage is already exercised.** The stage 7 Google Drive corpus runs over
+  an rclone mount where a single object write measured 2.7 s, and the gate passes there.
+  That is the same I/O shape a phone writing to cloud storage sees.
+
+None of this is blocked on a C dependency. The honest summary: **borge on mobile is a
+memory-bounding and packaging question, not a cryptography question**, provided the default
+mode is ChaCha20-Poly1305.
+
+### 12.4 The cgo decision, restated with numbers
+
+§0.4 allows a cgo-gated implementation only when measurement justifies it. It now nearly
+does for one thing and one thing only — AES-OCB — and even there the case is weak:
+
+- the pure-Go fixes above are worth 4.7x, 1.45x and a per-file millisecond count, and cost
+  nothing but the edit;
+- parallelism is worth more than any single primitive;
+- ChaCha20-Poly1305, at 1.3x, is already a reasonable default and the *right* default on
+  mobile;
+- and a cgo dependency forfeits the cross-compilation property §12.3 depends on.
+
+**Recommendation: take the pure-Go fixes and the pipeline first, then re-measure.** If
+AES-OCB is still the bottleneck for users who need that specific mode, write batched AES-NI
+with `avo` — pure Go assembly, no C toolchain, no loss of cross-compilation. BearSSL, named
+in the references, is a C library and would forfeit exactly what §12.3 needs.
+
+### 12.5 The suggested references, checked
+
+Claims worth checking before acting on them. Verdicts are from this machine and this
+repository, not from the descriptions.
+
+| claim | verdict |
+|---|---|
+| Go can replace borg's `platform/` directory without cgo | **Confirmed, and already done.** `CGO_ENABLED=0 go build ./...` succeeds. ACLs, xattrs and file flags go through `golang.org/x/sys/unix` directly. |
+| `github.com/pkg/xattr` is needed for extended attributes | **Not needed.** borge calls `unix.Lgetxattr`/`Lsetxattr` directly — one fewer dependency than suggested. |
+| `unix.SyncFileRange`, `os/user` cover the rest | Correct; both are in use or available. |
+| `zeebo/blake3` is faster (AVX-512/AVX2/SVE2/NEON) | **False here.** 1.3–1.7x *slower* than the incumbent on AVX2 hardware. Digests match, so the swap is safe but would regress. Re-measure per target. |
+| `mmcloughlin/avo` for generating x86 assembly | **The right tool** if borge writes batched AES-NI. Pure Go, no C toolchain, keeps cross-compilation. |
+| `Yawning/bsaes` (bitsliced constant-time AES) | Relevant for constant-time guarantees and for CPUs *without* AES instructions; it is slower than AES-NI, so not a speedup on the targets measured. |
+| BearSSL | A C library: cgo, and forfeits the cross-compilation §12.3 depends on. |
+| `ProtonMail/go-crypto` (OpenPGP fork of x/crypto) | Not applicable; borge uses no OpenPGP. |
+
+The headline claim — that a Go port needs no C for the platform layer — is not just
+plausible, it is the state the port is already in. The reference is if anything
+conservative about how few dependencies that takes.
+
 Then, in order:
 
 0. **Fix the chunker-per-file construction** (finding 2). It is a bug, not a tuning
@@ -1505,8 +1682,75 @@ behind an explicit repository version bump and a documented migration.
    speed versus lz4-class options.
 4. Any further on-disk changes the Stage 9 profiles justify.
 
+### 13.1 borg quirks to fix once compatibility is lifted
+
+Until this stage, borge reproduces borg's behaviour including its bugs — a port that
+"fixes" one silently is a port whose output no longer matches, which is the one thing the
+interop gate exists to prevent. Each of these is a place where the compatible behaviour is
+worse than the obvious one. The list is collected here so that lifting the constraint is a
+review of known items rather than a fresh audit.
+
+**Reproduced bugs, to be corrected:**
+
+- **`shellpattern.translate`'s vacuous guard.** borg's `(`, `|` and `)` passthrough checks
+  `pat[i-1] != "\\"` *after* `i` has already advanced, so the guard always passes and
+  `\(` becomes a backslash plus a group opener rather than a literal parenthesis. borge
+  reproduces it (see §6 and `internal/patterns`). A user cannot currently match a filename
+  containing a literal `(` with an `sh:` pattern. Fixing it changes which files a pattern
+  selects, which is why it waits.
+- **`stat.filemode` renders an unknown file type as `?`.** borg's C `_stat` and its
+  pure-Python fallback disagree on that character; borge reproduces the C one because that
+  is the one that runs. Cosmetic, but it is a difference between borge's output and its own
+  documentation.
+
+**Already fixed, recorded so they are not "corrected" back:**
+
+- **borg's `RobustUnpacker` is quadratic.** It rescans its whole buffer on every `feed`,
+  so resynchronising after damage costs O(n²) in the buffered bytes. borge keeps a scan
+  offset and is careful at the buffer's end instead — a provisional rejection near the end
+  is re-examined when more data arrives rather than skipped — and stays linear. See
+  `internal/archive/robust.go`. This is the quadratic behaviour worth naming: it is in the
+  *repair* path rather than the ordinary restore path, and borge does not have it.
+- **borge's `debug search-repo-objs` clamps two negative slice indices** that Python reads
+  as offsets from the end, so it does not blank the context before a hit or double-report
+  one-byte terms. DIVERGENCES #13.
+
+**Not bugs, but constraints worth revisiting:**
+
+- **Restore is lossy in borg's own terms.** The stage 5 gate compares borge's extraction
+  against *borg's*, not against the original tree, precisely because borg's restore does
+  not reproduce everything it stored — `bsdflags` are read and preserved but never applied
+  (DIVERGENCES #8), and `--sparse` restores holes only at chunk granularity
+  (DIVERGENCES #9). Once compatibility is lifted, "restore reproduces the source" becomes
+  an achievable gate rather than an aspiration.
+- **Item decoding is lossy for unknown keys** at the `Item` struct boundary, which is why
+  `debug dump-archive` reads the raw msgpack instead. A format borge owns can make the
+  round trip total.
+
+### 13.2 Large directories must not slow restore down
+
+This is the requirement the project brief opens with, restated as a gate rather than an
+aspiration: **restoring a directory of 118,866 files must not cost more per file than
+restoring a directory of 100.**
+
+borg reads a backup sequentially and recreates the tree as it goes, the way `tar -x` does.
+Anything worse than linear in that path defeats the intent. What is known so far:
+
+- The **directory-attribute stack** in `internal/archive/extract.go` is O(1) amortised: it
+  pops a directory when the next path leaves it, rather than searching. It does allocate a
+  string per item for the prefix comparison, which is 118,866 allocations on the
+  pathological corpus and trivially removable.
+- The **chunker-per-file construction** (§12.1) is a per-file millisecond cost on the
+  *create* side, worth ~3.5 minutes on that corpus alone.
+- **Restore-side ordering** is item 1 above and is the one with real headroom.
+
+Stage 9 measures all three before anything here changes the format. The point of writing
+them down together is that only one of them needs a format change, and it is not the
+expensive one.
+
 **Gate:** a migration path exists and is tested (borge reads the old format, converts,
-verifies); the change is justified by benchmark JSON in the evidence bundle.
+verifies); the change is justified by benchmark JSON in the evidence bundle; and the
+pathological-directory scenario shows per-file restore cost flat against directory size.
 
 ---
 
