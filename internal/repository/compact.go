@@ -312,3 +312,24 @@ func mustHex(s string) []byte {
 func isNotFound(err error) bool {
 	return err != nil && (errors.Is(err, store.ErrObjectNotFound) || errors.Is(err, ErrObjectNotFound))
 }
+
+// RebuildChunkIndex discards the stored index and rebuilds it by reading every pack.
+//
+// This is what makes a repair trustworthy. The index is a cache, and a cache that
+// disagrees with the packs is worse than no cache: a repair working from it would decide
+// what to fix against a picture of the repository that is not true. Reading every pack is
+// slow, which is exactly why the ordinary read path does not do it.
+func (r *Repository) RebuildChunkIndex() error {
+	if err := r.Flush(); err != nil {
+		return err
+	}
+	chunks, err := BuildChunkIndex(r.store, true)
+	if err != nil {
+		return err
+	}
+	r.chunks = chunks
+	if r.packWriter != nil {
+		r.packWriter.index = chunks
+	}
+	return r.WriteFullChunkIndex()
+}

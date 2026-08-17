@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
-// This file is a Go port of the verification half of borg's src/borg/archiver/check_cmd.py
-// and ArchiveChecker in src/borg/archive.py. The repair half is stage 8.
+// This file is a Go port of borg's src/borg/archiver/check_cmd.py and ArchiveChecker in
+// src/borg/archive.py.
 // Original work Copyright (C) 2015-2026 The Borg Collective; Copyright (C) 2010-2014 Jonas Borgström.
 // Licensed under the BSD 3-Clause License, see licenses/borg/LICENSE.
 // Modifications and Go translation Copyright (C) 2026 The borge authors,
@@ -37,9 +37,16 @@ import (
 // invariant "id == hash(plaintext)" is re-established for the whole repository, which is
 // what makes deduplication trustworthy.
 //
-// Repair is not implemented: borge reports what is wrong and changes nothing. A check
-// that writes is a much more dangerous thing than one that reads, and it belongs with the
-// rest of stage 8.
+// # --repair
+//
+// A check that writes is a far more dangerous thing than one that reads, so repair is
+// opt-in, has a --dry-run, and never removes the original of anything it rewrites: a
+// repaired archive is written alongside and the original soft-deleted, so somebody who
+// wants to try harder still can.
+//
+// It also rebuilds the chunk index from the packs first. An index that disagrees with what
+// the packs actually hold would make repair "fix" archives against a fiction, which is a
+// worse outcome than leaving them broken.
 func cmdCheck(e *Env, args []string) int {
 	fs := newFlagSet(e, "check")
 	var common commonFlags
@@ -49,13 +56,11 @@ func cmdCheck(e *Env, args []string) int {
 	verifyData := fs.Bool("verify-data", false, "re-hash every chunk and compare against its id")
 	repositoryOnly := fs.Bool("repository-only", false, "check the repository, not the archives")
 	archivesOnly := fs.Bool("archives-only", false, "check the archives, not the repository")
-	repair := fs.Bool("repair", false, "not implemented; borge check never writes")
+	repair := fs.Bool("repair", false, "write corrections into the repository")
+	findLost := fs.Bool("find-lost-archives", false,
+		"scan every object for archives whose directory entry is missing")
+	dryRun := fs.Bool("dry-run", false, "with --repair, report what would be changed and change nothing")
 	if err := fs.Parse(args); err != nil {
-		return ExitError
-	}
-	if *repair {
-		e.errorf("borge check --repair is not implemented (docs/PORTING_PLAN.md stage 8); " +
-			"use borg check --repair, or run borge check to see what is wrong")
 		return ExitError
 	}
 	if *repositoryOnly && *archivesOnly {
@@ -73,10 +78,30 @@ func cmdCheck(e *Env, args []string) int {
 	}
 	defer o.Close()
 
-	c := &checker{env: e, opened: o, verifyData: *verifyData, verbose: common.verbose}
+	c := &checker{
+		env: e, opened: o, verifyData: *verifyData, verbose: common.verbose,
+		repair: *repair, dryRun: *dryRun,
+	}
+
+	if *repair && !*dryRun {
+		// Repair rewrites archives and the chunk index. Rebuilding the index from the
+		// packs first is what makes that safe: an index that disagrees with what the packs
+		// actually hold would make repair "fix" archives against a fiction.
+		fmt.Fprintln(e.Stdout, "rebuilding the chunk index from the packs...")
+		if err := o.repo.RebuildChunkIndex(); err != nil {
+			return e.fail(err)
+		}
+	}
 
 	if !*archivesOnly {
 		if err := c.checkRepository(); err != nil {
+			return e.fail(err)
+		}
+	}
+	if *findLost {
+		if _, err := archive.FindLostArchives(o.manifest, *repair && !*dryRun, func(msg string) {
+			c.problem("%s", msg)
+		}); err != nil {
 			return e.fail(err)
 		}
 	}
@@ -86,6 +111,16 @@ func cmdCheck(e *Env, args []string) int {
 		}
 	}
 
+	if *repair && !*dryRun && c.repaired > 0 {
+		if err := o.manifest.Write(); err != nil {
+			return e.fail(err)
+		}
+	}
+
+	if c.repaired > 0 {
+		fmt.Fprintf(e.Stdout, "%d archive(s) repaired; the originals are soft-deleted and can "+
+			"still be inspected until a compaction runs.\n", c.repaired)
+	}
 	if c.errors == 0 {
 		fmt.Fprintf(e.Stdout, "Archive and repository consistency check complete, no problems found.\n")
 		if common.verbose {
@@ -103,11 +138,14 @@ type checker struct {
 	opened     *opened
 	verifyData bool
 	verbose    bool
+	repair     bool
+	dryRun     bool
 
 	objects    int
 	archives   int
 	references int
 	errors     int
+	repaired   int
 }
 
 func (c *checker) problem(format string, args ...any) {
@@ -163,6 +201,10 @@ func (c *checker) checkRepository() error {
 }
 
 // checkArchives walks every archive and confirms everything it references exists.
+//
+// With --repair, an archive that cannot be read straight through is re-read robustly and
+// rewritten from what survived. That does not bring data back - it stops one lost chunk
+// from making everything after it unreadable, which is a different and achievable thing.
 func (c *checker) checkArchives(opts manifest.ListOptions) error {
 	infos, err := c.opened.manifest.Archives.List(opts)
 	if err != nil {
@@ -177,8 +219,47 @@ func (c *checker) checkArchives(opts manifest.ListOptions) error {
 		c.archives++
 		if !info.Exists {
 			c.problem("archive %s: %s", hex.EncodeToString(info.ID)[:8], info.Problem)
+			if c.repair && !c.dryRun {
+				// The pointer names an object that is not there, so it names nothing. It
+				// is soft-deleted rather than removed: borg deletes it outright, but a
+				// soft delete leaves it recoverable if the object turns up again - a pack
+				// restored from another copy, say - and costs only a directory entry.
+				if err := c.opened.manifest.Archives.Delete(info.ID); err != nil {
+					return err
+				}
+				c.repaired++
+				fmt.Fprintf(c.env.Stdout,
+					"removed the directory entry for %s, whose archive object is missing\n",
+					hex.EncodeToString(info.ID)[:8])
+			}
 			continue
 		}
+
+		if c.repair {
+			report, err := archive.Repair(c.opened.manifest, info.ID, archive.RepairOptions{
+				DryRun:    c.dryRun,
+				OnProblem: func(msg string) { c.problem("%s", msg) },
+			})
+			if err != nil {
+				c.problem("archive %s (%s): %v", hex.EncodeToString(info.ID)[:8], info.Name, err)
+				continue
+			}
+			c.references += report.ItemsKept
+			if report.Repaired {
+				c.repaired++
+				fmt.Fprintf(c.env.Stdout, "repaired %s: kept %d item(s), %d stream chunk(s) lost, "+
+					"new archive %s\n",
+					info.Name, report.ItemsKept, report.StreamChunksMissing,
+					hex.EncodeToString(report.NewID)[:8])
+			} else if report.Damaged() && c.dryRun {
+				fmt.Fprintf(c.env.Stdout, "would repair %s: %d item(s) readable, %d stream chunk(s) lost\n",
+					info.Name, report.ItemsKept, report.StreamChunksMissing)
+			} else if c.verbose {
+				fmt.Fprintf(c.env.Stdout, "archive %s: ok\n", info.Name)
+			}
+			continue
+		}
+
 		a, err := archive.Open(c.opened.manifest, info.ID)
 		if err != nil {
 			c.problem("archive %s (%s): %v", hex.EncodeToString(info.ID)[:8], info.Name, err)

@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check`, `diff`, `export-tar` and `prune` done. `recreate`, `check --repair`, `repo-compress`, `import-tar` and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar` and `prune` done. `recreate`, `repo-compress`, `import-tar` and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -1089,6 +1089,44 @@ Everything needed for feature parity, once correctness is established.
 **Gate:** `borg check --repair` and `borge check --repair` produce equivalent
 repairs on a corpus of deliberately corrupted repositories (bit flips in packs,
 truncated packs, missing index, missing archive object, stale lock).
+
+> **`check --repair` done 2026-08-17** (`internal/archive/repair.go`,
+> `internal/cli/check.go`, `Repository.RebuildChunkIndex`).
+>
+> Repair cannot bring data back. What it can do is stop one lost chunk from making
+> everything after it unreadable: the item metadata stream has no framing, so a missing
+> chunk in the middle costs the *rest of the archive* rather than the files it held.
+> Repair resynchronises past the gap and rewrites what survived. A repaired archive is a
+> smaller archive, honestly labelled.
+>
+> Three safety properties, none of them optional:
+>
+> - It **rebuilds the chunk index from the packs first**. An index that disagrees with
+>   what the packs hold would make repair "fix" archives against a fiction, which is worse
+>   than leaving them broken.
+> - It **never removes the original** of anything it rewrites: the repaired archive is
+>   written alongside and the original soft-deleted, so somebody who wants to try harder
+>   still can. borg deletes; borge soft-deletes.
+> - Everything is read at the **repair** assert-id place, re-certifying
+>   `id == hash(content)`. Repair re-packs the stream under fresh ids, so a chunk whose
+>   content did not match its id would become valid data under a new id and the violation
+>   would be unnoticeable afterwards.
+>
+> Corruption corpus, all green: a flipped bit inside a pack (caught by `--verify-data`,
+> and borg agrees the repository is broken); a missing pack; a missing index, rebuilt and
+> written back; missing content chunks, with the archive still listable so the user can
+> see what they lost; a missing archive object, where repair says what is unrecoverable,
+> removes the dangling directory entry and leaves the other archives usable; and
+> `--find-lost-archives`, which recovers an archive whose pointer was deleted by finding
+> its metadata object in the packs.
+>
+> A repair of a **healthy** repository changes nothing — the most important thing it can
+> do.
+>
+> One observation worth recording: the archive-level check tests *index membership*, not
+> readability, so with a stale index a missing chunk is caught by the repository check
+> rather than the archive check. borg's does the same. Both together catch it; either
+> alone would not.
 
 ---
 
