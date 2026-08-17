@@ -67,12 +67,12 @@ echo "mkbundle: running checks"
 { ./scripts/check-layering.sh 2>&1 || echo "[check-layering exited $?]"; } > "$OUT/check-layering.txt"
 
 echo "mkbundle: running tests"
-{ go test ./... 2>&1 || echo "[go test exited $?]"; }               > "$OUT/go-test.txt"
-{ go test -json ./... 2>&1 || true; }                               > "$OUT/go-test.json"
+{ go test -timeout 60m ./... 2>&1 || echo "[go test exited $?]"; }  > "$OUT/go-test.txt"
+{ go test -timeout 60m -json ./... 2>&1 || true; }                  > "$OUT/go-test.json"
 # -short for the race pass only: the differential corpora take minutes on their own and
 # far longer under -race, and they exercise no concurrency for -race to find. The full
 # (non-race) run above still covers them.
-{ go test -race -short ./... 2>&1 || echo "[go test -race exited $?]"; } > "$OUT/go-test-race.txt"
+{ go test -race -short -timeout 60m ./... 2>&1 || echo "[go test -race exited $?]"; } > "$OUT/go-test-race.txt"
 
 # --- build inputs ------------------------------------------------------------------
 cp -f go.mod "$OUT/" 2>/dev/null || true

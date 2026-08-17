@@ -20,6 +20,13 @@ Portions of this software are derived from BorgBackup (https://github.com/borgba
   used to endorse or promote this project. This project is not produced, sponsored
   or endorsed by the Borg Collective.
 
+  internal/patterns/shellpattern.go is a port of borg's
+  src/borg/helpers/shellpattern.py, which is itself derived from the "fnmatch"
+  module of the Python standard library:
+
+    Copyright (C) 2001-2016 Python Software Foundation. All rights reserved.
+    Licensed under the Python Software Foundation License Version 2.
+
   internal/crypto/key/paperkey.html is borg's src/borg/paperkey.html, included
   verbatim rather than translated: it is the printable key template, and a key
   printed by one tool has to be readable by the other. It carries two inlined

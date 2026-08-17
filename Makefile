@@ -9,6 +9,12 @@ LDFLAGS     := -X $(MODULE)/internal/version.Version=$(VERSION)
 # The pinned borg 2 reference interpreter; see tests/borg2/setup.sh.
 BORG2       := tests/borg2/borg2
 
+# Go's default per-package test timeout is 10 minutes, which the differential suites
+# exceed: they drive a Python borg over a pipe across a whole corpus, and under -race
+# several of them take longer than that on their own. The deadline still exists - a test
+# that hangs must fail rather than run forever - it is just set to fit the work.
+TIMEOUT     ?= -timeout 60m
+
 .PHONY: all build test race cover bench fmt vet lint check spdx layering \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence clean help
 
@@ -21,18 +27,18 @@ build:
 
 ## test: run the unit tests
 test:
-	go test ./...
+	go test $(TIMEOUT) ./...
 
 ## race: run the tests under the race detector
 # PackWriter (stage 3) hands packs to a background writer while the caller keeps
 # mutating the ChunkIndex. That invariant is exactly the kind that fails rarely and
 # corrupts repositories when it does, so -race is not optional here.
 race:
-	go test -race ./...
+	go test -race $(TIMEOUT) ./...
 
 ## cover: run tests with coverage, write coverage.out and print the summary
 cover:
-	go test -coverprofile=coverage.out ./...
+	go test $(TIMEOUT) -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
 ## bench: run benchmarks

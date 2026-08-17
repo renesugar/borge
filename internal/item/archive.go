@@ -34,8 +34,13 @@ type ArchiveItem struct {
 	Hostname    *string
 	Username    *string
 
-	// Start and End are ISO-8601 strings, not timestamps: borg stores archive times as
-	// text here, unlike item times.
+	// Time, Start and End are ISO-8601 strings, not timestamps: borg stores archive
+	// times as text here, unlike item times.
+	//
+	// All three are v2 fields. Time is the archive's *nominal* time - the one a listing
+	// shows and "--timestamp" sets - while Start and End bracket how long the backup
+	// actually ran. Time is one of REQUIRED_ARCHIVE_KEYS; only TimeEnd below is legacy.
+	Time  *string
 	Start *string
 	End   *string
 
@@ -62,7 +67,6 @@ type ArchiveItem struct {
 	CmdLineSet            bool
 	RecreateCmdLine       []string
 	RecreateCmdLineSet    bool
-	Time                  *string
 	TimeEnd               *string
 	SizeParts             *int64
 	NFilesParts           *int64
