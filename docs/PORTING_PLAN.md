@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-4 complete. Stage 5 (read path: manifest, archive, extraction) is next.**
+Status: **Stages 0-4 complete; stage 5 substantially complete (export-tar and diff outstanding). Stage 6 (write path: `create`) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -785,6 +785,54 @@ corpora (§10), `borge extract` produces a tree that compares equal to `borg ext
 under a strict comparator (path set, content sha256, mode, uid/gid, mtime to ns,
 symlink targets, hardlink groups, xattrs, sparse layout). Divergences are enumerated,
 not tolerated.
+
+> **Done 2026-08-17** (`internal/manifest`, `internal/archive`, `internal/patterns`,
+> `internal/cli`, plus `item.FormatMode`). Gate green, in five parts:
+>
+> - **5a manifest.** borge's archive listing matches `borg repo-list --json` on ids,
+>   names, hosts, users and timestamps; borge rewrites the manifest and `borg check`
+>   still passes; soft delete and undelete agree with borg.
+> - **5b item stream.** borge walks the stream and gets the same items
+>   `borg list --json-lines` reports, in the same order, verified across a **33-chunk
+>   stream of 20k+ items** so the boundary-straddling case is actually exercised.
+> - **5c extraction.** Both tools extract the same archive into their own directory and
+>   the results are compared: **27 entries, zero differences**, across content sha256,
+>   mode, uid/gid, mtime to the nanosecond, symlink targets, hard link grouping, xattrs
+>   and POSIX ACLs. The comparator reports what it reached and **fails if the corpus
+>   missed symlinks or hard links**, so it cannot pass vacuously.
+> - **5d patterns.** 4464 (style, pattern, path) triples across `fm:`, `sh:`, `pp:` and
+>   `pf:` agree with borg exactly, plus `re:`; whole include/exclude sequences agree on
+>   the decision *and* the recursion flag.
+> - **5e commands.** `repo-list`, `repo-info`, `list`, `info` and `extract`, compared
+>   against borg's output as data (JSON) and by fields (text).
+>
+> **Not done, and tracked rather than quietly dropped:** `export-tar` and `diff`, and
+> `bsdflags` restoration (`docs/DIVERGENCES.md` §8). The corpora in §10 were exercised
+> through the stage 3 and 4 gates; the extraction comparator runs on a purpose-built
+> tree, because the point is to reach the awkward shapes (sparse files, hard link
+> groups, ACLs, sub-second times) rather than to move volume.
+>
+> **Findings:**
+>
+> - **borge was not restoring timestamps on symlinks, fifos or device nodes** - only on
+>   regular files and directories. borg's `restore_attrs` does times for every item type.
+>   Caught by the comparator's mtime check.
+> - **`repo-list --short` prints archive *ids*, not names.** An id is what uniquely
+>   selects an archive; names are not unique. Printing names would have looked friendlier
+>   and been wrong.
+> - **`stat.filemode` renders an unknown file type as `?`, not `-`** - the C `_stat`
+>   implementation is the one that runs, and it differs from the pure-Python fallback in
+>   exactly that character.
+> - **borg's `shellpattern.translate` has a vacuous guard**: its `(`/`|`/`)` passthrough
+>   checks `pat[i-1] != "\\"` after `i` has already advanced, so the guard always
+>   passes and `\(` becomes a backslash plus a group opener. Reproduced as-is.
+> - **`RobustUnpacker` cannot keep a scan offset naively**: a candidate rejected only
+>   because the key it needed had not arrived yet must be re-examined, not skipped.
+>
+> Two security properties are ported deliberately and tested against crafted input:
+> a path containing `..` or below an existing symlinked parent is refused, and a hard
+> link whose group leader is a symlink recreates the symlink rather than linking the
+> file it points at (CVE-2026-62268).
 
 ---
 
