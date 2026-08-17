@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-4 complete; stage 5 substantially complete (export-tar and diff outstanding). Stage 6 (write path: `create`) is next.**
+Status: **Stages 0-6 complete (export-tar and diff from stage 5 outstanding). Stage 7 (the interoperability gate) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -854,6 +854,48 @@ not tolerated.
 
 **Gate:** `borge create` then `borg check --verify-data` (venv) passes; `borg extract`
 of a borge-created archive matches the source tree under the strict comparator.
+
+> **Done 2026-08-17** (`internal/archive/builder.go`, `create_linux.go`,
+> `internal/cache`, `internal/cli/create.go`, `manage.go`). Gate green:
+>
+> - **`borg check --verify-data` passes** on a borge-written repository, for an encrypted
+>   and an unencrypted one. That reads every chunk of every archive and re-verifies it
+>   against its id.
+> - **`borg extract` of a borge-written archive reproduces the source tree**: 27 entries,
+>   zero differences, including xattrs, POSIX ACLs, hard link groups, symlink targets and
+>   nanosecond mtimes.
+> - A repository borge created is one borg opens, backs up into and verifies, in all four
+>   modes tried; and borge reads back what borg wrote into it.
+> - `create`, `delete`, `undelete`, `rename` and `tag` are each checked by asking **borg**
+>   what the repository looks like afterwards, with `borg check --verify-data` at the end.
+>
+> **The chunker result is the one worth keeping.** Given the same tree and the same key,
+> borge and borg produce **identical chunk ids** - same boundaries, so borge's archive
+> deduplicated entirely against borg's and stored only its own metadata. One test
+> exercises the whole chain: the fastcdc gear table, the `derive_key(domain="fastcdc",
+> from_id_key=True)` derivation, and the id hash.
+>
+> **Findings:**
+>
+> - borge set `hlid` on symlinks and device nodes but **not on regular files**, so borg
+>   restored a hard link group as independent files with identical contents. Sharing the
+>   chunk list saves space; the hlid preserves the *relationship*. Two mechanisms, and
+>   only one was implemented.
+> - borge wrote named ACL entries as `user:0:r--`. borg's `acl_set` reads `fields[3]`
+>   unconditionally for any entry with a non-empty name field, so restoring one raises
+>   IndexError - the archive would be unreadable by the tool it exists to interoperate
+>   with. Named entries now carry the name *and* the id.
+> - The files cache's newest-timestamp exclusion has a consequence that looks like a bug:
+>   **a single-file tree caches nothing**, because every entry is then the newest. borg
+>   behaves identically. `TestOneFileCachesNothing` records it.
+>
+> Concurrency is deliberately absent, as §9 asks: the write path is serial. Stage 9
+> pipelines it with this gate already in place to catch regressions.
+>
+> The files cache is borge's own on-disk format, not borg's - the caches are not shared
+> (`docs/DIVERGENCES.md` §4), so there is nothing to interoperate with. It stores full
+> chunk ids rather than borg's index-compressed form, which is simpler and costs memory;
+> stage 9 measures whether that matters.
 
 ---
 

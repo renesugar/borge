@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -442,4 +443,166 @@ func walkNames(t *testing.T, root string) []string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// TestWriteCommandsMatchBorg covers the commands that change a repository: create,
+// delete, undelete, rename and tag. Each is checked by asking borg what the repository
+// looks like afterwards, so the assertion is about the repository rather than about
+// borge's own reporting of it.
+func TestWriteCommandsMatchBorg(t *testing.T) {
+	r := newBorgRepo(t, "aes256-ocb")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	for i := 0; i < 3; i++ {
+		p := filepath.Join(src, fmt.Sprintf("f%d.txt", i))
+		if err := os.WriteFile(p, []byte(strings.Repeat("x", 100+i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create
+	if _, stderr, code := r.borge(t, "create", "first", src); code != ExitOK {
+		t.Fatalf("borge create exited %d\n%s", code, stderr)
+	}
+	if _, stderr, code := r.borge(t, "create", "second", src); code != ExitOK {
+		t.Fatalf("borge create exited %d\n%s", code, stderr)
+	}
+	if names := borgArchiveNames(t, r); strings.Join(names, ",") != "first,second" {
+		t.Fatalf("borg lists %v after two borge creates", names)
+	}
+	if out, err := r.runErr("check", "--verify-data", "-r", r.path); err != nil {
+		t.Fatalf("borg check failed after borge created archives: %v\n%s", err, out)
+	}
+
+	// rename
+	if _, stderr, code := r.borge(t, "rename", "first", "renamed"); code != ExitOK {
+		t.Fatalf("borge rename exited %d\n%s", code, stderr)
+	}
+	if names := borgArchiveNames(t, r); strings.Join(names, ",") != "renamed,second" {
+		t.Errorf("borg lists %v after a rename", names)
+	}
+
+	// tag
+	if _, stderr, code := r.borge(t, "tag", "-add", "keep", "-add", "important", "second"); code != ExitOK {
+		t.Fatalf("borge tag exited %d\n%s", code, stderr)
+	}
+	listed := r.mustRun("repo-list", "-r", r.path)
+	if !strings.Contains(listed, "important,keep") {
+		t.Errorf("borg does not show the tags borge set:\n%s", listed)
+	}
+	// And selecting by tag works in both tools.
+	if names := borgArchiveNames(t, r, "-a", "tags:keep"); strings.Join(names, ",") != "second" {
+		t.Errorf("borg's tag selection gives %v", names)
+	}
+
+	// delete, then undelete
+	if _, stderr, code := r.borge(t, "delete", "renamed"); code != ExitOK {
+		t.Fatalf("borge delete exited %d\n%s", code, stderr)
+	}
+	if names := borgArchiveNames(t, r); strings.Join(names, ",") != "second" {
+		t.Errorf("borg lists %v after a delete", names)
+	}
+	if _, stderr, code := r.borge(t, "undelete", "renamed"); code != ExitOK {
+		t.Fatalf("borge undelete exited %d\n%s", code, stderr)
+	}
+	if names := borgArchiveNames(t, r); strings.Join(names, ",") != "renamed,second" {
+		t.Errorf("borg lists %v after an undelete", names)
+	}
+
+	// borg is still happy with everything that happened.
+	if out, err := r.runErr("check", "--verify-data", "-r", r.path); err != nil {
+		t.Fatalf("borg check failed after borge's write commands: %v\n%s", err, out)
+	}
+}
+
+// TestRepoCreateThenBorgUses: a repository borge created, in every mode, is one borg can
+// open, back up into and verify.
+func TestRepoCreateThenBorgUses(t *testing.T) {
+	for _, mode := range []string{"aes256-ocb", "chacha20-poly1305", "authenticated-sha256", "none-sha256"} {
+		t.Run(mode, func(t *testing.T) {
+			base := t.TempDir()
+			r := &borgRepo{
+				t:          t,
+				binary:     borgBinary(t),
+				path:       filepath.Join(base, "repo"),
+				keysDir:    filepath.Join(base, "keys"),
+				configDir:  filepath.Join(base, "config"),
+				passphrase: "repo-create gate",
+			}
+			for _, d := range []string{r.keysDir, r.configDir} {
+				if err := os.MkdirAll(d, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("BORGE_KEYS_DIR", r.keysDir)
+			t.Setenv("BORGE_TESTONLY_WEAKEN_KDF", "1")
+			t.Setenv("BORGE_KEY_FILE", "")
+			t.Setenv("BORG_KEY_FILE", "")
+
+			// borge creates the repository...
+			if _, stderr, code := r.borge(t, "repo-create", "-e", mode); code != ExitOK {
+				t.Fatalf("borge repo-create exited %d\n%s", code, stderr)
+			}
+			// ...and borg uses it.
+			if out, err := r.runErr("repo-info", "-r", r.path); err != nil {
+				t.Fatalf("borg cannot open a borge-created repository: %v\n%s", err, out)
+			}
+			src := t.TempDir()
+			if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("hello"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			r.mustRun("create", "-r", r.path, "by-borg", src)
+			if out, err := r.runErr("check", "--verify-data", "-r", r.path); err != nil {
+				t.Fatalf("borg check failed on a borge-created repository: %v\n%s", err, out)
+			}
+			// And borge can read what borg wrote into its own repository.
+			stdout, stderr, code := r.borge(t, "list", "-short", "by-borg")
+			if code != ExitOK {
+				t.Fatalf("borge list exited %d\n%s", code, stderr)
+			}
+			if !strings.Contains(stdout, "a.txt") {
+				t.Errorf("borge does not list what borg wrote:\n%s", stdout)
+			}
+		})
+	}
+}
+
+func borgBinary(t *testing.T) string {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping the borg CLI gate in short mode")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(root, ".venv-borg2", "bin", "borg")
+	if _, err := os.Stat(binary); err != nil {
+		t.Skip("borg 2 venv not built; run 'make borg2' to enable the CLI gate")
+	}
+	return binary
+}
+
+// runErr is mustRun without the fatal, for the cases that want the error.
+func (r *borgRepo) runErr(args ...string) (string, error) {
+	r.t.Helper()
+	cmd := exec.Command(r.binary, args...)
+	cmd.Env = r.env()
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func borgArchiveNames(t *testing.T, r *borgRepo, extra ...string) []string {
+	t.Helper()
+	args := append([]string{"repo-list", "-r", r.path, "--format", "{archive}{NL}"}, extra...)
+	out := r.mustRun(args...)
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	sort.Strings(names)
+	return names
 }

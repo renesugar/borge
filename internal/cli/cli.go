@@ -89,6 +89,10 @@ var commands = []command{
 	{"info", "show information about an archive", cmdInfo},
 	{"create", "create an archive from paths", cmdCreate},
 	{"extract", "extract an archive", cmdExtract},
+	{"rename", "rename an archive", cmdRename},
+	{"tag", "add or remove an archive's tags", cmdTag},
+	{"delete", "soft-delete archives", cmdDelete},
+	{"undelete", "restore soft-deleted archives", cmdUndelete},
 }
 
 // Run dispatches a command line. It never panics on bad input; every failure becomes an

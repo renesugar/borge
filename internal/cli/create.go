@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/chunker"
 	"github.com/renesugar/borge/internal/compress"
 	"github.com/renesugar/borge/internal/crypto/key"
@@ -188,6 +189,7 @@ func cmdCreate(e *Env, args []string) int {
 	noACLs := fs.Bool("noacls", false, "do not store ACLs")
 	noFlags := fs.Bool("noflags", false, "do not store file flags")
 	readSpecial := fs.Bool("read-special", false, "read the contents of fifos and devices")
+	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
 	list := fs.Bool("list", false, "print each item as it is archived")
 	stats := fs.Bool("stats", false, "print statistics when finished")
 	if err := fs.Parse(args); err != nil {
@@ -256,6 +258,25 @@ func cmdCreate(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
+	// The files cache spares unchanged files from being read. It is per archive *name*,
+	// so a nightly "daily" backup reuses last night's; a differently named archive is a
+	// different working set and would only evict it.
+	cacheMode := cache.DefaultMode()
+	if *filesCache != "" {
+		cacheMode, err = cache.ParseMode(*filesCache)
+		if err != nil {
+			return e.fail(err)
+		}
+	}
+	cachePath, err := cache.Path(repo.ID(), name)
+	if err != nil {
+		return e.fail(err)
+	}
+	files, err := cache.Read(cachePath, cacheMode, b.Start().UnixNano())
+	if err != nil {
+		return e.fail(err)
+	}
+
 	status := ExitOK
 	opts := archive.CreateOptions{
 		Paths:         paths,
@@ -266,6 +287,7 @@ func cmdCreate(e *Env, args []string) int {
 		NoACLs:        *noACLs,
 		NoFlags:       *noFlags,
 		ReadSpecial:   *readSpecial,
+		Files:         files,
 		OnError: func(p string, err error) error {
 			// One unreadable file does not abandon the backup: the rest is still worth
 			// having, and the exit code says something was missed.
@@ -281,6 +303,13 @@ func cmdCreate(e *Env, args []string) int {
 	created, err := b.Create(opts)
 	if err != nil {
 		return e.fail(err)
+	}
+
+	// The cache is saved only after the archive is complete: an interrupted backup must
+	// not leave a cache claiming files were stored when they were not.
+	if err := files.Save(cachePath); err != nil {
+		e.warnf("could not save the files cache: %v", err)
+		status = ExitWarning
 	}
 
 	cwd, _ := os.Getwd()
@@ -303,6 +332,9 @@ func cmdCreate(e *Env, args []string) int {
 		fmt.Fprintf(e.Stdout, "Original size: %d\n", s.OriginalSize)
 		fmt.Fprintf(e.Stdout, "Deduplicated size: %d\n", s.DedupedSize)
 		fmt.Fprintf(e.Stdout, "Chunks: %d (%d new)\n", s.Chunks, s.NewChunks)
+		hits, misses := files.Stats()
+		fmt.Fprintf(e.Stdout, "Files cache: %s, %d unchanged, %d read (%d hits, %d misses)\n",
+			cacheMode, created.Unchanged, s.NFiles-int64(created.Unchanged), hits, misses)
 		if created.Errors > 0 {
 			fmt.Fprintf(e.Stdout, "Errors: %d\n", created.Errors)
 		}

@@ -24,6 +24,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/patterns"
 )
@@ -49,6 +50,10 @@ type CreateOptions struct {
 	// off unless asked for.
 	ReadSpecial bool
 
+	// Files is the files cache, or nil to read every file. It is consulted before a file
+	// is opened and updated after it is chunked.
+	Files *cache.FilesCache
+
 	// OnItem is called for each item as it is archived.
 	OnItem func(status byte, path string)
 	// OnError is called for a per-path failure. Returning an error aborts; returning nil
@@ -61,6 +66,8 @@ type CreateStats struct {
 	Stats
 	Errors  int
 	Skipped int
+	// Unchanged counts files the files cache spared from being read.
+	Unchanged int
 }
 
 // Create walks the given paths and writes every matching object into the archive.
@@ -211,7 +218,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 		w.markHardlink(it, st)
 
 	case unix.S_IFREG:
-		chunks, shared, err := w.fileChunks(abs, st)
+		chunks, st2, err := w.fileChunks(abs, stored, st)
 		if err != nil {
 			return w.fail(abs, err)
 		}
@@ -221,9 +228,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 		// independent files with the same contents. Sharing the chunk list saves space;
 		// the hlid is what preserves the *relationship*, and the two are separate.
 		w.markHardlink(it, st)
-		if shared {
-			status = 'h'
-		}
+		status = st2
 
 	case unix.S_IFIFO, unix.S_IFCHR, unix.S_IFBLK, unix.S_IFSOCK:
 		if st.Mode&unix.S_IFMT == unix.S_IFSOCK {
@@ -234,7 +239,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 			return nil
 		}
 		if w.opts.ReadSpecial {
-			chunks, shared, err := w.fileChunks(abs, st)
+			chunks, _, err := w.fileChunks(abs, stored, st)
 			if err != nil {
 				return w.fail(abs, err)
 			}
@@ -244,9 +249,6 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 			// --read-special is for: the point is to capture what flows through it.
 			mode := int64(st.Mode&0o7777) | item.SIFREG
 			it.Mode = &mode
-			if shared {
-				status = 'h'
-			}
 		} else {
 			rdev := int64(st.Rdev)
 			it.RDev = &rdev
@@ -274,28 +276,68 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 // The second link to an inode stores no content at all: it shares the first one's chunk
 // list and its hlid. That is not only a size saving - it is what makes a restore
 // recreate the hard link rather than two independent files.
-func (w *walker) fileChunks(abs string, st *unix.Stat_t) ([]item.ChunkListEntry, bool, error) {
-	key := hardlinkKey{dev: st.Dev, ino: st.Ino}
+func (w *walker) fileChunks(abs, stored string, st *unix.Stat_t) ([]item.ChunkListEntry, byte, error) {
+	hlKey := hardlinkKey{dev: st.Dev, ino: st.Ino}
 	if st.Nlink > 1 {
-		if chunks, ok := w.hardlinks[key]; ok {
-			return chunks, true, nil
+		if chunks, ok := w.hardlinks[hlKey]; ok {
+			return chunks, 'h', nil
+		}
+	}
+
+	// The files cache: if it says this file is unchanged, its chunk list is reused and
+	// the file is never opened. That is the whole point of an incremental backup, and it
+	// is also the one place borge can silently store the wrong contents - see the cache
+	// package for what keeps it honest.
+	status := byte('A')
+	var cacheKey string
+	if w.opts.Files != nil {
+		cacheKey = cache.PathKey(stored)
+		known, chunks := w.opts.Files.Lookup(cacheKey, cache.FileInfo{
+			Size:  st.Size,
+			Inode: int64(st.Ino),
+			CTime: st.Ctim.Sec*1e9 + st.Ctim.Nsec,
+			MTime: st.Mtim.Sec*1e9 + st.Mtim.Nsec,
+		})
+		if known && chunks != nil {
+			w.stats.Unchanged++
+			// The chunks still count towards the archive's size: the archive contains the
+			// file whether or not this run had to read it.
+			for _, c := range chunks {
+				w.builder.stats.Chunks++
+				w.builder.stats.OriginalSize += c.Size
+			}
+			if st.Nlink > 1 {
+				w.hardlinks[hlKey] = chunks
+			}
+			return chunks, 'U', nil
+		}
+		if known {
+			status = 'M'
 		}
 	}
 
 	f, err := os.Open(abs)
 	if err != nil {
-		return nil, false, err
+		return nil, status, err
 	}
 	defer f.Close()
 
 	chunks, err := w.builder.ChunkFile(f)
 	if err != nil {
-		return nil, false, err
+		return nil, status, err
 	}
 	if st.Nlink > 1 {
-		w.hardlinks[key] = chunks
+		w.hardlinks[hlKey] = chunks
 	}
-	return chunks, false, nil
+	if w.opts.Files != nil {
+		w.opts.Files.Memorize(cacheKey, cache.FileInfo{
+			Size:  st.Size,
+			Inode: int64(st.Ino),
+			CTime: st.Ctim.Sec*1e9 + st.Ctim.Nsec,
+			MTime: st.Mtim.Sec*1e9 + st.Mtim.Nsec,
+		}, chunks)
+	}
+	return chunks, status, nil
 }
 
 // markHardlink sets an item's hlid when its inode has more than one link.

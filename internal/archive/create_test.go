@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"time"
+
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
@@ -243,4 +246,95 @@ func chunkIDsOf(t *testing.T, r *borgRepo, archiveName string) []string {
 		t.Fatal(err)
 	}
 	return ids
+}
+
+// TestFilesCacheSkipsUnchangedFiles is the incremental-backup property end to end: with a
+// files cache, a second backup of an unchanged tree does not read the files at all.
+//
+// It waits a few seconds on purpose. The cache deliberately refuses to keep entries for
+// files touched around backup time (see internal/cache), so a tree created and backed up
+// in the same instant caches nothing - which is correct, and which makes a naive version
+// of this test pass for the wrong reason.
+func TestFilesCacheSkipsUnchangedFiles(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	cacheDir := t.TempDir()
+	t.Setenv("BORGE_CACHE_DIR", cacheDir)
+
+	src := t.TempDir()
+	for i := 0; i < 5; i++ {
+		content := []byte(strings.Repeat(fmt.Sprintf("file %d ", i), 20000))
+		if err := os.WriteFile(filepath.Join(src, fmt.Sprintf("f%d.txt", i)), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Let the files age past the cache's three-second race window.
+	time.Sleep(4 * time.Second)
+
+	run := func(name string) (unchanged int, hits int) {
+		t.Helper()
+		repo, b := createBuilder(t, r)
+		defer repo.Close()
+
+		cachePath, err := cache.Path(repo.ID(), "series")
+		if err != nil {
+			t.Fatal(err)
+		}
+		files, err := cache.Read(cachePath, cache.DefaultMode(), b.Start().UnixNano())
+		if err != nil {
+			t.Fatal(err)
+		}
+		stats, err := b.Create(CreateOptions{Paths: []string{src}, Files: files})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := b.Save(SaveOptions{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+		if err := files.Save(cachePath); err != nil {
+			t.Fatal(err)
+		}
+		h, _ := files.Stats()
+		return stats.Unchanged, h
+	}
+
+	if unchanged, _ := run("series"); unchanged != 0 {
+		t.Errorf("the first backup reported %d unchanged files; there was no cache yet", unchanged)
+	}
+	unchanged, hits := run("series")
+	// One file always misses: the newest timestamp is never cached, by design.
+	if unchanged < 4 {
+		t.Errorf("the second backup read %d of 5 files from the cache, want at least 4", unchanged)
+	}
+	t.Logf("second backup: %d files unchanged, %d cache hits", unchanged, hits)
+
+	// Changing a file must be noticed, or the backup would silently store the old contents.
+	if err := os.WriteFile(filepath.Join(src, "f0.txt"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, _ = run("series")
+	if unchanged >= 4 {
+		t.Errorf("after editing a file %d were still reported unchanged", unchanged)
+	}
+
+	// And the change is really in the repository.
+	m := r.open(t)
+	a, err := OpenByName(m, "series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	if err := a.Items(func(it *item.Item) error {
+		if strings.HasSuffix(it.Path, "f0.txt") {
+			found = true
+			if got := it.ContentSize(); got != int64(len("changed")) {
+				t.Errorf("f0.txt is %d bytes in the newest archive, want %d", got, len("changed"))
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Error("f0.txt is not in the newest archive")
+	}
 }
