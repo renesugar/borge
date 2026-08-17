@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact` done, so all eight gate rows now run as written. `export-tar`, `diff`, `prune`, `recreate`, `check --repair` and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check`, `diff` and `export-tar` done. `prune`, `recreate`, `check --repair` and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -990,7 +990,8 @@ the full comparator output.
 > of stage 8 and row 7 now runs as written — borge deletes *and* compacts, borg verifies —
 > with 584 entries identical. The stage 8 record has the detail.
 >
-> **Still outstanding:** `export-tar` and `diff` from stage 5.
+> **`export-tar` and `diff` have since landed** in stage 8; nothing from stage 5 is
+> outstanding any more.
 >
 > Real corpora run as bounded subsets (4000 files each) so the gate stays runnable on
 > every commit; the counts are logged, and stage 9 is what runs them whole. Rows 1–4 over
@@ -1042,6 +1043,22 @@ Everything needed for feature parity, once correctness is established.
 > repository whose damage removed archive metadata is legitimately unlistable afterwards,
 > so "still listable" is the wrong assertion for a refused compaction; "nothing further was
 > deleted" is the right one.
+
+> **`diff` and `export-tar` done 2026-08-17.** These were stage 5's two outstanding
+> commands, so they were taken next.
+>
+> `diff` compares two archives by their chunk lists, which answers the question without
+> reading any content — but only while both archives were chunked the same way. With
+> different `--chunker-params` the same bytes produce different ids, so borge compares the
+> recorded parameters and, when they differ, falls back to size comparison and says so
+> rather than reporting every file as modified.
+>
+> `export-tar` writes PAX by default because it is the only format that carries extended
+> attributes, ACLs and sub-second times. GNU is available and **warns per item** about what
+> it is dropping: an export that silently loses a file's ACLs is worse than one that says
+> so, because the user believes they have a faithful copy. Verified by GNU tar itself
+> reading and extracting the output, with hard links emitted as tar link entries rather
+> than second copies.
 
 - `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`,
   `repo-space`, `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`,
