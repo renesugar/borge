@@ -165,18 +165,13 @@ func assertDeduplicated(t *testing.T, tl *tools) {
 	}
 }
 
-// TestRows7and8 are the delete-and-compact rows.
+// TestRows7and8 are the delete-and-compact rows, each tool deleting and compacting in
+// turn while the other verifies.
 //
-// # What is actually run, and what is not
-//
-// The plan's rows 7 and 8 call for "delete + compact" from each tool. `borge compact` is
-// stage 8 (docs/PORTING_PLAN.md §11) and does not exist yet, so the compaction is done by
-// borg in both directions. What is still exercised - and what these rows are for - is that
-// each tool's *delete* leaves an archive directory and a chunk index the other tool, and
-// borg's garbage collector, agree with.
-//
-// The borge-compact half is deferred, not passed. It is listed in the stage 7 record as
-// outstanding.
+// A compaction is the most destructive thing either tool does to a repository it did not
+// write: it decides, from its own reading of every archive, which chunks nobody needs any
+// more, and deletes them. A disagreement about what an archive references shows up here as
+// silent data loss and nowhere else.
 func TestRows7and8(t *testing.T) {
 	for _, mode := range []string{"aes256-ocb", "none-sha256"} {
 		t.Run(mode, func(t *testing.T) {
@@ -188,10 +183,10 @@ func TestRows7and8(t *testing.T) {
 				tl.mustBorg("create", "-r", tl.repo, "drop", src)
 
 				tl.mustBorge("delete", "drop")
-				tl.mustBorg("compact", "-r", tl.repo)
+				tl.mustBorge("compact")
 
 				if out, err := tl.run(tl.borg, "", "check", "--verify-data", "-r", tl.repo); err != nil {
-					t.Errorf("borg check after borge deleted and borg compacted: %v\n%s", err, out)
+					t.Errorf("borg check after borge deleted and compacted: %v\n%s", err, out)
 				}
 				assertArchives(t, tl, "keep")
 				// And what survived is still restorable, which is the thing a compaction

@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 (remaining commands and backends) is next; `compact`, `export-tar` and `diff` are the named gaps.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact` done, so all eight gate rows now run as written. `export-tar`, `diff`, `prune`, `recreate`, `check --repair` and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -959,7 +959,7 @@ the full comparator output.
 > | 4 | `borg check --verify-data` over both | ✅ 5 key modes |
 > | 5 | borg then borge into one repository | ✅ both tools extract both archives |
 > | 6 | borge then borg into one repository | ✅ both tools extract both archives |
-> | 7 | borg creates, borge deletes, **borg** compacts | ✅ with the substitution above |
+> | 7 | borg creates, borge deletes and compacts | ✅ (see the note below) |
 > | 8 | borge creates, borg deletes and compacts | ✅ |
 >
 > **584 entries identical** on every comparison — the synthetic corpus, which covers
@@ -985,8 +985,12 @@ the full comparator output.
 > 16477067133423719032 does not fit in an int64". `item.Item.Inode` is now unsigned, and
 > is encoded as unsigned so it round-trips as the number that went in.
 >
-> **Not run, and tracked:** `borge compact` (stage 8), so row 7's borge-compact half is
-> substituted. `export-tar` and `diff` remain outstanding from stage 5.
+> **Row 7's substitution has since been lifted.** At the time this gate first ran,
+> `borge compact` did not exist and borg did the compaction. `compact` landed at the start
+> of stage 8 and row 7 now runs as written — borge deletes *and* compacts, borg verifies —
+> with 584 entries identical. The stage 8 record has the detail.
+>
+> **Still outstanding:** `export-tar` and `diff` from stage 5.
 >
 > Real corpora run as bounded subsets (4000 files each) so the gate stays runnable on
 > every commit; the counts are logged, and stage 9 is what runs them whole. Rows 1–4 over
@@ -1006,6 +1010,38 @@ the full comparator output.
 ## 11. Stage 8 — remaining commands and backends
 
 Everything needed for feature parity, once correctness is established.
+
+> **`compact` done 2026-08-17** (`internal/repository/compact.go`,
+> `internal/cli/compact.go`). It is the gap that kept stage 7's row 7 from running as
+> written, so it was taken first.
+>
+> Mark and sweep: walk every archive for the chunk ids it references, remove the
+> soft-deleted archives' directory entries, then drop packs that are wholly dead and
+> rewrite packs that are dead enough to be worth the copy (10% by default). The index is
+> rewritten whole afterwards, because removing entries is not something an incremental
+> write can express.
+>
+> **It refuses to run on an incomplete scan.** If any archive is unreadable, or if a
+> referenced chunk is not in the index, it stops and changes nothing. A garbage collector
+> that proceeds from a partial view of what is referenced deletes live data, and does it
+> silently — the archive that needed the chunk is not read again until a restore, which is
+> exactly when the user cannot afford to find out.
+>
+> Soft-deleted archives are nuked *after* the live scan comes back clean, for the same
+> reason: while a repository is damaged, `borge undelete` may be the way out.
+>
+> Deliberately not ported: borg's per-archive reference caches, tiny-pack merging and the
+> all-packs gate. Those change *when* a compaction runs, not what it produces. They are
+> performance work and belong with stage 9's measurements rather than with a guess.
+>
+> Verified: reclaims 1.2 MB of a 1.2 MB dead archive; rewrites mixed packs and the
+> survivors still restore byte-identically; a dry run changes nothing and leaves an
+> undelete possible; `borg check --verify-data` passes after every case. Two test-shaping
+> notes worth keeping — a *contiguous* surviving subset can line up exactly with a pack
+> boundary and produce no mixed pack at all (the test interleaves instead), and a
+> repository whose damage removed archive metadata is legitimately unlistable afterwards,
+> so "still listable" is the wrong assertion for a refused compaction; "nothing further was
+> deleted" is the right one.
 
 - `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`,
   `repo-space`, `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`,
