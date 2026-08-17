@@ -232,3 +232,16 @@ allocated. borg behaves identically — its own documentation calls `--sparse`
 This is recorded because it looks like a bug in a test: a small sparse file appears not to
 restore sparsely, and the fix is a bigger file, not different code. The stage 7 corpus uses
 96 MiB files for exactly that reason.
+
+## 10. The inode field is unsigned
+
+**Stage 7 · `internal/item/item.go` · forced by reality, not a choice**
+
+`item.inode` is decoded and encoded as a `uint64`, while every other integer in an item is
+`int64`. That asymmetry looks arbitrary and is not: an rclone mount synthesises inode
+numbers from a hash, and values above 2^63 occur routinely. borg stores the field as a
+msgpack uint64 and Python's arbitrary-precision integers never notice the difference;
+a Go port that decodes it as `int64` **cannot read such an archive at all**.
+
+Found by the stage 7 Google Drive corpus, which exists in the corpus list for its I/O
+latency and turned out to be the only one that could surface this.

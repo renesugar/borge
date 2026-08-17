@@ -383,7 +383,7 @@ func (w *walker) fillMetadata(it *item.Item, abs string, st *unix.Stat_t) {
 	if st.Mode&unix.S_IFMT == unix.S_IFREG {
 		it.Size = &size
 	}
-	inode := int64(st.Ino)
+	inode := st.Ino
 	it.Inode = &inode
 
 	if !w.opts.NoXAttrs {

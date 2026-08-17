@@ -325,11 +325,28 @@ func TestRealCorpora(t *testing.T) {
 				t.Skipf("corpus not available at %s", rc.path)
 			}
 
-			src, count := subsetOf(t, rc.path, filesPerCorpus)
+			var src string
+			var count int
+			if rc.name == "googledrive" {
+				// Backed up *in place*, not copied to a local subset.
+				//
+				// This corpus is in the list for its high-latency I/O pattern - a stage 2
+				// measurement put one 100 kB write at 2.673 s through this mount - and
+				// copying it to local storage first would remove exactly the property it
+				// is here to exercise. So a small subdirectory is archived directly, and
+				// the comparison reads the source back through the mount too.
+				src = filepath.Join(rc.path, "Trail")
+				if _, err := os.Stat(src); err != nil {
+					t.Skipf("%s is not available: %v", src, err)
+				}
+				count = countFiles(src)
+			} else {
+				src, count = subsetOf(t, rc.path, filesPerCorpus)
+			}
 			if count == 0 {
 				t.Skipf("no readable regular files under %s", rc.path)
 			}
-			t.Logf("subset of %s: %d file(s)", rc.path, count)
+			t.Logf("corpus %s: %d file(s) under %s", rc.name, count, src)
 
 			tl := newTools(t, "aes256-ocb")
 

@@ -973,11 +973,33 @@ the full comparator output.
 > **deduplication across tools** — two archives of one tree, written by different tools,
 > occupy ~256 KB of packs rather than twice one archive.
 >
+> The Google Drive corpus is archived **in place** rather than copied to a local subset:
+> it is in the list for its high-latency I/O pattern (stage 2 measured one 100 kB write at
+> 2.673 s through it), and copying it to local storage first would remove exactly the
+> property it exists to exercise.
+>
+> **And it earned its place.** It found a real bug that no other corpus could: an rclone
+> mount synthesises inode numbers from a hash, so they exceed 2^63. borg stores the inode
+> as a msgpack uint64 and Python's arbitrary-precision integers never notice; borge
+> decoded it as int64 and **refused to read the archive at all** with "inode value
+> 16477067133423719032 does not fit in an int64". `item.Item.Inode` is now unsigned, and
+> is encoded as unsigned so it round-trips as the number that went in.
+>
 > **Not run, and tracked:** `borge compact` (stage 8), so row 7's borge-compact half is
 > substituted. `export-tar` and `diff` remain outstanding from stage 5.
 >
 > Real corpora run as bounded subsets (4000 files each) so the gate stays runnable on
-> every commit; the counts are logged, and stage 9 is what runs them whole.
+> every commit; the counts are logged, and stage 9 is what runs them whole. Rows 1–4 over
+> each, with `aes256-ocb`:
+>
+> | Corpus | Entries compared | Result |
+> | --- | --- | --- |
+> | Joplin archive (with attachments) | 4000 | ✅ both directions |
+> | Joplin recipes | 4000 | ✅ both directions |
+> | Obsidian vault | 4104 | ✅ both directions |
+> | recipedb (whole) | 4613 | ✅ both directions |
+> | pathological dir (118,866 files in one directory) | 4000 | ✅ both directions |
+> | Google Drive (rclone mount) | 84 | ✅ both directions, archived **in place** |
 
 ---
 

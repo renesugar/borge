@@ -308,3 +308,16 @@ func subsetOf(t *testing.T, root string, n int) (string, int) {
 	}
 	return dest, copied
 }
+
+// countFiles counts the regular files under a directory, for the corpora that are
+// archived in place rather than copied.
+func countFiles(root string) int {
+	n := 0
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err == nil && info.Mode().IsRegular() {
+			n++
+		}
+		return nil
+	})
+	return n
+}

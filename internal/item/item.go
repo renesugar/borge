@@ -69,8 +69,13 @@ type Item struct {
 	RDev     *int64
 	BSDFlags *int64
 	Size     *int64
-	Inode    *int64
-	NLink    *int64
+	// Inode is unsigned, unlike the other numbers here. A real filesystem's inode fits
+	// comfortably in an int64, but a synthesised one need not: an rclone mount derives it
+	// from a hash, and values above 2^63 occur in practice. borg stores it as a msgpack
+	// uint64 and Python does not care; borge has to say so explicitly or it cannot read
+	// such an archive at all.
+	Inode *uint64
+	NLink *int64
 
 	// Times are nanoseconds since the epoch, stored on the wire as msgpack timestamps.
 	ATime     *int64
@@ -200,7 +205,14 @@ func DecodeItem(m *msgpackx.Map) (*Item, error) {
 			}
 			it.Group = &s
 
-		case "mode", "uid", "gid", "rdev", "bsdflags", "size", "inode", "nlink", "part":
+		case "inode":
+			n, err := wantUint(key, e.Value)
+			if err != nil {
+				return nil, err
+			}
+			it.Inode = &n
+
+		case "mode", "uid", "gid", "rdev", "bsdflags", "size", "nlink", "part":
 			n, err := wantInt(key, e.Value)
 			if err != nil {
 				return nil, err
@@ -218,8 +230,6 @@ func DecodeItem(m *msgpackx.Map) (*Item, error) {
 				it.BSDFlags = &n
 			case "size":
 				it.Size = &n
-			case "inode":
-				it.Inode = &n
 			case "nlink":
 				it.NLink = &n
 			case "part":
@@ -330,12 +340,17 @@ func (it *Item) Encode() (*msgpackx.Map, error) {
 		val *int64
 	}{
 		{"mode", it.Mode}, {"uid", it.UID}, {"gid", it.GID}, {"rdev", it.RDev},
-		{"bsdflags", it.BSDFlags}, {"size", it.Size}, {"inode", it.Inode},
+		{"bsdflags", it.BSDFlags}, {"size", it.Size},
 		{"nlink", it.NLink}, {"part", it.Part},
 	} {
 		if f.val != nil {
 			m.Set(f.key, *f.val)
 		}
+	}
+	if it.Inode != nil {
+		// Encoded as an unsigned value, so an inode above 2^63 comes back as the number
+		// that went in rather than as a negative one.
+		m.Set("inode", *it.Inode)
 	}
 
 	for _, f := range []struct {
@@ -444,6 +459,27 @@ func wantBytes(key string, v any) ([]byte, error) {
 		return []byte(b), nil
 	default:
 		return nil, fmt.Errorf("item: %s must be bytes, got %T", key, v)
+	}
+}
+
+// wantUint reads an integer that may exceed the int64 range.
+//
+// Only the inode uses it. A synthesised filesystem - an rclone mount, for one - derives
+// inode numbers from a hash, so values above 2^63 occur; borg stores them as msgpack
+// uint64 and Python's arbitrary-precision integers never notice. Refusing them here would
+// mean borge cannot read such an archive at all, which is how this was found: the stage 7
+// GoogleDrive corpus.
+func wantUint(key string, v any) (uint64, error) {
+	switch n := v.(type) {
+	case uint64:
+		return n, nil
+	case int64:
+		if n < 0 {
+			return 0, fmt.Errorf("item: %s value %d is negative", key, n)
+		}
+		return uint64(n), nil
+	default:
+		return 0, fmt.Errorf("item: %s must be an integer, got %T", key, v)
 	}
 }
 

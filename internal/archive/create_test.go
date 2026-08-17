@@ -301,9 +301,12 @@ func TestFilesCacheSkipsUnchangedFiles(t *testing.T) {
 		t.Errorf("the first backup reported %d unchanged files; there was no cache yet", unchanged)
 	}
 	unchanged, hits := run("series")
-	// One file always misses: the newest timestamp is never cached, by design.
-	if unchanged < 4 {
-		t.Errorf("the second backup read %d of 5 files from the cache, want at least 4", unchanged)
+	// Not all five: every entry carrying the newest ctime/mtime is deliberately dropped
+	// when the cache is saved, and how many files share that timestamp depends on the
+	// filesystem's granularity - two files written back to back can land in one tick. So
+	// the assertion is "most of them", not an exact count.
+	if unchanged < 3 {
+		t.Errorf("the second backup read %d of 5 files from the cache, want at least 3", unchanged)
 	}
 	t.Logf("second backup: %d files unchanged, %d cache hits", unchanged, hits)
 
@@ -311,9 +314,11 @@ func TestFilesCacheSkipsUnchangedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "f0.txt"), []byte("changed"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	before := unchanged
 	unchanged, _ = run("series")
-	if unchanged >= 4 {
-		t.Errorf("after editing a file %d were still reported unchanged", unchanged)
+	if unchanged >= before {
+		t.Errorf("after editing a file %d were reported unchanged, was %d before the edit",
+			unchanged, before)
 	}
 
 	// And the change is really in the repository.
