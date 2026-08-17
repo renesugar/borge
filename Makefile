@@ -15,7 +15,7 @@ BORG2       := tests/borg2/borg2
 # that hangs must fail rather than run forever - it is just set to fit the work.
 TIMEOUT     ?= -timeout 60m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering \
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence clean help
 
 all: check
@@ -28,6 +28,12 @@ build:
 ## test: run the unit tests
 test:
 	go test $(TIMEOUT) ./...
+
+## interop: run the stage 7 interoperability gate (needs 'make build' and 'make borg2')
+# Separate from 'make test' because it drives two real binaries over real corpora and
+# takes tens of minutes; 'make check' stays fast enough to run before every commit.
+interop: build
+	go test $(TIMEOUT) -v ./tests/interop/
 
 ## race: run the tests under the race detector
 # PackWriter (stage 3) hands packs to a background writer while the caller keeps

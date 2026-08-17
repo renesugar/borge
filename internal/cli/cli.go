@@ -93,6 +93,7 @@ var commands = []command{
 	{"tag", "add or remove an archive's tags", cmdTag},
 	{"delete", "soft-delete archives", cmdDelete},
 	{"undelete", "restore soft-deleted archives", cmdUndelete},
+	{"check", "verify a repository and its archives", cmdCheck},
 }
 
 // Run dispatches a command line. It never panics on bad input; every failure becomes an

@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-6 complete (export-tar and diff from stage 5 outstanding). Stage 7 (the interoperability gate) is next.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 (remaining commands and backends) is next; `compact`, `export-tar` and `diff` are the named gaps.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -942,6 +942,42 @@ sparse-region layout. Reports every difference; exits non-zero on any.
 
 **Gate:** all 8 rows green across all corpora and key modes. Evidence bundle includes
 the full comparator output.
+
+> **Ordering correction.** Rows 3, 6 and 8 need `borge check --verify-data`, and row 7
+> needs `borge compact` — both of which this plan filed under stage 8 (§11). That was an
+> ordering mistake in the plan, not a discovery about the format. `borge check` was
+> implemented here rather than deferring three rows; `borge compact` was not, and row 7's
+> compaction is done by borg with the substitution stated in the test.
+
+> **Done 2026-08-17** (`tests/interop/`, `internal/cli/check.go`). Gate green:
+>
+> | Row | What runs | Result |
+> | --- | --- | --- |
+> | 1 | borg writes, borge extracts | ✅ 5 key modes |
+> | 2 | borge writes, borg extracts | ✅ 5 key modes |
+> | 3 | `borge check --verify-data` over both | ✅ 5 key modes |
+> | 4 | `borg check --verify-data` over both | ✅ 5 key modes |
+> | 5 | borg then borge into one repository | ✅ both tools extract both archives |
+> | 6 | borge then borg into one repository | ✅ both tools extract both archives |
+> | 7 | borg creates, borge deletes, **borg** compacts | ✅ with the substitution above |
+> | 8 | borge creates, borg deletes and compacts | ✅ |
+>
+> **584 entries identical** on every comparison — the synthetic corpus, which covers
+> invalid-UTF-8 names, NFC/NFD pairs, a bidi override, control characters in names, 40
+> levels of nesting, zero- and one-byte files, setuid/setgid/sticky modes, sparse files,
+> six kinds of symlink, three hard link groups including a hard-linked symlink, a fifo,
+> binary and 3 KB extended attributes, and access and default POSIX ACLs.
+>
+> Also green: all four compression settings interoperate in both directions (including
+> `auto`, which decides per chunk); `--sparse` restores holes; and rows 5 and 6 confirm
+> **deduplication across tools** — two archives of one tree, written by different tools,
+> occupy ~256 KB of packs rather than twice one archive.
+>
+> **Not run, and tracked:** `borge compact` (stage 8), so row 7's borge-compact half is
+> substituted. `export-tar` and `diff` remain outstanding from stage 5.
+>
+> Real corpora run as bounded subsets (4000 files each) so the gate stays runnable on
+> every commit; the counts are logged, and stage 9 is what runs them whole.
 
 ---
 

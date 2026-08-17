@@ -214,3 +214,21 @@ This is a real gap, not a decision, and it is listed here so it is not mistaken 
 It needs an ioctl and has to run *last* of all attribute restoration — the immutable flag
 makes every other change impossible — which is why it is a separate piece of work rather
 than a line in `restoreAttrs`.
+
+## 9. Sparseness survives only at chunk granularity
+
+**Stage 7 · not a divergence from borg, but a property worth writing down**
+
+`--sparse` restores an **all-zero chunk** as a hole. A chunk that contains a hole *and*
+some data is written out in full, because the chunk is the unit the repository stores and
+nothing records where inside it the hole was.
+
+The practical consequence: with the default fastcdc maximum chunk size of 8 MiB, a hole
+has to be several times that before any chunk falls entirely inside it. A 4 MiB hole in an
+8 MiB file round-trips with the right contents and the right length, and comes back fully
+allocated. borg behaves identically — its own documentation calls `--sparse`
+"chunk-granularity, independent of the original being sparse".
+
+This is recorded because it looks like a bug in a test: a small sparse file appears not to
+restore sparsely, and the fix is a bigger file, not different code. The stage 7 corpus uses
+96 MiB files for exactly that reason.
