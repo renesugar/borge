@@ -23,7 +23,12 @@ fail=0
 note() { printf '%s\n' "$*" >&2; fail=1; }
 
 # Only files we wrote; never vendored or generated trees.
-mapfile -t files < <(git ls-files '*.go' | grep -v '^vendor/' || true)
+#
+# Untracked files are included deliberately: checking only the index would let a new file
+# pass the check right up until the moment it is committed, which is exactly when the
+# check stops being useful.
+mapfile -t files < <({ git ls-files '*.go'; git ls-files --others --exclude-standard '*.go'; } \
+    | grep -v '^vendor/' | sort -u || true)
 
 if [ ${#files[@]} -eq 0 ]; then
     echo "check-spdx: no Go files tracked yet, nothing to check"
@@ -49,7 +54,7 @@ for f in "${files[@]}"; do
                 note "$f: header cites an upstream source path but SPDX says plain Apache-2.0"
             fi
             ;;
-        "Apache-2.0 AND BSD-3-Clause"|"Apache-2.0 AND BSD-2-Clause")
+        "Apache-2.0 AND BSD-3-Clause"|"Apache-2.0 AND BSD-2-Clause"|"Apache-2.0 AND BSD-3-Clause AND PSF-2.0")
             # Ported. Must name a source file, and that file must exist upstream.
             # The path must end in an alphanumeric so a sentence-final period is not
             # swallowed into it ("...msgpack.py." would then not exist upstream).
@@ -66,8 +71,10 @@ for f in "${files[@]}"; do
                 borghash/*|borgstore/*) root="$PYPKG_SRC"; who="python package" ;;
                 *)
                     case "$spdx" in
-                        *BSD-3-Clause) root="$BORG_SRC"; who=borg ;;
-                        *)             root="$RESTIC_SRC"; who=restic ;;
+                        # A trailing term (e.g. "AND PSF-2.0" for the fnmatch-derived
+                        # code) must not change which upstream the path is looked up in.
+                        *BSD-3-Clause*) root="$BORG_SRC"; who=borg ;;
+                        *)              root="$RESTIC_SRC"; who=restic ;;
                     esac
                     ;;
             esac
@@ -81,7 +88,7 @@ for f in "${files[@]}"; do
             fi
             ;;
         *)
-            note "$f: unexpected SPDX expression '$spdx' (expected 'Apache-2.0', 'Apache-2.0 AND BSD-3-Clause' or 'Apache-2.0 AND BSD-2-Clause')"
+            note "$f: unexpected SPDX expression '$spdx' (expected 'Apache-2.0', 'Apache-2.0 AND BSD-3-Clause', 'Apache-2.0 AND BSD-2-Clause' or 'Apache-2.0 AND BSD-3-Clause AND PSF-2.0')"
             ;;
     esac
 done
