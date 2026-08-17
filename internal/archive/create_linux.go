@@ -1,0 +1,399 @@
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+//
+// This file is a Go port of the filesystem walk and item construction in borg's
+// src/borg/archive.py (FilesystemObjectProcessors) and src/borg/archiver/create_cmd.py.
+// Original work Copyright (C) 2015-2026 The Borg Collective; Copyright (C) 2010-2014 Jonas Borgström.
+// Licensed under the BSD 3-Clause License, see licenses/borg/LICENSE.
+// Modifications and Go translation Copyright (C) 2026 The borge authors,
+// licensed under the Apache License 2.0, see LICENSE.
+
+//go:build linux
+
+package archive
+
+import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"os"
+	"os/user"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/patterns"
+)
+
+// CreateOptions control what a backup includes and how.
+type CreateOptions struct {
+	// Paths are the roots to back up.
+	Paths []string
+
+	// Matcher decides which paths are included. Nil includes everything.
+	Matcher *patterns.Matcher
+
+	// OneFileSystem stops the walk at a mount point.
+	OneFileSystem bool
+	// NumericIDs stores only numeric uid/gid, omitting the names.
+	NumericIDs bool
+	// NoXAttrs, NoACLs and NoFlags leave those attributes out of the archive.
+	NoXAttrs bool
+	NoACLs   bool
+	NoFlags  bool
+	// ReadSpecial reads the contents of fifos and devices instead of recording them as
+	// special files. Dangerous by nature - reading a fifo can block forever - so it is
+	// off unless asked for.
+	ReadSpecial bool
+
+	// OnItem is called for each item as it is archived.
+	OnItem func(status byte, path string)
+	// OnError is called for a per-path failure. Returning an error aborts; returning nil
+	// continues. Nil means "abort on the first error".
+	OnError func(path string, err error) error
+}
+
+// CreateStats is what a backup did, beyond the chunk accounting in Stats.
+type CreateStats struct {
+	Stats
+	Errors  int
+	Skipped int
+}
+
+// Create walks the given paths and writes every matching object into the archive.
+//
+// # Path form
+//
+// Archived paths are relative and use "/": an absolute path loses its leading slash, so
+// "/home/alice" is stored as "home/alice". That is what makes an archive restorable
+// somewhere other than where it came from, and it is why extraction refuses a stored path
+// containing "..".
+func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
+	if len(opts.Paths) == 0 {
+		return nil, errors.New("archive: no paths to back up")
+	}
+	w := &walker{
+		builder:   b,
+		opts:      opts,
+		stats:     &CreateStats{},
+		hardlinks: map[hardlinkKey][]item.ChunkListEntry{},
+		users:     map[uint32]string{},
+		groups:    map[uint32]string{},
+	}
+	for _, root := range opts.Paths {
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			return w.stats, err
+		}
+		if err := w.walk(abs, 0); err != nil {
+			return w.stats, err
+		}
+	}
+	w.stats.Stats = b.stats
+	return w.stats, nil
+}
+
+// hardlinkKey identifies an inode.
+type hardlinkKey struct{ dev, ino uint64 }
+
+type walker struct {
+	builder *Builder
+	opts    CreateOptions
+	stats   *CreateStats
+
+	// hardlinks remembers the chunk list of each inode already archived, so the second
+	// and later links store an item with the same hlid and no content of their own.
+	hardlinks map[hardlinkKey][]item.ChunkListEntry
+	// rootDev is the device of the first root, for --one-file-system.
+	rootDev uint64
+	haveDev bool
+
+	// users and groups cache id-to-name lookups, which otherwise cost a syscall or an
+	// NSS round trip per file.
+	users  map[uint32]string
+	groups map[uint32]string
+}
+
+func (w *walker) fail(path string, err error) error {
+	w.stats.Errors++
+	if w.opts.OnError == nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return w.opts.OnError(path, err)
+}
+
+// archivedPath turns an absolute path into the form stored in the archive.
+func archivedPath(abs string) string {
+	return strings.TrimPrefix(filepath.ToSlash(abs), "/")
+}
+
+func (w *walker) walk(abs string, depth int) error {
+	var st unix.Stat_t
+	if err := unix.Lstat(abs, &st); err != nil {
+		return w.fail(abs, err)
+	}
+
+	if w.opts.OneFileSystem {
+		if !w.haveDev {
+			w.rootDev, w.haveDev = st.Dev, true
+		} else if st.Dev != w.rootDev && st.Mode&unix.S_IFMT == unix.S_IFDIR {
+			w.stats.Skipped++
+			return nil
+		}
+	}
+
+	stored := archivedPath(abs)
+	included := true
+	if w.opts.Matcher != nil {
+		included = w.opts.Matcher.Match(stored)
+	}
+
+	if included {
+		if err := w.archive(abs, stored, &st); err != nil {
+			return err
+		}
+	} else {
+		w.stats.Skipped++
+	}
+
+	// Descend into a directory unless the matcher said not to. An excluded directory is
+	// still descended into by default, so an include pattern *inside* it can be found;
+	// only the no-recurse exclude form stops the walk.
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return nil
+	}
+	if !included && w.opts.Matcher != nil && !w.opts.Matcher.RecurseDir() {
+		return nil
+	}
+
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return w.fail(abs, err)
+	}
+	// Sorted, so an archive of the same tree is reproducible and two runs can be
+	// compared. Readdir order is not defined and differs between filesystems.
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		if err := w.walk(filepath.Join(abs, name), depth+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// archive builds and stores the item for one filesystem object.
+func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
+	it := &item.Item{Path: stored}
+	w.fillMetadata(it, abs, st)
+
+	status := byte('A')
+	switch st.Mode & unix.S_IFMT {
+	case unix.S_IFDIR:
+		status = 'd'
+
+	case unix.S_IFLNK:
+		target, err := os.Readlink(abs)
+		if err != nil {
+			return w.fail(abs, err)
+		}
+		it.Target = &target
+		status = 's'
+		// A symlink can be hard-linked too, and then it needs an hlid like any other
+		// multiply-linked inode.
+		w.markHardlink(it, st)
+
+	case unix.S_IFREG:
+		chunks, shared, err := w.fileChunks(abs, st)
+		if err != nil {
+			return w.fail(abs, err)
+		}
+		it.Chunks = chunks
+		it.ChunksSet = true
+		// The hlid is what makes a restore recreate the hard link rather than two
+		// independent files with the same contents. Sharing the chunk list saves space;
+		// the hlid is what preserves the *relationship*, and the two are separate.
+		w.markHardlink(it, st)
+		if shared {
+			status = 'h'
+		}
+
+	case unix.S_IFIFO, unix.S_IFCHR, unix.S_IFBLK, unix.S_IFSOCK:
+		if st.Mode&unix.S_IFMT == unix.S_IFSOCK {
+			// A socket has no content and cannot be recreated meaningfully. borg skips
+			// them, and so does borge - archiving one would restore something that is not
+			// the same object.
+			w.stats.Skipped++
+			return nil
+		}
+		if w.opts.ReadSpecial {
+			chunks, shared, err := w.fileChunks(abs, st)
+			if err != nil {
+				return w.fail(abs, err)
+			}
+			it.Chunks = chunks
+			it.ChunksSet = true
+			// Reading a special file turns it into a regular one on restore, which is what
+			// --read-special is for: the point is to capture what flows through it.
+			mode := int64(st.Mode&0o7777) | item.SIFREG
+			it.Mode = &mode
+			if shared {
+				status = 'h'
+			}
+		} else {
+			rdev := int64(st.Rdev)
+			it.RDev = &rdev
+			w.markHardlink(it, st)
+		}
+		status = 'i'
+
+	default:
+		w.stats.Skipped++
+		return nil
+	}
+
+	if err := w.builder.AddItem(it); err != nil {
+		return w.fail(abs, err)
+	}
+	if w.opts.OnItem != nil {
+		w.opts.OnItem(status, stored)
+	}
+	return nil
+}
+
+// fileChunks reads and chunks a regular file, reusing the chunk list of an inode already
+// archived.
+//
+// The second link to an inode stores no content at all: it shares the first one's chunk
+// list and its hlid. That is not only a size saving - it is what makes a restore
+// recreate the hard link rather than two independent files.
+func (w *walker) fileChunks(abs string, st *unix.Stat_t) ([]item.ChunkListEntry, bool, error) {
+	key := hardlinkKey{dev: st.Dev, ino: st.Ino}
+	if st.Nlink > 1 {
+		if chunks, ok := w.hardlinks[key]; ok {
+			return chunks, true, nil
+		}
+	}
+
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	chunks, err := w.builder.ChunkFile(f)
+	if err != nil {
+		return nil, false, err
+	}
+	if st.Nlink > 1 {
+		w.hardlinks[key] = chunks
+	}
+	return chunks, false, nil
+}
+
+// markHardlink sets an item's hlid when its inode has more than one link.
+func (w *walker) markHardlink(it *item.Item, st *unix.Stat_t) {
+	if st.Nlink <= 1 {
+		return
+	}
+	it.HLID = hardlinkID(st.Ino, st.Dev)
+}
+
+// hardlinkID is borg's hardlink_id_from_inode: sha256("<ino>/<dev>").
+//
+// A hash rather than the raw pair, because the identifier is stored in the archive and
+// inode numbers say something about the source filesystem that the archive has no reason
+// to carry.
+func hardlinkID(ino, dev uint64) []byte {
+	sum := sha256.Sum256([]byte(strconv.FormatUint(ino, 10) + "/" + strconv.FormatUint(dev, 10)))
+	return sum[:]
+}
+
+// fillMetadata records everything about an object except its content.
+func (w *walker) fillMetadata(it *item.Item, abs string, st *unix.Stat_t) {
+	mode := int64(st.Mode)
+	it.Mode = &mode
+
+	uid, gid := int64(st.Uid), int64(st.Gid)
+	it.UID, it.GID = &uid, &gid
+	if !w.opts.NumericIDs {
+		if name := w.userName(st.Uid); name != "" {
+			it.User = &name
+		}
+		if name := w.groupName(st.Gid); name != "" {
+			it.Group = &name
+		}
+	}
+
+	mtime := st.Mtim.Sec*1e9 + st.Mtim.Nsec
+	atime := st.Atim.Sec*1e9 + st.Atim.Nsec
+	ctime := st.Ctim.Sec*1e9 + st.Ctim.Nsec
+	it.MTime, it.ATime, it.CTime = &mtime, &atime, &ctime
+
+	size := int64(st.Size)
+	if st.Mode&unix.S_IFMT == unix.S_IFREG {
+		it.Size = &size
+	}
+	inode := int64(st.Ino)
+	it.Inode = &inode
+
+	if !w.opts.NoXAttrs {
+		if attrs, err := GetXAttrs(abs); err == nil && len(attrs) > 0 {
+			it.XAttrs = attrs
+			it.XAttrsSet = true
+		}
+	}
+	if !w.opts.NoACLs {
+		w.fillACLs(it, abs, st)
+	}
+}
+
+// fillACLs records the POSIX ACLs of an object.
+//
+// Only an object that actually carries an extended ACL gets the fields: a file whose
+// "ACL" is just its mode bits has nothing to record, and storing one would make every
+// file in the archive larger for no gain.
+func (w *walker) fillACLs(it *item.Item, abs string, st *unix.Stat_t) {
+	if st.Mode&unix.S_IFMT == unix.S_IFLNK {
+		return // symlinks carry no ACL
+	}
+	if text, err := GetACLText(abs, xattrACLAccess, w.opts.NumericIDs); err == nil && text != "" {
+		it.ACLAccess = []byte(text)
+	}
+	if st.Mode&unix.S_IFMT == unix.S_IFDIR {
+		if text, err := GetACLText(abs, xattrACLDefault, w.opts.NumericIDs); err == nil && text != "" {
+			it.ACLDefault = []byte(text)
+		}
+	}
+}
+
+func (w *walker) userName(uid uint32) string {
+	if name, ok := w.users[uid]; ok {
+		return name
+	}
+	name := ""
+	if u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10)); err == nil {
+		name = u.Username
+	}
+	w.users[uid] = name
+	return name
+}
+
+func (w *walker) groupName(gid uint32) string {
+	if name, ok := w.groups[gid]; ok {
+		return name
+	}
+	name := ""
+	if g, err := user.LookupGroupId(strconv.FormatUint(uint64(gid), 10)); err == nil {
+		name = g.Name
+	}
+	w.groups[gid] = name
+	return name
+}

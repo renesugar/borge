@@ -302,11 +302,11 @@ func GetACLText(path, attr string, numericIDs bool) (string, error) {
 		case aclUserObj:
 			lines = append(lines, "user::"+perms)
 		case aclUser:
-			lines = append(lines, fmt.Sprintf("user:%d:%s", e.id, perms))
+			lines = append(lines, fmt.Sprintf("user:%s:%s:%d", aclUserField(e.id, numericIDs), perms, e.id))
 		case aclGroupObj:
 			lines = append(lines, "group::"+perms)
 		case aclGroup:
-			lines = append(lines, fmt.Sprintf("group:%d:%s", e.id, perms))
+			lines = append(lines, fmt.Sprintf("group:%s:%s:%d", aclGroupField(e.id, numericIDs), perms, e.id))
 		case aclMask:
 			lines = append(lines, "mask::"+perms)
 		case aclOther:
@@ -316,6 +316,34 @@ func GetACLText(path, attr string, numericIDs bool) (string, error) {
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// aclUserField and aclGroupField render the name field of a named ACL entry.
+//
+// The **fourth field is not optional**. borg's acl_set reads `fields[3]` unconditionally
+// for any entry whose name field is non-empty, so a three-field named entry makes borg
+// raise IndexError while restoring - the archive would be unreadable by the tool it is
+// meant to interoperate with. The owner, owning-group, mask and other entries keep the
+// three-field form, because their name field is empty and borg does not look further.
+//
+// With numeric ids the name field holds the number too, which is what borg's
+// _acl_from_numeric_to_numeric_with_id produces.
+func aclUserField(id uint32, numericIDs bool) string {
+	if !numericIDs {
+		if u, err := user.LookupId(strconv.FormatUint(uint64(id), 10)); err == nil && u.Username != "" {
+			return u.Username
+		}
+	}
+	return strconv.FormatUint(uint64(id), 10)
+}
+
+func aclGroupField(id uint32, numericIDs bool) string {
+	if !numericIDs {
+		if g, err := user.LookupGroupId(strconv.FormatUint(uint64(id), 10)); err == nil && g.Name != "" {
+			return g.Name
+		}
+	}
+	return strconv.FormatUint(uint64(id), 10)
 }
 
 func unpackACL(buf []byte) ([]aclEntry, error) {

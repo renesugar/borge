@@ -139,6 +139,15 @@ type Key interface {
 
 	// Encrypts reports whether this mode hides the payload. The MAC modes do not.
 	Encrypts() bool
+
+	// DeriveIDKey derives key material from the *id* key, for a caller-chosen domain.
+	//
+	// The chunker uses this: its table has to be secret, or an observer could infer
+	// chunk boundaries and hence file contents from chunk sizes alone. It comes from the
+	// id key rather than the crypt key because related repositories deliberately share
+	// the id key - that is what lets them deduplicate against each other, and it would
+	// not work if they chunked differently.
+	DeriveIDKey(domain []byte, size int) ([]byte, error)
 }
 
 // AssertID verifies that data hashes to id.
@@ -219,6 +228,13 @@ func (k *macKey) Encrypts() bool { return false }
 func (k *macKey) IDCheckIsAuthentication() bool { return k.unkeyed }
 
 func (k *macKey) IDHash(data []byte) []byte { return k.idHash(k.idKey, data) }
+
+// DeriveIDKey derives from the id key. For the unkeyed none-* modes that key is empty,
+// so every repository of those modes derives the same value - which is correct: they have
+// no secrets, and they all have to chunk alike to deduplicate alike.
+func (k *macKey) DeriveIDKey(domain []byte, size int) ([]byte, error) {
+	return DeriveKey(k.idKey, nil, domain, size)
+}
 
 // tagPrefix is everything the tag covers except the payload.
 //

@@ -457,3 +457,25 @@ func (m *Manifest) Write() error {
 	}
 	return m.repo.PutManifest(obj)
 }
+
+// Create builds the manifest a fresh repository starts with.
+//
+// It is not written here: the caller writes it, because a repository is only usable once
+// the manifest is on disk and the caller is the one that knows whether the rest of the
+// creation succeeded.
+func Create(r *repository.Repository, k key.Key) (*Manifest, error) {
+	ro, err := repoobj.New(k)
+	if err != nil {
+		return nil, err
+	}
+	m := &Manifest{
+		repo:     r,
+		ro:       ro,
+		key:      k,
+		version:  Version,
+		Config:   msgpackx.NewStableMap(),
+		ItemKeys: append([]string(nil), ItemKeys...),
+	}
+	m.Archives = &Archives{repo: r, manifest: m}
+	return m, nil
+}

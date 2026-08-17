@@ -129,6 +129,12 @@ func (k *aeadKey) IDCheckIsAuthentication() bool { return false }
 
 func (k *aeadKey) IDHash(data []byte) []byte { return k.idHash(k.idKey, data) }
 
+// DeriveIDKey derives from the id key; see the Key interface for why it is the id key and
+// not the crypt key.
+func (k *aeadKey) DeriveIDKey(domain []byte, size int) ([]byte, error) {
+	return DeriveKey(k.idKey, nil, domain, size)
+}
+
 // newSession draws a fresh session id and derives its key. Callers hold k.mu.
 func (k *aeadKey) newSession() error {
 	id := make([]byte, aeadSessionIDSize)

@@ -40,6 +40,8 @@ package chunker
 import (
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 )
 
 // Algorithm names, as they appear in --chunker-params and in stored archive metadata
@@ -262,4 +264,77 @@ func classify(data []byte) Chunk {
 		}
 	}
 	return Chunk{Data: nil, Size: len(data), Allocation: AllocAlloc}
+}
+
+// ParseParams reads a --chunker-params specification.
+//
+// The forms are borg's, and the numbers are positional because that is how the archive
+// records them:
+//
+//	fastcdc,CHUNK_MIN_EXP,CHUNK_MAX_EXP,HASH_MASK_BITS,NC_LEVEL
+//	buzhash64,CHUNK_MIN_EXP,CHUNK_MAX_EXP,HASH_MASK_BITS,HASH_WINDOW_SIZE,NC_LEVEL
+//	buzhash,CHUNK_MIN_EXP,CHUNK_MAX_EXP,HASH_MASK_BITS,HASH_WINDOW_SIZE
+//	fixed,BLOCK_SIZE[,HEADER_SIZE]
+//
+// A bare "default" is the fastcdc default. borg also accepts the four-number form with no
+// algorithm, which meant buzhash before borg 2; borge refuses it rather than guessing,
+// because guessing wrong changes every chunk boundary in the archive.
+func ParseParams(spec string) (Params, error) {
+	fields := strings.Split(spec, ",")
+	if len(fields) == 0 || fields[0] == "" {
+		return Params{}, fmt.Errorf("chunker: empty chunker parameters")
+	}
+	if fields[0] == "default" && len(fields) == 1 {
+		return DefaultParams(), nil
+	}
+
+	nums := make([]int, 0, len(fields)-1)
+	for _, f := range fields[1:] {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil {
+			return Params{}, fmt.Errorf("chunker: %q is not a number in %q", f, spec)
+		}
+		nums = append(nums, n)
+	}
+
+	want := func(n int) error {
+		if len(nums) != n {
+			return fmt.Errorf("chunker: %s takes %d numbers, got %d in %q", fields[0], n, len(nums), spec)
+		}
+		return nil
+	}
+
+	switch fields[0] {
+	case AlgoFastCDC:
+		if err := want(4); err != nil {
+			return Params{}, err
+		}
+		return Params{Algorithm: AlgoFastCDC, ChunkMinExp: nums[0], ChunkMaxExp: nums[1],
+			HashMaskBits: nums[2], NCLevel: nums[3]}, nil
+	case AlgoBuzhash64:
+		if err := want(5); err != nil {
+			return Params{}, err
+		}
+		return Params{Algorithm: AlgoBuzhash64, ChunkMinExp: nums[0], ChunkMaxExp: nums[1],
+			HashMaskBits: nums[2], WindowSize: nums[3], NCLevel: nums[4]}, nil
+	case AlgoBuzhash:
+		if err := want(4); err != nil {
+			return Params{}, err
+		}
+		return Params{Algorithm: AlgoBuzhash, ChunkMinExp: nums[0], ChunkMaxExp: nums[1],
+			HashMaskBits: nums[2], WindowSize: nums[3]}, nil
+	case AlgoFixed:
+		if len(nums) != 1 && len(nums) != 2 {
+			return Params{}, fmt.Errorf("chunker: fixed takes 1 or 2 numbers, got %d in %q", len(nums), spec)
+		}
+		p := Params{Algorithm: AlgoFixed, BlockSize: nums[0]}
+		if len(nums) == 2 {
+			p.HeaderSize = nums[1]
+		}
+		return p, nil
+	default:
+		return Params{}, fmt.Errorf("chunker: unknown chunker %q "+
+			"(borge requires the algorithm name; borg's bare four-number form meant buzhash "+
+			"before borg 2 and guessing it would change every chunk boundary)", fields[0])
+	}
 }

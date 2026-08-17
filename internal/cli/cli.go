@@ -82,10 +82,12 @@ type command struct {
 // It is a list rather than a map so the help has a sensible order: alphabetical would put
 // "delete" before "extract", which is not how anybody thinks about a backup tool.
 var commands = []command{
+	{"repo-create", "create a new repository", cmdRepoCreate},
 	{"repo-list", "list the archives in a repository", cmdRepoList},
 	{"repo-info", "show information about a repository", cmdRepoInfo},
 	{"list", "list the contents of an archive", cmdList},
 	{"info", "show information about an archive", cmdInfo},
+	{"create", "create an archive from paths", cmdCreate},
 	{"extract", "extract an archive", cmdExtract},
 }
 
