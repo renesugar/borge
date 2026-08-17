@@ -140,3 +140,44 @@ known-repositories file are rebuilt from the repository when absent.
 Environment variables *are* shared, in a read-only direction: borge reads `BORGE_*`
 first and falls back to `BORG_*`, so an exported `BORG_PASSPHRASE` keeps working
 without borge squatting on borg's namespace.
+
+## 5. borge reads borg's keys directory but writes into its own
+
+**Stage 4 · `internal/crypto/key/manager.go`, `KeysDirs` · by design**
+
+Divergence 4 says config directories are not shared. Key files are the one place where
+that rule, applied strictly, would break the thing the project is for: a key file is
+byte-for-byte the same under either tool, and a user who runs `borg repo-create
+--key-location=keyfile` and then reaches for borge would find that borge cannot open the
+repository borg just made — not because of the format, but because it declined to look
+in the obvious place.
+
+So the keyfile search path is a list, not a single directory:
+
+1. `BORGE_KEYS_DIR`, else `BORG_KEYS_DIR` — an explicit setting pins the search to that
+   one directory and stops there. Someone who says where the keys are is not asking for
+   a search.
+2. `BORGE_CONFIG_DIR/keys`, then `BORG_CONFIG_DIR/keys`.
+3. `BORGE_BASE_DIR/.config/borge/keys`, then `BORG_BASE_DIR/.config/borg/keys`.
+4. Otherwise the platform config directory, `borge/keys` first and `borg/keys` second.
+
+New key files are written to the **first** entry only, so borge never creates anything
+inside borg's configuration directory. The asymmetry is deliberate: reading someone
+else's directory is harmless, writing to it is not.
+
+The consequence to be aware of is the reverse direction. borg looks in exactly one
+place, so a keyfile borge created is not found by borg unless `BORG_KEYS_DIR` points at
+it or the file is copied. `borge key export` / `borg key import` is the supported route,
+and the stage 4 gate exercises it.
+
+## 6. The paper key template is copied, not ported
+
+**Stage 4 · `internal/crypto/key/paperkey.html` · by necessity**
+
+`ExportPaperKeyHTML` serves borg's `paperkey.html` unchanged. It is a 66 KB self-contained
+page carrying an inlined QR generator and SHA-256 implementation (both MIT, see NOTICE),
+and it is the *reader* for a printed key as well as its writer. Reimplementing it would
+mean a printed key whose QR codes a borg installation might not scan back, which is a
+risk with no upside. The numbered-line format, which is what a human types back in, *is*
+ported — and `TestPaperKeyMatchesBorg` asserts that borge's printout is byte-identical to
+borg's, line for line.

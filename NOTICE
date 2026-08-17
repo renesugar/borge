@@ -20,6 +20,14 @@ Portions of this software are derived from BorgBackup (https://github.com/borgba
   used to endorse or promote this project. This project is not produced, sponsored
   or endorsed by the Borg Collective.
 
+  internal/crypto/key/paperkey.html is borg's src/borg/paperkey.html, included
+  verbatim rather than translated: it is the printable key template, and a key
+  printed by one tool has to be readable by the other. It carries two inlined
+  MIT-licensed JavaScript libraries, whose notices are preserved inside the file:
+
+    - Kazuhiko Arase's qrcode-generator, Copyright (c) 2009 Kazuhiko Arase
+    - Chris Veness's SHA-256 implementation, Copyright (c) 2002-2014 Chris Veness
+
 --------------------------------------------------------------------------------
 Portions of this software are derived from borghash (https://github.com/borgbackup/borghash)
 and from borgstore (https://github.com/borgbackup/borgstore)
