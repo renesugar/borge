@@ -13,8 +13,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/repoobj"
 	"github.com/renesugar/borge/internal/store"
 )
 
@@ -76,4 +78,57 @@ func (r *Repository) DeleteKey(name string) error {
 // the repokey store.
 func (r *Repository) KeyManager() (*key.Manager, error) {
 	return key.NewManager(r.id, r)
+}
+
+// DetectKeyType reports which crypto mode this repository uses, by looking at the first
+// byte of the manifest object.
+//
+// This is how a repository is identified before anything has been unlocked: the type byte
+// is outside the encryption, because something has to say which key to look for. Note
+// what it does *not* say - where the key is stored is not encoded in it.
+func (r *Repository) DetectKeyType() (byte, error) {
+	obj, err := r.Manifest()
+	if err != nil {
+		return 0, fmt.Errorf("repository: cannot read the manifest: %w", err)
+	}
+	crypted, err := repoobj.ExtractCryptedData(obj)
+	if err != nil {
+		return 0, err
+	}
+	if len(crypted) == 0 {
+		return 0, errors.New("repository: the manifest object has an empty data slot")
+	}
+	return crypted[0], nil
+}
+
+// Unlock opens the repository's key.
+//
+// The passphrase is ignored by the none-* modes, which have no key material at all -
+// asking for one there would be theatre, not security.
+func (r *Repository) Unlock(passphrase string) (key.Key, *key.Unlocked, error) {
+	keyType, err := r.DetectKeyType()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !key.IsImplementedType(keyType) {
+		return nil, nil, fmt.Errorf("repository: this repository uses %s", key.TypeName(keyType))
+	}
+	if !key.RequiresKeyMaterial(keyType) {
+		k, err := key.FromMaterialForType(keyType, nil)
+		return k, nil, err
+	}
+
+	m, err := r.KeyManager()
+	if err != nil {
+		return nil, nil, err
+	}
+	unlocked, err := m.Unlock(passphrase)
+	if err != nil {
+		return nil, nil, err
+	}
+	k, err := key.FromMaterialForType(keyType, unlocked.Material)
+	if err != nil {
+		return nil, nil, err
+	}
+	return k, unlocked, nil
 }

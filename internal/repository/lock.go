@@ -15,8 +15,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/renesugar/borge/internal/store"
@@ -41,11 +43,16 @@ type Lock struct {
 	store     *store.Store
 	exclusive bool
 
-	// id identifies this holder: host, process, and a random value standing in for the
-	// thread id borg uses.
+	// id identifies this holder. The three fields are borg's identity tuple, and their
+	// types are load-bearing: borg asserts that processid and threadid are integers, so a
+	// lock carrying anything else makes borg abort rather than merely ignore it.
+	//
+	// threadID is always zero, as it is in borg. The consequence is that two locks taken
+	// by the same process do not conflict with each other - which is borg's behaviour
+	// too, and is what lets a single process hold a lock across nested operations.
 	hostID    string
 	processID int
-	threadID  string
+	threadID  threadID
 
 	myKey       string
 	lastRefresh time.Time
@@ -63,13 +70,70 @@ var (
 	ErrNotLocked = errors.New("repository: not locked")
 )
 
+// lockTimeLayout is how a lock's timestamp is written.
+//
+// It has to be **timezone-aware**, matching Python's
+// datetime.now(UTC).isoformat(timespec="milliseconds") - which produces a "+00:00"
+// suffix, not a bare local-looking time and not a "Z".
+//
+// This is not cosmetic. borg parses the field with datetime.fromisoformat and then
+// compares it against an aware "now": a naive timestamp makes that comparison raise
+// TypeError, so a lock written by borge would crash borg on every subsequent repository
+// access. It was found by the stage 4 gate, where borg had to open a repository borge
+// still held.
+const lockTimeLayout = "2006-01-02T15:04:05.000-07:00"
+
+// parseLockTime reads a lock timestamp.
+//
+// Both spellings are accepted on the way in - with an offset, and the bare form borge
+// itself wrote before this was fixed - because refusing to parse a lock means silently
+// ignoring it, and ignoring a lock is how two writers end up in one repository. A lock
+// that cannot be read is more dangerous than one that is slightly the wrong shape.
+func parseLockTime(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02T15:04:05.000", strings.TrimSuffix(s, "Z"))
+}
+
 // lockRecord is the JSON stored in a lock object. The field names are borg's.
 type lockRecord struct {
-	Exclusive bool   `json:"exclusive"`
-	HostID    string `json:"hostid"`
-	ProcessID int    `json:"processid"`
-	ThreadID  string `json:"threadid"`
-	Time      string `json:"time"`
+	Exclusive bool     `json:"exclusive"`
+	HostID    string   `json:"hostid"`
+	ProcessID int      `json:"processid"`
+	ThreadID  threadID `json:"threadid"`
+	Time      string   `json:"time"`
+}
+
+// threadID decodes borg's integer thread id, and also tolerates a string.
+//
+// borg always writes an integer and asserts on anything else. borge is lenient on the way
+// *in* for the same reason it accepts both timestamp spellings: a lock it refuses to
+// parse is a lock it might act on wrongly, and being generous about a field nobody uses
+// costs nothing.
+type threadID int
+
+func (t *threadID) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		// The value is only ever compared for equality, so a non-numeric string just
+		// becomes "not zero" - which is what it means.
+		if s == "0" || s == "" {
+			*t = 0
+		} else {
+			*t = -1
+		}
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*t = threadID(n)
+	return nil
 }
 
 // Default lock timings, from borg.
@@ -84,27 +148,100 @@ const (
 
 // NewLock returns a lock for a store.
 func NewLock(s *store.Store, exclusive bool) (*Lock, error) {
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown"
-	}
-	// borg uses a host id that includes more than the hostname; the important property
-	// is only that two different machines do not collide, and that a lock can be
-	// recognised as ours.
-	var rnd [8]byte
-	if _, err := rand.Read(rnd[:]); err != nil {
-		return nil, fmt.Errorf("repository: %w", err)
-	}
 	return &Lock{
 		store:     s,
 		exclusive: exclusive,
-		hostID:    host,
+		hostID:    HostID(),
 		processID: os.Getpid(),
-		threadID:  hex.EncodeToString(rnd[:]),
+		threadID:  0, // always, as in borg; see the Lock struct
 		timeout:   defaultLockTimeout,
 		stale:     defaultLockStale,
 		sleep:     defaultLockSleep,
 	}, nil
+}
+
+// hostIDOnce caches the host id, which involves a network interface lookup.
+var (
+	hostIDOnce  sync.Once
+	hostIDValue string
+)
+
+// HostID identifies this machine in a lock record, in borg's spelling: "<fqdn>@<node>",
+// where node is a MAC address as a decimal integer (Python's uuid.getnode()).
+//
+// # Why the spelling matters
+//
+// borg compares this against its own host id to decide whether it may check the recorded
+// pid for liveness. If the two do not match, borg assumes the lock's owner is alive - the
+// conservative answer - and falls back on the staleness timeout. So a mismatch is safe
+// but costs half an hour of waiting after a crash, which is worth avoiding.
+//
+// It cannot be guaranteed to match: Python and Go may pick different interfaces on a
+// multi-homed machine, and getfqdn's behaviour depends on the resolver. BORG_HOST_ID
+// exists for exactly that case and is honoured here, so the two can always be aligned
+// explicitly.
+func HostID() string {
+	hostIDOnce.Do(func() {
+		if v, ok := lookupEnv("HOST_ID"); ok && v != "" {
+			hostIDValue = v
+			return
+		}
+		host, err := os.Hostname()
+		if err != nil || host == "" {
+			host = "unknown"
+		}
+		hostIDValue = fmt.Sprintf("%s@%d", host, nodeID())
+	})
+	return hostIDValue
+}
+
+// nodeID is Python's uuid.getnode(): the first usable MAC address as a 48-bit integer.
+//
+// Python falls back to a random value when it finds none, and so does this - a random
+// value cannot collide with another machine's real one, which is the property that
+// matters. A zero MAC is skipped for the reason borg documents (borg #3968): some
+// virtualised environments hand out an all-zero address to everybody.
+func nodeID() uint64 {
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagLoopback != 0 || len(iface.HardwareAddr) != 6 {
+				continue
+			}
+			var v uint64
+			var nonZero bool
+			for _, b := range iface.HardwareAddr {
+				v = v<<8 | uint64(b)
+				if b != 0 {
+					nonZero = true
+				}
+			}
+			if nonZero {
+				return v
+			}
+		}
+	}
+	var rnd [6]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return 0
+	}
+	var v uint64
+	for _, b := range rnd {
+		v = v<<8 | uint64(b)
+	}
+	// Set the multicast bit, as Python does, to mark the value as not a real address.
+	return v | (1 << 40)
+}
+
+// setHolder overrides the identity this lock is taken under.
+//
+// It exists so tests can act as a second client without starting a second process. The
+// identity is otherwise fixed for the lifetime of the process, which is the point:
+// pretending to be somebody else is not something a real caller should be able to do.
+func (l *Lock) setHolder(host string, pid, thread int) {
+	l.hostID = host
+	l.processID = pid
+	l.threadID = threadID(thread)
 }
 
 // SetTimeout overrides how long Acquire waits for a conflicting lock to go away.
@@ -122,7 +259,7 @@ func (l *Lock) create(exclusive bool) (string, error) {
 		HostID:    l.hostID,
 		ProcessID: l.processID,
 		ThreadID:  l.threadID,
-		Time:      time.Now().UTC().Format("2006-01-02T15:04:05.000"),
+		Time:      time.Now().UTC().Format(lockTimeLayout),
 	}
 	value, err := json.Marshal(rec)
 	if err != nil {
@@ -175,13 +312,17 @@ func (l *Lock) getLocks() ([]heldLock, error) {
 		}
 		var rec lockRecord
 		if err := json.Unmarshal(value, &rec); err != nil {
-			// Not a lock we understand. Leave it alone rather than deleting something
-			// another tool may own.
-			continue
+			// A lock that cannot be read must not be treated as a lock that is not there.
+			// Ignoring it would let a second writer into a repository somebody is using,
+			// which is the one failure this whole mechanism exists to prevent - so refuse
+			// to proceed and say which object is the problem. borg fails here too.
+			return nil, fmt.Errorf("repository: locks/%s could not be read (%w); "+
+				"if no borg or borge is running, remove the stale lock", key, err)
 		}
-		at, err := time.Parse("2006-01-02T15:04:05.000", strings.TrimSuffix(rec.Time, "Z"))
+		at, err := parseLockTime(rec.Time)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("repository: locks/%s has an unreadable timestamp %q; "+
+				"if no borg or borge is running, remove the stale lock", key, rec.Time)
 		}
 		if time.Since(at) > l.stale {
 			// Stale: the holder has not refreshed it in long enough that it is presumed

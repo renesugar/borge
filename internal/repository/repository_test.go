@@ -476,12 +476,15 @@ func TestExclusiveLockExcludes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Another holder must be refused, exclusive or shared.
+	// Another holder must be refused, exclusive or shared. It has to be given a distinct
+	// identity: locks taken by the same process do not conflict with each other, which is
+	// borg's behaviour and what lets one process hold a lock across nested operations.
 	for _, exclusive := range []bool{true, false} {
 		second, err := NewLock(s, exclusive)
 		if err != nil {
 			t.Fatal(err)
 		}
+		second.setHolder("another-host", 424242, 0)
 		second.SetTimeout(50 * time.Millisecond)
 		if err := second.Acquire(); !errors.Is(err, ErrLockTimeout) {
 			t.Errorf("exclusive=%v: acquired alongside an exclusive lock (%v)", exclusive, err)
@@ -497,6 +500,7 @@ func TestExclusiveLockExcludes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	third.setHolder("another-host", 424242, 0)
 	third.SetTimeout(50 * time.Millisecond)
 	if err := third.Acquire(); err != nil {
 		t.Errorf("could not acquire after a release: %v", err)
@@ -512,6 +516,7 @@ func TestSharedLocksCoexist(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		l.setHolder("shared-host", 1000+i, 0)
 		l.SetTimeout(50 * time.Millisecond)
 		if err := l.Acquire(); err != nil {
 			t.Fatalf("shared lock %d was refused: %v", i, err)
@@ -524,6 +529,7 @@ func TestSharedLocksCoexist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ex.setHolder("exclusive-host", 2000, 0)
 	ex.SetTimeout(50 * time.Millisecond)
 	if err := ex.Acquire(); !errors.Is(err, ErrLockTimeout) {
 		t.Errorf("an exclusive lock was taken alongside shared ones: %v", err)
@@ -543,6 +549,7 @@ func TestStaleLocksAreRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	abandoned.setHolder("dead-host", 999999, 0)
 	if err := abandoned.Acquire(); err != nil {
 		t.Fatal(err)
 	}
@@ -591,19 +598,62 @@ func TestRepositoryLocking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A second exclusive open must be refused while the first is held.
-	if _, err := Open(path, Options{Exclusive: true}); err == nil {
-		t.Error("a second exclusive open succeeded")
+	// Another *client* must be refused. It is written directly into locks/, because a
+	// Lock built here would carry this process's identity - and locks taken by the same
+	// process deliberately do not conflict (borg behaves the same way, and it is what
+	// lets one process hold a lock across nested operations).
+	foreign := fmt.Sprintf(
+		`{"exclusive": true, "hostid": "elsewhere", "processid": 4242, "threadid": 0, "time": %q}`,
+		time.Now().UTC().Format(lockTimeLayout))
+	sum := sha256.Sum256([]byte(foreign))
+	foreignName := filepath.Join(path, "locks", hex.EncodeToString(sum[:]))
+	if err := os.WriteFile(foreignName, []byte(foreign), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	if r2, err := Open(path, Options{Exclusive: true}); err == nil {
+		r2.Close()
+		t.Error("an open succeeded while another client held an exclusive lock")
+	}
+	if err := os.Remove(foreignName); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// And succeed once it is closed.
+	// And an open succeeds once the repository is free.
 	r2, err := Open(path, Options{Exclusive: true})
 	if err != nil {
 		t.Fatalf("could not open after close: %v", err)
 	}
 	r2.Close()
+}
+
+// TestSameProcessLocksDoNotConflict pins the consequence of using borg's identity tuple:
+// the thread id is always zero, so two locks taken by one process see each other as
+// "ours". borg is the same. It is recorded here because it is easy to mistake for a bug.
+func TestSameProcessLocksDoNotConflict(t *testing.T) {
+	s := newTestStore(t)
+	first, err := NewLock(s, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.SetTimeout(50 * time.Millisecond)
+	if err := first.Acquire(); err != nil {
+		t.Fatal(err)
+	}
+	defer first.Release(true)
+
+	second, err := NewLock(s, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.SetTimeout(50 * time.Millisecond)
+	if err := second.Acquire(); err != nil {
+		t.Errorf("a second lock in the same process was refused: %v", err)
+	} else {
+		_ = second.Release(true)
+	}
 }
 
 // ---------------------------------------------------------------------------- index

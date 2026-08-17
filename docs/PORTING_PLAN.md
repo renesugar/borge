@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-3 complete. Stage 4 (keys: the AEAD modes and key storage) is next.**
+Status: **Stages 0-4 complete. Stage 5 (read path: manifest, archive, extraction) is next.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -702,6 +702,62 @@ tested before Stage 1.3's OCB work is trusted. The AEAD modes join at the Stage 
 **Gate:** borge unlocks a repokey and a keyfile repository created by borg (all
 passphrase-protected modes), and borg unlocks borge-created ones; `borge key export` /
 `borg key import` cross-check in both directions.
+
+> **Done 2026-08-16** (`internal/crypto/key`: `aead.go`, `blob.go`, `manager.go`,
+> `paperkey.go`; `internal/repository/keys.go`). Gate green:
+>
+> - **All ten mode/location combinations** borg can create — `aes256-ocb`,
+>   `chacha20-poly1305`, both with `sha256` and `blake3` id hashes, `authenticated-*`,
+>   `none-*`, in `repokey` and `keyfile` — are opened by borge, which finds the key where
+>   borg put it and **decrypts the manifest object** with the key it derives.
+> - borg keeps working after borge writes into it: a key borge added opens the
+>   repository, `borg key list` shows both keys, and a passphrase borge changed takes
+>   effect for borg (old refused, new accepted).
+> - `borg key export` → borge reads it; `borge key export` → `borg key import` → borg
+>   still opens the repository, and borge finds the keyfile borg wrote.
+> - Every mode's **id hash matches borg exactly**, and the deterministic MAC modes
+>   produce **byte-identical envelopes**. The AEAD modes are checked by round trip in
+>   both directions, which is what tests the session key derivation: borg picks a random
+>   session id and borge has to rederive the same key from it.
+> - The **paper key printout is byte-identical to borg's**, line for line, and borge
+>   reads borg's.
+>
+> **Finding, and a real bug fixed: borge's lock records were unreadable to borg.**
+> Two defects, both in stage 3 code, both invisible until borg had to open a repository
+> borge was holding:
+>
+> - The timestamp was timezone-naive. borg parses it with `datetime.fromisoformat` and
+>   compares it against an aware `now`, so borg **crashed with TypeError** on every
+>   access to a repository borge had touched. Fixed by writing `+00:00`, matching
+>   Python's `isoformat(timespec="milliseconds")`.
+> - `threadid` was a random hex string. borg asserts it is an `int`, so borg **aborted**
+>   rather than merely ignoring the lock. It is now always `0`, as in borg.
+>
+> The second one has a consequence worth stating: with borg's identity tuple
+> `(hostid, pid, 0)`, two locks taken by *one process* no longer conflict.
+> `TestSameProcessLocksDoNotConflict` records that, because it looks like a bug and is
+> not — it is borg's behaviour, and it is what lets one process hold a lock across
+> nested operations.
+>
+> The same class of mistake was closed in the other direction too: borge used to *skip*
+> any lock it could not parse, which silently turns "somebody is using this repository"
+> into "nobody is". It now refuses to proceed and names the object.
+>
+> **Finding: `BORG_TESTONLY_WEAKEN_KDF` weakens the derivation but records the real
+> argon2 parameters** in the blob, so a key written under it cannot be opened without
+> it. borge routes sealing and opening through one chokepoint that reproduces this;
+> writing the weakened parameters into the blob instead would have looked more honest
+> and made the two tools unable to read each other's test keys.
+>
+> Two departures recorded in `docs/DIVERGENCES.md`: the keyfile search path reads borg's
+> directory but writes only borge's (§5), and `paperkey.html` is copied verbatim rather
+> than ported (§6).
+>
+> Concurrency work landed here as well, because the AEAD path is the first thing stage 6
+> will use from a worker pool: `ocb` precomputes its `L` table so `Seal`/`Open` no longer
+> write to the receiver, and the message counter is mutex-guarded with
+> `TestAEADCounterIsUnique` asserting uniqueness under `-race`. A repeated
+> (session key, nonce) pair is not a survivable bug.
 
 ---
 

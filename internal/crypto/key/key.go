@@ -18,26 +18,32 @@
 //     is what stops an observer from confirming that a known file is in the repository.
 //   - **Envelope.** Encrypt and Decrypt wrap a payload so it can be authenticated (and
 //     in the AEAD modes, hidden).
-//   - **Storage.** Where the key material itself lives - a keyfile or the repository.
-//     That is stage 4; this package currently implements the modes that need no stored
-//     key material and the ones whose material is supplied directly.
+//   - **Storage.** Where the key material itself lives - a keyfile, or the repository's
+//     keys/ namespace. See blob.go and manager.go.
 //
-// # Which modes are implemented
+// # The modes
 //
-// The MAC-based family, which covers everything that does not encrypt:
+// The MAC-based family, which authenticates but does not encrypt (this file):
 //
 //	none-sha256            unkeyed checksum       type 0x80
 //	none-blake3            unkeyed checksum       type 0x90
 //	authenticated-sha256   keyed MAC              type 0x60
 //	authenticated-blake3   keyed MAC              type 0x70
 //
-// docs/PORTING_PLAN.md §7 calls for exactly this order: these modes exercise the whole
-// object and archive path with no crypto risk, so stages 3, 5 and 6 can be built and
-// interop-tested before the AEAD modes and their key derivation land.
+// and the AEAD family, which encrypts (aead.go):
 //
-// The AEAD modes (aes256-ocb, chacha20-poly1305, and their blake3 variants) are
-// stage 4. internal/crypto already has the ciphers; what is missing is the session key
-// derivation and the key blob handling.
+//	aes256-ocb                  AES-256-OCB, HMAC-SHA-256 ids   type 0x10
+//	chacha20-poly1305           ChaCha20-Poly1305, ditto        type 0x20
+//	blake3-aes256-ocb           AES-256-OCB, BLAKE3 ids         type 0x30
+//	blake3-chacha20-poly1305    ChaCha20-Poly1305, BLAKE3 ids   type 0x40
+//
+// Note what the type byte does *not* encode: whether the key is a keyfile or a repokey.
+// borg arrived at that separation after coupling them for years, and it is easy to
+// re-couple by accident, so nothing here derives one from the other.
+//
+// The MAC modes were built first, per docs/PORTING_PLAN.md §7: they exercise the whole
+// object and archive path with no crypto risk, so stage 3 could be interop-tested before
+// the AEAD modes landed.
 package key
 
 import (
