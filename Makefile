@@ -15,7 +15,7 @@ BORG2       := tests/borg2/borg2
 # that hangs must fail rather than run forever - it is just set to fit the work.
 TIMEOUT     ?= -timeout 60m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering interop \
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence clean help
 
 all: check
@@ -109,6 +109,10 @@ msgpack-fixtures:
 	.venv-borg2/bin/python internal/msgpackx/testdata/gen_fixtures.py \
 		> internal/msgpackx/testdata/fixtures.txt
 	@echo "regenerated internal/msgpackx/testdata/fixtures.txt"
+
+## coverage: compare borg's subcommand list against borge's (the stage 8 gate)
+coverage: build
+	./tests/evidence/command-coverage.sh
 
 ## evidence: build a stage evidence bundle, e.g. make evidence STAGE=stage-0
 evidence:

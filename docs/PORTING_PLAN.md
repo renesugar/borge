@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark` and `completion` done - the command list is complete. The remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark` and `completion` done: **28 of borg's 36 commands**. `key`, `repo-delete` and `help` are still missing, and the remote backends (`serve`, sftp/rest/s3/rclone) with them. `mount`/`umount`/`webdav` are §0.6 non-goals.**
 Last updated: 2026-08-17.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -1307,7 +1307,35 @@ Everything needed for feature parity, once correctness is established.
 > offers; a syntax check would pass on a script that completes nothing. tcsh is refused with
 > an explanation rather than generated (DIVERGENCES #15).
 
-- Remote store backends: `sftp`, `rest` (+ `borge serve --rest`), `s3`, `rclone`.
+> **The stage 8 gate is `tests/evidence/command-coverage.sh`**, added 2026-08-17 after
+> this section had already been written as if it were the gate.
+>
+> It asks *borg* what commands it has, asks borge the same, and classifies every
+> difference against a table of recorded reasons - failing on any command that is in
+> neither. It exists because the paragraph above listed "`benchmark`, `debug *`, shell
+> completions" as what remained, those three were finished, and the status line was
+> changed to say the command list was complete. It was not: borg has 36 commands and
+> borge had 28. A list of remaining work maintained by hand is exactly how that happens.
+>
+> It also caught a bug in itself on the first run, which is worth recording because it is
+> the same failure in miniature: the extraction required two spaces after a command name,
+> and `repo-compress` is thirteen characters against borge's twelve-wide column, so the
+> gate reported a command borge *has* as missing.
+>
+> Current state: 28 implemented, 8 absent with a recorded reason, 0 unexplained. Of the
+> eight, three are non-goals (`mount`, `umount`, `webdav`, §0.6) and five are work:
+
+- **`key`** — export, import, change-passphrase, add, remove, paperkey. The library is
+  done and was gated at §1.3, including the byte-identical paper key; only the CLI
+  command is missing. This is the largest of the gaps and the most surprising, since
+  §1.3's gate text names `borge key export` as passing — it passes as a *library* test.
+- **`repo-delete`** — deleting a repository. Recorded nowhere in this plan before now.
+- **`help`** — borg's extra help topics (`patterns`, `match-archives`, `placeholders`,
+  `compression`). Small, and the topics are documentation borge has to write anyway.
+- **`serve`** and the remote store backends: `sftp`, `rest`, `s3`, `rclone`.
+- **`transfer`** between two borg 2 repositories. §0.6 rules out transfer *from borg 1.x*
+  because it depends on the borg 1 reader; it says nothing about borg 2 to borg 2, which
+  is a decision still to make rather than one already taken.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.
 
