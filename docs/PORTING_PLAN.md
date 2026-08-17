@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `prune`, `recreate` and `repo-compress` done. `import-tar`, `analyze`, `benchmark`, `find`, `debug *` and the remote backends remain.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate` and `repo-compress` done. `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`, shell completions and the remote backends remain.**
 Last updated: 2026-08-16.
 
 This is the working plan. It is versioned in git alongside the code and is expected to
@@ -229,6 +229,14 @@ organised so that an interruption is cheap:
    version pin, and a `MANIFEST.txt` listing every file with its sha256. It is copied
    to `/home/renes/evidence/borge/` and its name is recorded in the stage's row in
    §8 below.
+
+   The bundle tests a **snapshot** of the tree, not the tree itself (added 2026-08-17).
+   A full run takes the better part of an hour, and editing during it does not merely mix
+   two versions: `go test` lists a package's test functions and *then* compiles, so a test
+   renamed in between leaves the generated test main calling a function that no longer
+   exists and the package fails to build. Two stage-7 bundles recorded failures that were
+   not real — one from this, one from `/tmp` filling — which is worse than a slow bundle,
+   because a bundle exists to be trusted without re-running it.
 5. **Ask before advancing a stage.** After a stage gate passes, stop and ask before
    starting the next one.
 
@@ -1104,9 +1112,47 @@ Everything needed for feature parity, once correctness is established.
 > which lz4 compresses almost as well as zstd — it passed on a 19-byte margin out of 8324
 > while the code was doing nothing at all.
 
-- `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`,
+> **`import-tar` done 2026-08-17, and the `BORG` tar format with it.**
+>
+> The inverse of `export-tar`: a tar stream becomes an archive without ever landing on the
+> filesystem, so it works on a pipe and so device nodes and ACLs survive on a machine where
+> creating them would need root.
+>
+> Implementing it forced the **`BORG` tar format** onto the export side too, which had only
+> `PAX` and `GNU`. A tar header cannot express birthtime, BSD flags, or the hard link group;
+> `PAX` adds sub-second times, xattrs and ACLs and stops there. `BORG` carries the whole
+> item as a msgpacked, base64'd pax record, and is the only format an import restores
+> *exactly*. Without it borge could neither read nor write the format borg uses for archive
+> transfer between repositories — an interop gap, not a missing nicety.
+>
+> The record **replaces** the tar header rather than merging with it, matching borg: two
+> sources of truth for one field is how they drift apart. Its chunk list is dropped on
+> import — those ids name objects in whatever repository the tar came from — and refilled
+> from the stream, so an import can never write an item pointing at chunks that do not
+> exist here.
+>
+> **A fidelity limit worth stating.** tar's hard link model is "first entry is the file,
+> later ones name it", and borg turns each later entry into an ordinary item reusing the
+> first one's chunk list. The `hlid` is not reconstructed, so an `export-tar`/`import-tar`
+> round trip through `PAX` silently **unshares hard links**: two files with identical
+> content instead of two names for one inode. `BORG` format keeps the `hlid`, because it
+> keeps everything. This is borg's behaviour and borge matches it.
+>
+> `--ignore-zeros` reads concatenated tars. Go's tar reader stops at the end-of-archive
+> marker, so a fresh reader is started on the same buffered source; peeking is what
+> separates "more blocking-factor padding" from "actually finished". Checked against a real
+> `tar --concatenate` output, not a hand-built one, because the padding is exactly where the
+> two implementations could differ.
+>
+> Seven tests, two of them differential against borg (a tar imported by both tools item for
+> item, and the padded concatenation), plus both directions of the `BORG` format:
+> borge reads borg's tar and borg reads borge's. The differential test asserts up front that
+> all six entry types are present with populated mode/mtime/target/size — two empty structs
+> would otherwise agree and prove nothing.
+
+- `check` (+ `--repair`), `compact`, `prune`, `recreate`, `repo-compress`, `import-tar`,
   `repo-space`, `analyze`, `benchmark`, `find`, `debug *`, `version`, `lock`/`break-lock`,
-  `import-tar`, shell completions.
+  shell completions.
 - Remote store backends: `sftp`, `rest` (+ `borge serve --rest`), `s3`, `rclone`.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.

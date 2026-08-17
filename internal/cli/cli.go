@@ -91,6 +91,7 @@ var commands = []command{
 	{"extract", "extract an archive", cmdExtract},
 	{"diff", "report what changed between two archives", cmdDiff},
 	{"export-tar", "write an archive as a tar stream", cmdExportTar},
+	{"import-tar", "create an archive from a tar stream", cmdImportTar},
 	{"rename", "rename an archive", cmdRename},
 	{"tag", "add or remove an archive's tags", cmdTag},
 	{"delete", "soft-delete archives", cmdDelete},

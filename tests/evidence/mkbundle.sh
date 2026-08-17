@@ -58,6 +58,24 @@ git status --porcelain > "$OUT/git-status.txt" 2>/dev/null || true
 git log -20 --format='%H %ad %s' --date=iso > "$OUT/git-log.txt" 2>/dev/null || true
 git diff > "$OUT/git-uncommitted.diff" 2>/dev/null || true
 
+# --- snapshot ----------------------------------------------------------------------
+# The tests run against a *copy* of the tree, not the tree itself.
+#
+# A full run takes the better part of an hour. Editing the working tree during it does
+# not merely mix results from two versions: `go test` lists a package's test functions,
+# then compiles, so a test renamed in between leaves the generated test main referring
+# to a function that no longer exists, and the package fails to build. That has now
+# produced two evidence bundles recording failures that were not real - which is worse
+# than a slow bundle, because a bundle exists to be trusted without re-running it.
+#
+# The copy includes .git, so the git-aware checks behave identically. It costs a few
+# seconds and a few tens of megabytes, and the build cache is shared, so the tests
+# themselves are no slower.
+echo "mkbundle: snapshotting the tree"
+SRC="$WORK/src"
+rsync -a --exclude='/tests/evidence/out/' "$ROOT/" "$SRC/"
+cd "$SRC"
+
 # --- checks and tests --------------------------------------------------------------
 # Failures are captured, not fatal: an evidence bundle for a *failed* gate is a
 # legitimate and useful thing to have.
@@ -84,6 +102,9 @@ go list -m all > "$OUT/go-modules.txt" 2>/dev/null || true
 if [ "$#" -gt 0 ]; then
     mkdir -p "$OUT/artifacts"
     for f in "$@"; do
+        # Resolved against the real tree, not the snapshot: an artifact is something the
+        # caller produced beforehand, and it lives where the caller left it.
+        case "$f" in /*) ;; *) f="$ROOT/$f" ;; esac
         if [ -e "$f" ]; then
             cp -r "$f" "$OUT/artifacts/"
         else

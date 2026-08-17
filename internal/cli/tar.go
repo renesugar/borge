@@ -12,15 +12,150 @@ package cli
 import (
 	"bufio"
 	"compress/gzip"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/chunker"
+	"github.com/renesugar/borge/internal/compress"
+	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
+	"github.com/renesugar/borge/internal/repository"
 )
+
+// cmdImportTar creates an archive from a tar stream.
+//
+// It is the inverse of export-tar, and the pair is how an archive moves between
+// repositories that cannot talk to each other - or into borge from anything at all that
+// can produce a tar.
+//
+// The round trip is only exact with --tar-format=BORG. PAX carries what tar has a concept
+// of; BORG carries the item itself. See internal/archive/tar_import.go.
+func cmdImportTar(e *Env, args []string) int {
+	fs := newFlagSet(e, "import-tar")
+	var common commonFlags
+	common.register(fs)
+	comment := fs.String("comment", "", "a comment to store with the archive")
+	compression := fs.String("C", "lz4", "compression spec, e.g. zstd,3")
+	fs.StringVar(compression, "compression", "lz4", "compression spec")
+	chunkerParams := fs.String("chunker-params", "", "chunker parameters, e.g. fastcdc,19,23,21,2")
+	ignoreZeros := fs.Bool("ignore-zeros", false,
+		"keep reading past the end-of-archive marker, for concatenated tars")
+	list := fs.Bool("list", false, "print each item as it is imported")
+	stats := fs.Bool("stats", false, "print statistics when finished")
+	if err := fs.Parse(args); err != nil {
+		return ExitError
+	}
+	if fs.NArg() < 2 {
+		e.errorf("import-tar needs an archive name and an input file (or - for stdin)")
+		return ExitError
+	}
+	name, source := fs.Arg(0), fs.Arg(1)
+
+	compressor, err := compress.FromSpec(*compression)
+	if err != nil {
+		return e.fail(err)
+	}
+	params := chunker.DefaultParams()
+	if *chunkerParams != "" {
+		params, err = chunker.ParseParams(*chunkerParams)
+		if err != nil {
+			return e.fail(err)
+		}
+	}
+
+	// The reader stack, innermost last: tar <- optional gzip <- buffer <- file.
+	var in io.Reader = e.Stdin
+	if source == "-" && in == nil {
+		e.errorf("import-tar was given - for the input, but this process has no stdin")
+		return ExitError
+	}
+	if source != "-" {
+		file, err := os.Open(source)
+		if err != nil {
+			return e.fail(err)
+		}
+		defer file.Close()
+		in = file
+	}
+	in = bufio.NewReaderSize(in, 1<<20)
+	if strings.HasSuffix(source, ".gz") || strings.HasSuffix(source, ".tgz") {
+		gz, err := gzip.NewReader(in)
+		if err != nil {
+			return e.fail(err)
+		}
+		defer gz.Close()
+		in = gz
+	}
+
+	path, err := e.resolveRepo(common.repo)
+	if err != nil {
+		return e.fail(err)
+	}
+
+	// Exclusive, for the same reason create is: this writes packs, the archive directory
+	// and the manifest.
+	repo, err := repository.Open(path, repository.Options{Exclusive: true})
+	if err != nil {
+		return e.fail(err)
+	}
+	defer repo.Close()
+
+	k, unlocked, err := repo.Unlock(e.passphrase())
+	if err != nil {
+		if errors.Is(err, key.ErrPassphraseWrong) {
+			return e.fail(fmt.Errorf("%w (set BORGE_PASSPHRASE or BORG_PASSPHRASE)", err))
+		}
+		return e.fail(err)
+	}
+	m, err := manifest.Load(repo, k, manifest.OpWrite)
+	if err != nil {
+		return e.fail(err)
+	}
+
+	var chunkSeed uint32
+	if unlocked != nil {
+		chunkSeed = uint32(key.ChunkSeed(unlocked.Material))
+	}
+
+	status := ExitOK
+	st, id, err := archive.ImportTar(m, in, archive.ImportTarOptions{
+		Name:          name,
+		Comment:       *comment,
+		ChunkerParams: params,
+		ChunkSeed:     chunkSeed,
+		Compressor:    compressor,
+		IgnoreZeros:   *ignoreZeros,
+		OnItem: func(s byte, p string) {
+			if *list {
+				fmt.Fprintf(e.Stdout, "%c %s\n", s, p)
+			}
+		},
+		OnWarning: func(p, reason string) {
+			e.warnf("%s: %s", p, reason)
+			status = ExitWarning
+		},
+	})
+	if err != nil {
+		return e.fail(err)
+	}
+	if err := m.Write(); err != nil {
+		return e.fail(err)
+	}
+
+	if *stats || common.verbose {
+		fmt.Fprintf(e.Stdout, "imported %d item(s), %d file(s), %d hard link(s), %d bytes; "+
+			"%d skipped\narchive %s: %s\n",
+			st.Items, st.Files, st.Hardlinks, st.Bytes, st.Skipped,
+			name, hex.EncodeToString(id))
+	}
+	return status
+}
 
 // cmdExportTar writes an archive as a tar stream.
 func cmdExportTar(e *Env, args []string) int {
@@ -29,7 +164,8 @@ func cmdExportTar(e *Env, args []string) int {
 	var pf patternFlags
 	common.register(fs)
 	pf.register(fs)
-	format := fs.String("tar-format", "PAX", "PAX (carries xattrs, ACLs, sub-second times) or GNU")
+	format := fs.String("tar-format", "PAX",
+		"PAX (xattrs, ACLs, sub-second times), BORG (PAX plus the whole item) or GNU")
 	strip := fs.Int("strip-components", 0, "remove this many leading path components")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
@@ -46,8 +182,10 @@ func cmdExportTar(e *Env, args []string) int {
 		tarFormat = archive.TarPAX
 	case "GNU":
 		tarFormat = archive.TarGNU
+	case "BORG":
+		tarFormat = archive.TarBORG
 	default:
-		e.errorf("--tar-format must be PAX or GNU, not %q", *format)
+		e.errorf("--tar-format must be PAX, BORG or GNU, not %q", *format)
 		return ExitError
 	}
 

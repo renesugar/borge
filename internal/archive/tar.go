@@ -11,6 +11,7 @@ package archive
 
 import (
 	"archive/tar"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -31,6 +32,15 @@ const (
 	paxACLDefault  = "SCHILY.acl.default"
 )
 
+// pax header names for the BORG format, which carries the whole item rather than the
+// part of it tar has somewhere to put.
+const (
+	paxBorgVersion = "BORG.item.version"
+	paxBorgMeta    = "BORG.item.meta"
+	// borgItemVersion is the only value borg accepts, and it asserts on anything else.
+	borgItemVersion = "1"
+)
+
 // TarFormat selects how much metadata the output carries.
 type TarFormat string
 
@@ -42,6 +52,16 @@ const (
 	// TarGNU is the older GNU format: long names work, but xattrs, ACLs and sub-second
 	// times do not survive.
 	TarGNU TarFormat = "GNU"
+	// TarBORG is PAX plus the whole item, msgpacked and base64'd into a BORG.* pax
+	// record. It is the only format an import can restore *exactly*, because the
+	// standard records cover only the metadata tar has a concept of - not birthtime,
+	// not BSD flags, not the hard link group, and not any key a future borg adds.
+	//
+	// The cost is size: the item includes its chunk list, so a large file carries a few
+	// dozen bytes of pax record per chunk. Those ids mean nothing outside the repository
+	// they came from and the import overwrites them, but borg writes them and reads
+	// them, so borge does too.
+	TarBORG TarFormat = "BORG"
 )
 
 // TarOptions control an export.
@@ -270,6 +290,14 @@ func tarHeader(it *item.Item, name string, format TarFormat, hardlinks map[strin
 	}
 	if len(it.ACLDefault) > 0 {
 		hdr.PAXRecords[paxACLDefault] = string(it.ACLDefault)
+	}
+	if format == TarBORG {
+		meta, err := it.Marshal()
+		if err != nil {
+			return nil, false, fmt.Errorf("archive: %s: %w", it.Path, err)
+		}
+		hdr.PAXRecords[paxBorgVersion] = borgItemVersion
+		hdr.PAXRecords[paxBorgMeta] = base64.StdEncoding.EncodeToString(meta)
 	}
 	if len(hdr.PAXRecords) == 0 {
 		hdr.PAXRecords = nil
