@@ -53,6 +53,13 @@ check the output, not just the exit code.
 `go test -short` skips the borg gate deliberately. The evidence bundler uses `-short` for
 its `-race` pass only.
 
+**Use `make test`, not a bare `go test ./...`.** The Makefile passes `-timeout 60m`;
+Go's default is 10 minutes, and `internal/cli` alone now runs for about that long because
+almost every command has a differential test that forks borg. A bare `go test` fails with a
+goroutine dump pointing at whichever test happened to be running when the deadline fired —
+which looks exactly like that test hanging, and is not. If you must invoke `go test`
+directly, pass `-timeout 60m`.
+
 ### Temporary space
 
 The corpora are large. Set `TMPDIR=/media/renes/HD2/borge-tmp` for full runs; `/tmp` is a

@@ -60,7 +60,11 @@ echo "mkbundle: collecting evidence for stage '$STAGE'"
             actual="$(git -C "$BORG_SRC" rev-parse HEAD 2>/dev/null || echo '<unknown>')"
             pinned="$(head -1 "$ROOT/tests/borg2/borg-commit.txt" 2>/dev/null)"
             echo "borg2 actual:   $actual"
-            dirty="$(git -C "$BORG_SRC" status --porcelain 2>/dev/null | head -5)"
+            # Tracked changes only. The borg tree carries Cython-generated .c and .so
+            # files that are untracked build artifacts and always present; warning about
+            # them every time would make this line noise, and a warning nobody reads is
+            # the same as no warning.
+            dirty="$(git -C "$BORG_SRC" status --porcelain --untracked-files=no 2>/dev/null | head -5)"
             [ -n "$dirty" ] && echo "borg2 tree:     MODIFIED - $(echo "$dirty" | tr '\n' ' ')"
             if [ "$actual" != "$pinned" ]; then
                 echo "borg2 WARNING:  the borg checkout is NOT at the pinned commit;"
