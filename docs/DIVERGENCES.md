@@ -540,3 +540,29 @@ the same borg habit, and `-r .` or `-r ../backups` is a normal thing to type. Re
 
 **How it was found:** the same fixture. The help topics write `-r REPO`, and the first
 attempt to run them verbatim in a scratch directory was refused.
+
+## 23. Directory entries are archived in sorted order
+
+**Stage 6 · `internal/archive/create_linux.go` · deliberate**
+
+borge sorts each directory's entries before walking into them. borg archives them in
+`readdir` order, which is whatever the filesystem returns — not defined, and different
+between filesystems and between runs on the same one.
+
+The same tree therefore produces the same archive twice with borge and need not with borg:
+
+```
+borg      root, root/sub, root/sub/deep.txt, root/notes.txt
+borge     root, root/notes.txt, root/sub, root/sub/deep.txt
+```
+
+Both archives hold the same items, and every command in both tools reads either order, so
+this costs no interoperability. What it buys is that two archives of an unchanged tree are
+comparable — which is how several of the differential tests in this port are able to assert
+anything at all.
+
+**It is a trap for tests, and it caught one.** `TestExcludeAfterPositionalsMatchesBorg`
+first compared the two tools' `list` output as a sequence and failed, having archived
+exactly the same four paths. A differential test that cares *which* items were stored has
+to sort both sides; one that compares sequences is asserting this divergence rather than
+whatever it meant to check.

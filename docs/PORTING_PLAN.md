@@ -2104,7 +2104,8 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
 the other two are `serve` and an undecided `transfer`. Two argument-handling defects remain
 open and are listed in §11: relative source paths (#21) and relative repository paths
-(#22). The third, options after positionals (#20), was fixed on 2026-08-18; it was the one
+(#22). Sorted directory order (#23) is deliberate and was written down only when a
+differential test tripped over it. The third, options after positionals (#20), was fixed on 2026-08-18; it was the one
 that changed what ended up in the archive, and #21 still does.
 
 **What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been

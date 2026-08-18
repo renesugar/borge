@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -172,12 +173,19 @@ func TestExcludeAfterPositionalsMatchesBorg(t *testing.T) {
 		t.Fatalf("borge create exited %d\n%s", code, stderr)
 	}
 
+	// Sorted on both sides: this test is about *which* paths were archived, and the two
+	// tools store them in different orders by design - borge sorts each directory,
+	// borg keeps readdir order (docs/DIVERGENCES.md #23). Comparing sequences here would
+	// fail for a reason that has nothing to do with argument parsing, which is exactly
+	// what it did first time round.
 	borgPaths := strings.Fields(r.mustRun("list", "-r", r.path, "byborg", "--short"))
 	stdout, stderr, code := r.borge(t, "list", "--short", "byborge")
 	if code != ExitOK {
 		t.Fatalf("borge list exited %d\n%s", code, stderr)
 	}
 	borgePaths := strings.Fields(stdout)
+	sort.Strings(borgPaths)
+	sort.Strings(borgePaths)
 
 	// Both tools excluding everything would compare equal and mean nothing.
 	if len(borgPaths) < 3 {
