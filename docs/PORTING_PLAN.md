@@ -371,10 +371,72 @@ sentence into the diff of the change that falsifies it.
    Build the five-case calibration set from git *first*, then the checker. Advisory output,
    not a gate. Worth doing after item 1 and independently of items 2–4: it needs the anchors
    for pairing, and nothing else.
+6. **`TestHelpExamplesRun`** — §2.1.2(a). Execute every `borge …` line in every help topic
+   against a scratch repository and require the documented exit status. **Do this first of
+   all six.** It needs no anchors, no model and no new syntax; it is an ordinary Go test; and
+   it has already found a data-correctness bug by hand. Deterministic, so unlike items 5 and
+   7 it can gate the build.
+7. **`docactionable`** — §2.1.2(b). Generate a command from each topic and run it. Advisory.
+   Last, because it depends on item 6's scratch-repository harness for execution.
 
 **Gate:** `docaudit` reports zero dangling anchors and zero orphan claims; every help topic
 has a grade breakdown recorded; and the unverified share is stated in the plan rather than
 discovered later.
+
+#### 2.1.2 The strongest check: run the examples, and generate them from the prose
+
+For an API, a code example carries the information. For a command-line tool the equivalent
+is a **command line or a configuration**, and it has the property prose does not: it can be
+executed.
+
+That reframes what help text is for. The useful question is not *is this sentence true* but
+**does this sentence tell me specifically what I can and cannot do**. A true sentence can be
+useless — "borge supports patterns" is unfalsifiable and unactionable. The test for
+specificity is constructive: **try to produce a working command from the prose alone.** If
+you cannot, the prose is too vague, and that is a finding about the documentation even
+though nothing in it is false.
+
+Two mechanisms, in order of how cheaply they pay:
+
+**a. Execute every example in the help text.** They are already written; they are already
+shipped; nothing checks them. Extract the indented `borge …` lines from each topic,
+substitute the placeholders (`REPO`, `ARCHIVE`, `~`) against a scratch repository built for
+the purpose, run them, and require the documented exit status. Examples that must not be
+run destructively use `--dry-run` where the command has one, and are marked otherwise.
+
+**This was tried by hand on 2026-08-17 and found two wrong out of fifteen**, one of which
+was not a documentation bug at all:
+
+- `borge find --pattern 'sh:…'` — `--pattern` needs an action prefix; the documented form
+  is an error.
+- `borge create -r REPO archive ~ --exclude 'sh:**/.cache'` — **the exclusion silently does
+  not happen.** Go's `flag` stops at the first positional, so the option became two more
+  paths to archive. borg's archive had 0 `.cache` entries; borge's had 2. Recorded as
+  DIVERGENCES #20 and as a fix in §11.
+
+A defect that stores data the user asked to exclude was sitting in the help text, and
+running the examples is what surfaced it. That is the argument for this item over every
+other item in §2.1.
+
+**b. Generate a command from the prose, then run it.** The specificity test, mechanised: give
+a model the topic and nothing else, ask it to produce the command line that does what the
+topic describes, and execute the result. A topic that yields a working command is
+actionable. A topic that yields a command which fails to parse, or does something else, is
+vague or wrong — and the generated attempt is itself the bug report, because it shows what a
+careful reader concluded.
+
+This is stronger than the contradiction check of §2.1.1 and subsumes part of it: a claim
+that cannot be turned into a command is one the reader cannot act on, whatever its truth.
+It is also non-deterministic and advisory, for the same reasons, and it wants the same
+calibration discipline — the two examples above are the first known-answer cases.
+
+**A fourth grade.** §2.1's grades gain one, and it sits at the top:
+
+- **Executed** — the prose carries an example that is run in the test suite.
+- Generated · Claimed · Unverified, as before.
+
+The target is that every help topic carries at least one executed example, because that is
+the grade a user actually relies on: they copy the example.
 
 #### 2.1.1 Attacking the unverified share: does the code contradict the prose?
 
@@ -1529,6 +1591,12 @@ Everything needed for feature parity, once correctness is established.
   is a decision still to make rather than one already taken.
 - **Archive-name placeholders**, which are not a command and so are invisible to the
   coverage gate — see DIVERGENCES #17 and the note below.
+- **Options must be accepted after positional arguments** (DIVERGENCES #20). Go's `flag`
+  stops at the first non-option, so `borge create -r REPO archive ~ --exclude …` archives
+  the directory it was told to exclude. The fix is to permute arguments before `fs.Parse`,
+  honouring `--` as an end-of-options marker. It touches every command's argument handling,
+  so it wants its own change and its own tests — including one that asserts a path
+  beginning with a dash still works after `--`.
 
 > **`key`, `repo-delete` and `help` done 2026-08-17**, closing the three gaps the coverage
 > gate found.
@@ -1969,7 +2037,7 @@ than no tracker: it is the document a new reader trusts first.
 | 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve` and the remote backends remain | not yet bundled |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | not started — 5 items, items 1 and 5 useful alone | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | not started — 7 items; **item 6 (run the help examples) is the one to do first** | — |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see

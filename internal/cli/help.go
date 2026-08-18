@@ -142,6 +142,19 @@ PATHS INSIDE AN ARCHIVE
 Paths are stored without a leading slash, so an archive of /home/me holds "home/me/...".
 A pattern is matched against that stored form.
 
+OPTIONS COME BEFORE PATHS
+
+borge stops reading options at the first non-option argument, so every option has to
+precede the paths:
+
+  borge create -r REPO --exclude 'sh:**/.cache' archive ~     correct
+  borge create -r REPO archive ~ --exclude 'sh:**/.cache'     WRONG
+
+borg accepts the second form. borge treats "--exclude" and the pattern after it as two
+more paths to archive, warns that they do not exist, and archives everything the exclude
+was meant to leave out. Use "--" to end the options when a path itself begins with a dash.
+This is a known defect, not a design decision; see docs/DIVERGENCES.md #20.
+
 ORDER
 
 Patterns are applied in the order given, and the first one that matches decides. In a
@@ -155,10 +168,10 @@ Blank lines and lines starting with # are ignored.
 
 EXAMPLES
 
-  borge create -r REPO archive ~ --exclude 'sh:**/.cache'
+  borge create -r REPO --exclude 'sh:**/.cache' archive ~
   borge extract ARCHIVE 'sh:home/me/**/*.txt'
   borge list ARCHIVE 're:\.(jpg|png)$'
-  borge find --pattern 'sh:**/invoice-*.pdf'
+  borge find 'sh:**/invoice-*.pdf'
 `
 
 const helpMatchArchives = `borge help match-archives

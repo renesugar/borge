@@ -426,3 +426,43 @@ wrong default.
 
 `--key-location repokey|keyfile` overrides it in both tools, and the two agree whenever it
 is given.
+
+## 20. Options must precede positional arguments
+
+**Stage 8 · `internal/cli` · a defect, not a decision — and it loses data**
+
+borg parses with Python's `argparse`, which accepts options anywhere on the command line.
+borge parses with Go's `flag`, which **stops reading options at the first non-option
+argument**. So:
+
+```
+borge create -r REPO archive ~ --exclude 'sh:**/.cache'
+```
+
+does not exclude anything. `--exclude` and the pattern after it become two more *paths to
+archive*. borge warns that they do not exist, exits 1 — and archives the directory the
+user asked to leave out.
+
+Measured on the same tree: borg's archive has 0 `.cache` entries, borge's has 2. Two
+warnings scroll past in the middle of a backup's output, and the archive looks fine.
+
+**This is the bad kind of divergence.** It is not a different answer to a question; it is
+the same command meaning something else, silently, in the direction of storing data the
+user tried to keep out. Anyone carrying a borg habit or a borg crontab across hits it.
+
+The correct form today is options first:
+
+```
+borge create -r REPO --exclude 'sh:**/.cache' archive ~
+```
+
+**It should be fixed rather than documented.** The fix is to permute arguments before
+`fs.Parse` — move options ahead of positionals, the way GNU `getopt` does — honouring `--`
+as an end-of-options marker so a path that begins with a dash stays a path. That touches
+every command's argument handling and needs its own change and its own tests; it is
+recorded in `docs/PORTING_PLAN.md` §11. Until then the help text says so out loud, because
+a user who does not know this will not discover it from the output.
+
+**How it was found:** by executing the command-line examples in borge's own help topics.
+Two of fifteen were wrong, and this one was wrong in a way that mattered. See
+`PORTING_PLAN.md` §2.1.2.
