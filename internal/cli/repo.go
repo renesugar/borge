@@ -12,6 +12,7 @@ package cli
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -67,6 +68,45 @@ type listSelectors struct {
 	sortBy  string
 	reverse bool
 	deleted bool
+
+	// The four relative time filters.
+	older  timespanFlag
+	newer  timespanFlag
+	oldest timespanFlag
+	newest timespanFlag
+}
+
+// timespanFlag is a relative time marker option: "7d", "12m".
+//
+// It parses when the option is set, so a bad span is refused before the repository is
+// opened - which is where borg refuses it, in the argparse type validator. A typo then
+// costs nothing and reports itself, instead of surfacing after a slow open or hiding
+// behind an unrelated error about the repository.
+//
+// It also records that the option was *given*, which is not the same as a non-empty
+// value: an explicitly empty span is what "--newer $SPAN" expands to when SPAN is unset,
+// borg exits 2 for it, and reading it as "no filter" would list every archive and report
+// success. That is the failure that looks most like a correct answer, and a test caught
+// it here.
+type timespanFlag struct {
+	span manifest.Timespan
+	set  bool
+}
+
+func (t *timespanFlag) String() string {
+	if !t.set {
+		return ""
+	}
+	return t.span.String()
+}
+
+func (t *timespanFlag) Set(v string) error {
+	span, err := manifest.ParseTimespan(v)
+	if err != nil {
+		return err
+	}
+	t.span, t.set = span, true
+	return nil
 }
 
 func (s *listSelectors) register(fs *flagSet) {
@@ -77,6 +117,10 @@ func (s *listSelectors) register(fs *flagSet) {
 	fs.StringVar(&s.sortBy, "sort-by", "", "comma-separated sort keys (timestamp, name, id, host, user, tags)")
 	fs.BoolVar(&s.reverse, "reverse", false, "reverse the order")
 	fs.BoolVar(&s.deleted, "deleted", false, "list soft-deleted archives instead")
+	fs.Var(&s.older, "older", "only archives older than now minus this span, e.g. 7d or 12m")
+	fs.Var(&s.newer, "newer", "only archives newer than now minus this span, e.g. 7d or 12m")
+	fs.Var(&s.oldest, "oldest", "only archives within this span of the oldest one, e.g. 7d")
+	fs.Var(&s.newest, "newest", "only archives within this span of the newest one, e.g. 7d")
 }
 
 // options builds the listing options, substituting placeholders in the selector as borg
@@ -90,10 +134,10 @@ func (s *listSelectors) options(e *Env) (manifest.ListOptions, error) {
 		return manifest.ListOptions{}, err
 	}
 	s.match = match
-	return s.rawOptions(), nil
+	return s.rawOptions()
 }
 
-func (s *listSelectors) rawOptions() manifest.ListOptions {
+func (s *listSelectors) rawOptions() (manifest.ListOptions, error) {
 	opts := manifest.ListOptions{
 		First:   s.first,
 		Last:    s.last,
@@ -106,7 +150,33 @@ func (s *listSelectors) rawOptions() manifest.ListOptions {
 	if s.sortBy != "" {
 		opts.SortBy = strings.Split(s.sortBy, ",")
 	}
-	return opts
+
+	// borg makes each pair mutually exclusive in the parser. Giving both would otherwise
+	// be read as an empty range or as one silently winning, and neither is anything the
+	// user meant.
+	if s.older.set && s.newer.set {
+		return opts, errors.New("--older and --newer are two ends of the same range; give one")
+	}
+	if s.oldest.set && s.newest.set {
+		return opts, errors.New("--oldest and --newest are two ends of the same range; give one")
+	}
+
+	// "now" is taken once for the whole command, so that two filters in one invocation
+	// cannot straddle a second boundary and disagree about which archives exist.
+	now := time.Now().UTC()
+	if s.older.set {
+		opts.Older = s.older.span.Offset(now, true)
+	}
+	if s.newer.set {
+		opts.Newer = s.newer.span.Offset(now, true)
+	}
+	if s.oldest.set {
+		opts.Oldest = s.oldest.span
+	}
+	if s.newest.set {
+		opts.Newest = s.newest.span
+	}
+	return opts, nil
 }
 
 // cmdRepoList lists a repository's archives.

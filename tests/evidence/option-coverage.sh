@@ -60,37 +60,38 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # Lower it as options land; never raise it without saying why in the commit message.
 # A command borge implements and this table omits is a failure.
 # Baseline measured 2026-08-18 against borg 2.0.0b23.dev377+g114bd1e94: 254 borg
-# command-specific options, 111 of them missing here.
+# command-specific options, 111 of them missing. Lowered to 79 the same day when the
+# shared archive date filters landed on eight commands at once.
 declare -A budget=(
-    [analyze]=4
+    [analyze]=0
     [benchmark]=0
     [break-lock]=0
-    [check]=7
+    [check]=3
     [compact]=0
     [completion]=0
     [create]=23
     [debug]=0
-    [delete]=5
+    [delete]=1
     [diff]=3
     [export-tar]=2
     [extract]=3
-    [find]=5
+    [find]=1
     [help]=2
     [import-tar]=3
     [info]=7
     [key]=0
     [list]=3
-    [prune]=12
-    [recreate]=9
+    [prune]=8
+    [recreate]=5
     [rename]=0
     [repo-compress]=0
     [repo-create]=3
     [repo-delete]=1
     [repo-info]=0
-    [repo-list]=6
+    [repo-list]=2
     [repo-space]=0
     [tag]=8
-    [undelete]=5
+    [undelete]=1
     [version]=0
     [with-lock]=0
 )

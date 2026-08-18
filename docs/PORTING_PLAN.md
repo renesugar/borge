@@ -1688,17 +1688,27 @@ Everything needed for feature parity, once correctness is established.
   below now come from it rather than from a paragraph. See §11.2 for what it measures and
   what it deliberately does not.
 
-  **Baseline: 254 of borg's command-specific options, 111 of them missing here**, plus 19
-  common options of which 15 are absent, plus 17 places where borge has the option but not
-  a spelling borg also offers (`-n` for `--dry-run`, `-s` for `--stats`, and prune's
+  **Baseline: 254 of borg's command-specific options, 111 of them missing**, plus 19 common
+  options of which 15 are absent, plus 17 places where borge has the option but not a
+  spelling borg also offers (`-n` for `--dry-run`, `-s` for `--stats`, and prune's
   `-d/-H/-m/-w/-y`).
 
-  **The highest-leverage finding is that the missing options cluster.** `--newer`,
-  `--newest`, `--older` and `--oldest` are absent from eight commands; `--format` from six;
-  `--sort-by` from four. These are borg's shared archive-filter and formatting groups,
-  registered once and attached to many commands, and borge should do the same: one
-  `archiveFilterFlags` and one `--format` implementation close roughly a third of the 111.
-  Doing them command by command would be three times the work and would drift.
+  **The highest-leverage finding was that the missing options cluster**, and acting on it
+  is what the count above measures. `--newer`, `--newest`, `--older` and `--oldest` were
+  absent from eight commands; `--format` from six; `--sort-by` from four. These are borg's
+  shared archive-filter and formatting groups, registered once and attached to many
+  commands.
+
+  - ~~**The four relative date filters**~~ — **done 2026-08-18**, on `listSelectors`, which
+    every command taking archive filters already used. **111 → 79 missing**: thirty-two
+    options across eight commands from one change, which is the argument for doing the
+    other groups the same way rather than command by command.
+  - **`--format`** on `list`, `repo-list`, `prune`, `check`, `diff`, `find` — borg's
+    placeholder formatter. The largest single group left.
+  - **`--sort-by`** where `listSelectors` does not already reach it (`info`, `tag`, `diff`).
+  - **`info` and `tag` do not use `listSelectors` at all** and so gained nothing from the
+    filter work: seven and eight options respectively, most of them the filter group they
+    should be sharing.
 
   The rest is genuine per-command work, `create` being the largest at 23 — `--dry-run`,
   `--sparse`, `--timestamp`, `--tags`, `--exclude-caches`, `--exclude-if-present`,
@@ -2318,7 +2328,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 111 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 79 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

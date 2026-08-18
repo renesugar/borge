@@ -216,8 +216,16 @@ type ListOptions struct {
 	Reverse bool
 	// First and Last keep only that many entries from the respective end.
 	First, Last int
-	// Newer and Older bound the timestamp, inclusive.
+	// Newer and Older bound the timestamp, inclusive. They are absolute instants: the
+	// caller has already resolved "--newer 7d" against now, because "now" is the command
+	// line's idea of time and not this package's.
 	Newer, Older time.Time
+	// Oldest and Newest are relative to the *result*, not to now: --oldest 7d keeps the
+	// archives from the oldest one that survived the filters above to seven days after
+	// it, and --newest 7d keeps the last seven days up to the newest survivor. They stay
+	// as spans rather than instants because the reference point is not known until the
+	// matching and Newer/Older filtering have run.
+	Oldest, Newest Timespan
 }
 
 // IsZero reports whether no filter or ordering was asked for, so this is the plain
@@ -228,7 +236,8 @@ type ListOptions struct {
 // statements about the whole repository.
 func (o ListOptions) IsZero() bool {
 	return len(o.Match) == 0 && !o.Deleted && len(o.SortBy) == 0 && !o.Reverse &&
-		o.First == 0 && o.Last == 0 && o.Newer.IsZero() && o.Older.IsZero()
+		o.First == 0 && o.Last == 0 && o.Newer.IsZero() && o.Older.IsZero() &&
+		o.Oldest.IsZero() && o.Newest.IsZero()
 }
 
 // List returns the archives matching the options, sorted.
@@ -271,6 +280,12 @@ func (a *Archives) List(opts ListOptions) ([]Info, error) {
 		infos = kept
 	}
 
+	// Oldest and Newest are measured from the extremes of what is left, so they run
+	// after the absolute bounds above and not before. borg does the same, and the order
+	// is visible: "--newer 7d --oldest 2d" means "of the last week, the first two days",
+	// which is not what the other order would give.
+	infos = filterByRelativeExtremes(infos, opts.Oldest, opts.Newest)
+
 	// borg's default order is by timestamp, and it is the only order that makes a listing
 	// readable; sorting keys are applied in reverse so the first named key wins.
 	sortKeys := opts.SortBy
@@ -295,6 +310,44 @@ func (a *Archives) List(opts ListOptions) ([]Info, error) {
 		}
 	}
 	return infos, nil
+}
+
+// filterByRelativeExtremes applies --oldest and --newest, which are spans measured from
+// the oldest and newest archives still in the list.
+func filterByRelativeExtremes(infos []Info, oldest, newest Timespan) []Info {
+	if len(infos) == 0 || (oldest.IsZero() && newest.IsZero()) {
+		return infos
+	}
+	earliest, latest := infos[0].Time, infos[0].Time
+	for _, info := range infos[1:] {
+		if info.Time.Before(earliest) {
+			earliest = info.Time
+		}
+		if info.Time.After(latest) {
+			latest = info.Time
+		}
+	}
+	if !oldest.IsZero() {
+		until := oldest.Offset(earliest, false)
+		var kept []Info
+		for _, info := range infos {
+			if !info.Time.After(until) {
+				kept = append(kept, info)
+			}
+		}
+		infos = kept
+	}
+	if !newest.IsZero() {
+		from := newest.Offset(latest, true)
+		var kept []Info
+		for _, info := range infos {
+			if !info.Time.Before(from) {
+				kept = append(kept, info)
+			}
+		}
+		infos = kept
+	}
+	return infos
 }
 
 func applyMatch(infos []Info, match string) ([]Info, error) {
