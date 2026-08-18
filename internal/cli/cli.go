@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -205,7 +206,19 @@ func newPassthroughFlagSet(e *Env, name string) *flagSet {
 	return fs
 }
 
-// resolveRepo works out which repository to act on.
+// resolveRepo works out which repository to act on. The answer is always absolute.
+//
+// borg resolves a relative "-r sub/repo", or a relative BORG_REPO, against the working
+// directory, and reports the absolute form as the repository's Location. borge refused a
+// relative path outright until 2026-08-18; see docs/DIVERGENCES.md #22.
+//
+// The resolution happens here rather than in the store because the store's rule - a
+// backend is rooted at an absolute path - is worth keeping. A backend rooted at something
+// that depends on the process working directory is one nothing else can reason about, and
+// borg resolves at argument parsing too.
+//
+// No "~" expansion, because borg does none: "-r ~/backups" means a directory literally
+// named "~" in both tools, and expanding it here would be borge inventing behaviour.
 func (e *Env) resolveRepo(given string) (string, error) {
 	path := given
 	if path == "" {
@@ -217,8 +230,13 @@ func (e *Env) resolveRepo(given string) (string, error) {
 		return "", errors.New("no repository given; pass -r or set BORGE_REPO")
 	}
 	// A repository path may carry placeholders, as borg's may: "-r /backups/{hostname}"
-	// is how one BORGE_REPO setting serves a fleet.
-	return e.expand(path)
+	// is how one BORGE_REPO setting serves a fleet. Expanded before the path is made
+	// absolute, so "-r {hostname}/repo" resolves the way a reader expects.
+	expanded, err := e.expand(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(expanded)
 }
 
 // placeholderValues is the substitution set for this process, taken once.

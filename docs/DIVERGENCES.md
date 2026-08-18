@@ -549,9 +549,12 @@ whitespace, and the synthetic corpus contains a filename with a space; then it s
 lines, and the corpus contains a filename with a **newline**. Any parsing of `--short` is
 wrong for real data. It reads `--json-lines` now, and so do the other new path tests.
 
-## 22. A repository path must be absolute
+## 22. A repository path must be absolute — **fixed 2026-08-18**
 
 **Stage 8 · `internal/store` · a defect, not a decision**
+
+**Resolved.** `Env.resolveRepo` makes the path absolute after expanding its placeholders.
+What follows describes the defect; the fix is at the end.
 
 `borg repo-create -r REPO` works. borge answers:
 
@@ -568,6 +571,28 @@ the same borg habit, and `-r .` or `-r ../backups` is a normal thing to type. Re
 
 **How it was found:** the same fixture. The help topics write `-r REPO`, and the first
 attempt to run them verbatim in a scratch directory was refused.
+
+### The fix
+
+The resolution happens in `Env.resolveRepo` (`internal/cli/cli.go`), not in the store, and
+that placement is the decision worth recording. The store's rule — a backend is rooted at an
+absolute path — is kept: a backend rooted at something that depends on the process working
+directory is one nothing else can reason about. borg resolves at argument parsing too, and
+reports the absolute form as the repository's `Location`, which borge now matches.
+
+Placeholders are expanded *before* the path is made absolute, so `-r '{hostname}/repo'`
+resolves the way a reader expects rather than producing a path containing a brace.
+`TestResolveRepoExpandsBeforeResolving` pins that order.
+
+**No `~` expansion**, because borg does none. `-r '~/backups'` means a directory literally
+named `~`, in both tools; expanding it here would be borge inventing behaviour that a user
+carrying a borg script would not expect.
+
+Verified against borg in both directions — borge creates a repository at a relative path and
+borg opens it, borg creates one and borge opens it — with the same repository id and the
+same absolute `Location` from both. And resolution is against the working directory and
+nothing else: from one level down, `-r sub/G` names a repository that does not exist, which
+is what borg does and what shows the resolution is not a search.
 
 ## 23. Directory entries are archived in sorted order
 

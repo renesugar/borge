@@ -1671,9 +1671,11 @@ Everything needed for feature parity, once correctness is established.
   visible only at restore — the same shape as #21 and found while porting its fix. It is a
   feature rather than a defect in what borge claims today, and it reaches `--pattern` roots
   as well as paths, so it wants its own change.
-- **A relative repository path must be accepted** (DIVERGENCES #22). The store layer
-  refuses `-r REPO` outright; borg resolves it against the working directory. Small, loud,
-  and a borg habit all the same.
+- ~~**A relative repository path must be accepted**~~ (DIVERGENCES #22).
+  **Done 2026-08-18.** `Env.resolveRepo` makes the path absolute after expanding its
+  placeholders; the store keeps its absolute-only rule, because a backend rooted at
+  something that depends on the process working directory is one nothing else can reason
+  about. No `~` expansion — borg does none, and inventing it would surprise a borg script.
 
 > **`key`, `repo-delete` and `help` done 2026-08-17**, closing the three gaps the coverage
 > gate found.
@@ -2125,9 +2127,9 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 `tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
 the other two are `serve` and an undecided `transfer`. Of the path and argument defects,
-options after positionals (#20) and relative source paths (#21) were both fixed on
-2026-08-18; relative repository paths (#22) and the rsync slashdot hack (#24) are still
-open and are listed in §11. Sorted directory order (#23) is deliberate and was written down
+options after positionals (#20), relative source paths (#21) and relative repository paths
+(#22) were all fixed on 2026-08-18; the rsync slashdot hack (#24) is still open and is
+listed in §11. Sorted directory order (#23) is deliberate and was written down
 only when a differential test tripped over it.
 
 **Three of those four came out of one activity**: running the examples in borge's own help
