@@ -35,7 +35,8 @@ make build          # ./bin/borge
 make test           # the Go test suite
 make check          # fmt, vet, lint, spdx, layering, test
 make borg2          # build the pinned borg 2 reference interpreter (needed by most tests)
-make coverage       # the stage 8 gate: borge's command list against borg's
+make coverage       # the stage 8 gates: borge's commands and per-command options against borg's
+make option-coverage # just the per-command option comparison (docs/PORTING_PLAN.md 11.2)
 make interop        # the stage 7 gate: the real-corpus interoperability matrix
 make evidence STAGE=stage-N   # build an evidence bundle
 ```

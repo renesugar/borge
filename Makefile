@@ -112,9 +112,16 @@ msgpack-fixtures:
 		> internal/msgpackx/testdata/fixtures.txt
 	@echo "regenerated internal/msgpackx/testdata/fixtures.txt"
 
-## coverage: compare borg's subcommand list against borge's (the stage 8 gate)
+## coverage: compare borg's commands and per-command options against borge's (stage 8 gate)
 coverage: build
 	./tests/evidence/command-coverage.sh
+	@echo
+	./tests/evidence/option-coverage.sh
+
+## option-coverage: just the per-command option comparison
+.PHONY: option-coverage
+option-coverage: build
+	./tests/evidence/option-coverage.sh
 
 ## evidence: build a stage evidence bundle, e.g. make evidence STAGE=stage-0
 evidence:

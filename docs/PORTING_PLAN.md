@@ -1682,28 +1682,53 @@ Everything needed for feature parity, once correctness is established.
   `walker.storedPath` is borg's three-case `create_helper`. Patterns match the **walked**
   path rather than the stored one, which is the half that is easy to get backwards, so the
   test asserts the negative case as well as the positive.
-- **Per-command options.** The coverage gate compares *command names* and nothing else, so
-  every missing option is invisible to it. Measured on 2026-08-18 by extracting both tools'
-  `--help` output: thirteen of the differences are borg's common options, present on every
-  command (`--info`, `--debug`, `--warning`, `--error`, `--critical`, `--debug-topic`,
-  `--log-json`, `--lock-wait`, `--progress`, `--show-rc`, `--show-version`, `--umask`,
-  `--help`); the rest are per-command work. `create` alone is missing about
-  twenty-five, including `--dry-run`, `--sparse`, `--timestamp`, `--tags`,
-  `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--atime`,
-  `--noctime`, `--nobirthtime`, the four `--stdin-*` and the four `--paths-from-*`.
-  `extract` is missing `--stdout` and `--continue`; `list` and `repo-list` are missing
-  `--format` and `--sort-by`/`--newer`/`--older`; `prune` is missing `--list-kept`,
-  `--list-pruned` and the `--keep-13weekly`/`--keep-3monthly` rules; `check` is missing
-  `--max-age` and `--max-duration`.
+- **Per-command options.** The command gate compares *command names* and nothing else, so
+  every missing option was invisible to it. **The gate for this is built**
+  (`tests/evidence/option-coverage.sh`, `make option-coverage`, 2026-08-18) and the numbers
+  below now come from it rather than from a paragraph. See §11.2 for what it measures and
+  what it deliberately does not.
 
-  **The first task is the gate, not the options.** `tests/evidence/command-coverage.sh`
-  exists because a stage was declared complete against a hand-maintained list; counting
-  options by hand now would repeat that mistake one level down. `borge completion` already
-  enumerates each command's flags by running it with `-help` and collecting the `FlagSet`,
-  so the machinery to ask borge is in place; borg's side is its `--help` output. The gate
-  should report, per command, implemented / absent-with-a-reason / unexplained, exactly as
-  the command gate does, and the numbers above should come from it rather than from this
-  paragraph.
+  **Baseline: 254 of borg's command-specific options, 111 of them missing here**, plus 19
+  common options of which 15 are absent, plus 17 places where borge has the option but not
+  a spelling borg also offers (`-n` for `--dry-run`, `-s` for `--stats`, and prune's
+  `-d/-H/-m/-w/-y`).
+
+  **The highest-leverage finding is that the missing options cluster.** `--newer`,
+  `--newest`, `--older` and `--oldest` are absent from eight commands; `--format` from six;
+  `--sort-by` from four. These are borg's shared archive-filter and formatting groups,
+  registered once and attached to many commands, and borge should do the same: one
+  `archiveFilterFlags` and one `--format` implementation close roughly a third of the 111.
+  Doing them command by command would be three times the work and would drift.
+
+  The rest is genuine per-command work, `create` being the largest at 23 — `--dry-run`,
+  `--sparse`, `--timestamp`, `--tags`, `--exclude-caches`, `--exclude-if-present`,
+  `--keep-exclude-tags`, `--atime`, `--noctime`, `--nobirthtime`, the four `--stdin-*` and
+  the four `--paths-from-*`.
+
+### 11.2 The option gate
+
+`tests/evidence/option-coverage.sh` asks `borg CMD --help` and `borge CMD -help`, so
+neither list is written down anywhere. Three decisions in it are worth keeping:
+
+**An option is a group of spellings, not a name.** `-n, --dry-run` is one option, not two.
+Counting names inflated the gap (131 rather than 111) and, worse, would have let the budget
+be paid down by adding one-letter aliases to options borge already has. A spelling borg
+offers and borge does not is reported separately as an alias gap, and is not a missing
+option.
+
+**A budget per command, not a reason per option.** A hundred and eleven hand-written
+reasons would be a hand-maintained list again, and nobody would keep it true. Each command
+carries the number it is missing today; the gate fails when a command is missing *more*
+than its budget, and reports when it is missing fewer so the number can be ratcheted down.
+A command absent from the table fails outright, so a new command cannot arrive with a
+silent gap. Verified by mutation: 22 for `create` fails with OVER BUDGET, 24 reports
+"improved — lower the budget to 23".
+
+**What it cannot see, stated in the script rather than left to be discovered.** Semantics
+(both tools have a `-v`; borg's is a log level and borge's is `--verbose`), and the options
+of `debug`, `key` and `benchmark` subcommands, which neither tool lists at the top level so
+both sides report none. Extending it to subcommands is the next piece of work on the gate
+itself.
 - ~~**`R` roots in a patterns file**~~ (DIVERGENCES #25). **Done 2026-08-18.**
   `patternFlags.roots()` collects them from a patterns file or a `--pattern 'R PATH'`, and
   `create` puts them ahead of the command-line paths as borg does. Fixing it turned up
@@ -2293,7 +2318,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), per-command options, bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 111 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
