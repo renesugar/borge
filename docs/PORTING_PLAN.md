@@ -1765,6 +1765,9 @@ Everything needed for feature parity, once correctness is established.
     worth of I/O — borg guards them behind `format_needs_cache` and a warning. Asking for
     one is an error naming the available keys, not an empty column.
 
+    §11.3 records why this is worth doing at all, why borge's two bracket systems are two
+    packages, and why no third-party template or strftime dependency is taken.
+
     The reason `repo-list` came first is not that it is easiest. Its default column layout
     was a `Printf` with a comment above it *quoting* borg's default template as though the
     two were the same thing — the same shape as the `patternFlags` comment that described
@@ -1821,6 +1824,89 @@ itself.
   placeholders; the store keeps its absolute-only rule, because a backend rooted at
   something that depends on the process working directory is one nothing else can reason
   about. No `~` expansion — borg does none, and inventing it would surprise a borg script.
+
+### 11.3 Templating: is it worth matching borg's, and how far is it done?
+
+**The question:** borge prints its own layout where borg renders a template. Is basic
+templating worth implementing to match borg more closely?
+
+**Yes, and as of 2026-08-18 most of it is done** — which is the useful answer, because the
+work already measured what "worth it" means. `internal/formatter` plus the archive and item
+key sets took `repo-list`, `list` and `find` from hand-written `Printf` lines to templates,
+and all three now produce **byte-identical output to borg** on their defaults and on every
+`--format` string tested. Fifty of the 111 missing per-command options have closed, and the
+option gate measured each step rather than anyone counting.
+
+**The rule that came out of it, and the reason to keep going.** `repo-list`'s layout was a
+`Printf` with a comment above it *quoting* borg's default template as though the two were
+the same thing. They could drift and nothing would notice. So: **a command that prints a
+record renders it through a template, and its default is that template** — then the columns
+a user sees without `--format` come from the same code path as the ones they see with it,
+and drift is impossible rather than merely unlikely.
+
+#### There are two bracket systems in borg, not one
+
+This is the correction that matters most, and every account of "borg templating" that
+describes only the first will produce a wrong implementation:
+
+| | where | `{name}` | what `:spec` means |
+| --- | --- | --- | --- |
+| **Placeholders** | archive names, repository paths | `{hostname}`, `{now}` | a **strftime** format: `{now:%Y-%m-%d}` |
+| **`--format` templates** | listings | `{archive}`, `{size}` | a **Python format spec**: `{archive:<36}`, `{id:.8}` |
+
+The surface syntax is identical and `:` means two unrelated things. A single engine built on
+the placeholder reading would apply strftime to `{size:8}` and emit nonsense; one built on
+the format-spec reading would treat `%Y-%m-%d` as a fill character followed by a width.
+borge keeps them apart deliberately: `internal/placeholders` for the first,
+`internal/formatter` for the second, and neither imports the other.
+
+#### On the suggested Go packages
+
+Assessed against what borge needs, not in the abstract. None is taken as a dependency, and
+the reasons are worth recording because they are the same reasons in each case.
+
+- **`valyala/fasttemplate`** — real, fast, and the wrong shape. It substitutes tags; it has
+  no format specs at all, so `{archive:<36}` and `{id:.8}` — borg's *own defaults* — cannot
+  be expressed. It also has no equivalent of Python's `{{` literal-brace escape. Worst for
+  this port: an unknown tag is substituted with nothing or left in place, depending on which
+  `Execute` variant is used, where borg raises. A listing quietly missing a column is the
+  silent-no-op failure §2.3 exists to stop. (Assessed from its documented API; the package
+  is not vendored here, so the exact unknown-tag behaviour per variant is unverified.)
+- **`lestrrat-go/strftime`** — real, and it would have been a reasonable choice a week ago.
+  borge already has a hand-written strftime in `internal/placeholders`, verified against
+  CPython across 31 directives × 11 edge-case instants, which is a stronger guarantee than
+  "a strftime library" for a tool whose whole purpose is matching another implementation.
+  It also deliberately **refuses** `%c`, `%x` and `%X` rather than approximating them: those
+  are locale-dependent in Python, and an archive name that changes with the machine's locale
+  is the opposite of a name. A general library would render them in some locale and the
+  divergence would be silent.
+- **`valyala/quicktemplate`** — a compile-time code generator for whole documents. Unrelated
+  to runtime placeholder substitution; listing it is a category error.
+
+The code samples in the source material also carry two mistakes worth not copying: the
+import paths are written with an `https://` scheme, which is not a Go import path; and the
+regex approach `{(now|utcnow):?([^}]*)}` has no handling for `{{`, so a literal `{{now}}`
+would be substituted rather than escaped. The `{now}` fallback of `2006-01-02T15:04:05` is
+correct — it is borg's `%Y-%m-%dT%H:%M:%S`.
+
+**The general point:** borge's constraint is not "render a template" but "produce the same
+bytes as another program". A dependency helps with the first and is neutral-to-harmful for
+the second, because every place its behaviour differs from CPython's becomes a divergence
+nobody wrote down. Both engines together are about 350 lines with no dependencies.
+
+#### What is left
+
+- **`diff`** — its records are *changes*, not paths, so it needs a third key set rather than
+  a reuse of the item one.
+- **`prune` and `check`** — these need more than the option. borg prints
+  `Keeping archive (rule: daily #1):   {archive:<36} {time} [{id}]`; borge prints
+  `keep   09f75833 a2   ...  (daily[0])`, putting the rule where borg puts a label. Wiring
+  `--format` there means reworking the surrounding output, and for `check` the divergence is
+  larger still: borg's `-v` reports index and pack progress where borge reports per-archive
+  results. The template is the small part.
+- **A trap in both:** borg's `prune` and `check` defaults have **no trailing `{NL}`** — the
+  command supplies the newline. Porting them with one appended, or without adding it, puts a
+  whole listing on one line.
 
 ### 11.1 `transfer`, borge to borge — decided 2026-08-18
 
