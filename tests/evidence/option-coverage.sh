@@ -62,7 +62,7 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # Baseline measured 2026-08-18 against borg 2.0.0b23.dev377+g114bd1e94: 254 borg
 # command-specific options, 111 of them missing. Lowered the same day: 79 when the shared
 # archive date filters landed on eight commands at once, 64 when info and tag started
-# taking the filter group at all, 63 when repo-list gained --format, 61 when list and find did.
+# taking the filter group at all, 63 when repo-list gained --format, 61 when list and find did, 58 when create gained the tag-based exclusions.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -70,7 +70,7 @@ declare -A budget=(
     [check]=3
     [compact]=0
     [completion]=0
-    [create]=23
+    [create]=20
     [debug]=0
     [delete]=1
     [diff]=3

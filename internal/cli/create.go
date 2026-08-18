@@ -189,6 +189,12 @@ func cmdCreate(e *Env, args []string) int {
 	noACLs := fs.Bool("noacls", false, "do not store ACLs")
 	noFlags := fs.Bool("noflags", false, "do not store file flags")
 	readSpecial := fs.Bool("read-special", false, "read the contents of fifos and devices")
+	excludeCaches := fs.Bool("exclude-caches", false,
+		"skip directories holding a CACHEDIR.TAG")
+	var excludeIfPresent multiFlag
+	fs.Var(&excludeIfPresent, "exclude-if-present", "skip directories holding this file (repeatable)")
+	keepExcludeTags := fs.Bool("keep-exclude-tags", false,
+		"archive the excluded directory and the tag files that excluded it")
 	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
 	list := fs.Bool("list", false, "print each item as it is archived")
 	stats := fs.Bool("stats", false, "print statistics when finished")
@@ -308,7 +314,12 @@ func cmdCreate(e *Env, args []string) int {
 		NoACLs:        *noACLs,
 		NoFlags:       *noFlags,
 		ReadSpecial:   *readSpecial,
-		Files:         files,
+		ExcludeCaches: *excludeCaches,
+		// A copy: the option value outlives this call in the caller's flag set, and a
+		// walker holding the same slice would see a later change.
+		ExcludeIfPresent: append([]string(nil), excludeIfPresent...),
+		KeepExcludeTags:  *keepExcludeTags,
+		Files:            files,
 		OnError: func(p string, err error) error {
 			// One unreadable file does not abandon the backup: the rest is still worth
 			// having, and the exit code says something was missed.

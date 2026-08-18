@@ -15,6 +15,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -49,6 +50,17 @@ type CreateOptions struct {
 	// special files. Dangerous by nature - reading a fifo can block forever - so it is
 	// off unless asked for.
 	ReadSpecial bool
+
+	// ExcludeCaches skips any directory holding a CACHEDIR.TAG with the standard
+	// signature (https://bford.info/cachedir/).
+	ExcludeCaches bool
+	// ExcludeIfPresent names files or directories whose presence excludes the directory
+	// holding them.
+	ExcludeIfPresent []string
+	// KeepExcludeTags archives the excluded directory itself and the tag files that
+	// excluded it, so a restore can be excluded again the same way. Without it, nothing
+	// from a tagged directory is stored - not even its entry.
+	KeepExcludeTags bool
 
 	// Files is the files cache, or nil to read every file. It is consulted before a file
 	// is opened and updated after it is chunked.
@@ -177,6 +189,58 @@ func archivedPath(p string) string {
 	return s
 }
 
+// cacheTagName and cacheTagSignature are the CACHEDIR.TAG protocol
+// (https://bford.info/cachedir/). borg reads exactly as many bytes as the signature is
+// long and compares them, so a file that merely starts with the signature counts - which
+// is what the specification asks for, since the rest of the line is free text.
+const (
+	cacheTagName      = "CACHEDIR.TAG"
+	cacheTagSignature = "Signature: 8a477f597d28d172789f06886806bc55"
+)
+
+// tagsExcluding returns the names of the tag files that exclude this directory, in borg's
+// order: CACHEDIR.TAG first, then each --exclude-if-present name that is there.
+//
+// An empty result means the directory is not tagged. The names are returned rather than a
+// bool because --keep-exclude-tags has to archive exactly the files that did the
+// excluding.
+func (w *walker) tagsExcluding(dir string) ([]string, error) {
+	if !w.opts.ExcludeCaches && len(w.opts.ExcludeIfPresent) == 0 {
+		return nil, nil
+	}
+	var tags []string
+	if w.opts.ExcludeCaches && isCacheDir(dir) {
+		tags = append(tags, cacheTagName)
+	}
+	for _, name := range w.opts.ExcludeIfPresent {
+		// Lstat, not Stat: a dangling symlink named as the tag is still present, and borg
+		// uses os.stat which follows - but a directory is as good as a file here, and
+		// either way the question is whether the name exists.
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			tags = append(tags, name)
+		}
+	}
+	return tags, nil
+}
+
+// isCacheDir reports whether the directory holds a CACHEDIR.TAG with the signature.
+//
+// Any error - missing, unreadable, a directory of that name - means "not a cache
+// directory", as borg's except-and-return-False does. A backup that refused to run because
+// something was unreadable here would be trading a whole backup for one exclusion.
+func isCacheDir(dir string) bool {
+	f, err := os.Open(filepath.Join(dir, cacheTagName))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, len(cacheTagSignature))
+	if _, err := io.ReadFull(f, buf); err != nil {
+		return false
+	}
+	return string(buf) == cacheTagSignature
+}
+
 // stripPrefix reads the slashdot hack out of a path as the user typed it, returning the
 // part to remove from the front of every stored path, with a trailing "/", or "" for none.
 //
@@ -239,6 +303,37 @@ func (w *walker) walk(abs string, depth int) error {
 	}
 	stored, storable := w.storedPath(abs)
 
+	// Tag-based exclusion is decided before the directory is stored, because a tagged
+	// directory is not stored at all unless --keep-exclude-tags asks for it. Checking
+	// after would archive the entry and then decline to recurse, which is a different
+	// archive.
+	isDir := st.Mode&unix.S_IFMT == unix.S_IFDIR
+	if isDir {
+		tags, err := w.tagsExcluding(abs)
+		if err != nil {
+			return err
+		}
+		if len(tags) > 0 {
+			w.stats.Skipped++
+			if !included || !storable || !w.opts.KeepExcludeTags {
+				// Nothing from here, and no recursion either way: borg returns at this
+				// point whether or not it kept the tags.
+				return nil
+			}
+			// The directory itself, then the tag files that excluded it - so a restore
+			// can be excluded again the same way.
+			if err := w.archive(abs, stored, &st); err != nil {
+				return err
+			}
+			for _, tag := range tags {
+				if err := w.walk(filepath.Join(abs, tag), depth+1); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+
 	if included && storable {
 		if err := w.archive(abs, stored, &st); err != nil {
 			return err
@@ -250,7 +345,7 @@ func (w *walker) walk(abs string, depth int) error {
 	// Descend into a directory unless the matcher said not to. An excluded directory is
 	// still descended into by default, so an include pattern *inside* it can be found;
 	// only the no-recurse exclude form stops the walk.
-	if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+	if !isDir {
 		return nil
 	}
 	if !included && w.opts.Matcher != nil && !w.opts.Matcher.RecurseDir() {
