@@ -244,9 +244,10 @@ func TestKeyChangePassphrase(t *testing.T) {
 
 // TestKeyChangePassphraseNeedsANewOne.
 //
-// borge does not prompt, so an unset variable has to be an error. Proceeding with an empty
-// passphrase would leave the repository unprotected while reporting success, which is the
-// one outcome worse than refusing.
+// borge prompts at a terminal, and a test has none, so this exercises the path a cron job
+// takes: no variable, nothing to ask at, and therefore an error naming the variable.
+// Proceeding with an empty passphrase would leave the repository unprotected while
+// reporting success, which is the one outcome worse than refusing.
 func TestKeyChangePassphraseNeedsANewOne(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 

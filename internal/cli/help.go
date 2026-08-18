@@ -321,8 +321,14 @@ With none of those set, keyfiles are looked for in the user configuration direct
 under borge/keys and then borg/keys - so a borg installation's keys are found without
 being moved.
 
-borge does not prompt for a passphrase. A command that needs one and cannot find it in
-the environment says so and stops rather than hanging.
+When the environment does not supply a working passphrase, borge asks at the terminal,
+with echo off, up to three times. It asks only after the environment has been tried and
+only for a repository that actually has a passphrase, so the unencrypted modes never
+prompt - and a wrong BORGE_PASSPHRASE gets a prompt rather than a bare refusal.
+
+With no terminal - a cron job, a pipeline - there is nothing to ask at, so the command
+says which variable to set and stops rather than hanging. The prompt is written to stderr,
+so redirecting a command's output still captures only its output.
 
 CACHE
 

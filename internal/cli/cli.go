@@ -249,11 +249,14 @@ func (e *Env) expandAll(texts []string) ([]string, error) {
 	return out, nil
 }
 
-// passphrase resolves the repository passphrase.
+// passphrase is the passphrase to try first: one already typed at a prompt during this
+// command, otherwise the environment's.
 //
-// Only the environment is consulted. borg also prompts, reads a file descriptor and runs
-// a command; those arrive with the write path, because a read-only command that hangs
-// waiting for a passphrase in a script is worse than one that says where to put it.
+// It does not prompt. Prompting happens on failure instead - see passphrase.go for why -
+// so this stays a plain lookup that every caller can make without deciding anything.
+//
+// borg also reads a file descriptor and runs a command to obtain a passphrase; borge does
+// not do either yet.
 func (e *Env) passphrase() string {
 	if e.prompted != nil {
 		return *e.prompted

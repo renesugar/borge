@@ -1373,11 +1373,11 @@ Everything needed for feature parity, once correctness is established.
 > resort it is: export it, take the keyfile away, confirm borg can no longer open the
 > repository, restore from the printout, confirm borg can.
 >
-> Two commands need a *second* passphrase, and borge does not prompt anywhere — so
-> `BORGE_NEW_PASSPHRASE` is required and its absence is an error. Proceeding with an empty
-> passphrase would leave a repository unprotected while reporting success. **Prompting is
-> still missing across the whole CLI** and is now the most user-visible gap; it needs
-> terminal handling and belongs in its own change.
+> Two commands need a *second* passphrase, which is what finally forced the prompting the
+> CLI had never had — see the note below. `BORGE_NEW_PASSPHRASE` still short-circuits it for
+> scripts, and its absence with no terminal is an error rather than an empty passphrase:
+> leaving a repository unprotected while reporting success is the one outcome worse than
+> refusing.
 >
 > **`repo-delete`** is the only irreversible command in borge, so most of its tests are
 > about what it refuses. It will not touch a path that is not a repository — `borge
@@ -1397,6 +1397,33 @@ Everything needed for feature parity, once correctness is established.
 > running the command rather than by review. The topic now says so, and
 > `TestHelpPlaceholdersTopicIsTrue` checks the claim against the behaviour so it cannot
 > quietly become false once placeholders are implemented.
+>
+> **Passphrase prompting, added 2026-08-17 in the same change** (`internal/cli/passphrase.go`,
+> `golang.org/x/term`). Until this, `Env.passphrase` read the environment and nothing else,
+> which §0.5 had recorded as arriving "with the write path" — and the write path had arrived
+> several stages earlier.
+>
+> It is structured as a **retry, not a first step**, and that is the whole design. A
+> repository's key type is not known until its manifest has been read, and the `none-*` and
+> `authenticated-*` modes have no passphrase at all; asking up front would prompt for
+> repositories with nothing to unlock. So the environment's passphrase is tried, and a
+> prompt happens only on `ErrPassphraseWrong` — a failure the unkeyed modes cannot produce.
+> The side effect is that a *wrong* `BORGE_PASSPHRASE` now gets a prompt instead of a bare
+> refusal.
+>
+> Three attempts; echo off via `term.ReadPassword`; the prompt on stderr so redirecting a
+> command's output still captures only its output; a passphrase typed once kept for the rest
+> of that command so `key change-location`, which unlocks twice, does not ask twice; and a
+> new passphrase asked for twice, because nothing can check it afterwards.
+>
+> `term.IsTerminal` is asked about the *process's* standard input rather than `Env.Stdin`,
+> which is an `io.Reader` so the CLI stays testable. In a test that reader is a buffer with
+> no terminal behind it, which is exactly the "do not prompt" answer wanted there — the
+> tests therefore exercise the cron-job path by construction.
+>
+> `golang.org/x/term` is the fourth external dependency and is justified under §0.4: reading
+> a passphrase without echo needs termios, the standard library has no equivalent, and
+> `x/sys` was already a dependency.
 - `--progress`, `--stats`, `--json`, `--log-json` output shapes.
 - Platform coverage: macOS and FreeBSD `platform/` implementations.
 

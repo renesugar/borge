@@ -33,11 +33,14 @@ import (
 //
 // # Passphrases
 //
-// borge reads passphrases from the environment and does not prompt; see Env.passphrase.
-// The two commands that need a *second* passphrase read BORGE_NEW_PASSPHRASE, falling
-// back to BORG_NEW_PASSPHRASE, which is the variable borg uses for the same purpose. When
-// it is unset they say so and stop, rather than proceeding with an empty passphrase -
-// silently protecting a key with "" would be a security failure that looks like success.
+// The environment is tried first and a terminal is asked only when that fails; see
+// passphrase.go for why that order rather than prompting up front.
+//
+// The two commands that need a *second* passphrase read BORGE_NEW_PASSPHRASE, falling back
+// to BORG_NEW_PASSPHRASE, which is the variable borg uses for the same purpose. With
+// neither set and no terminal to ask at they say so and stop, rather than proceeding with
+// an empty passphrase - silently protecting a key with "" would be a security failure that
+// looks like success.
 
 func keyCommands() []command {
 	return []command{
