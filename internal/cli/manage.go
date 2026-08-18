@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/renesugar/borge/internal/archive"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repoobj"
@@ -185,11 +186,26 @@ func cmdRename(e *Env, args []string) int {
 	})
 }
 
-// cmdTag changes an archive's tags.
+// cmdTag changes the tags of every archive the filters select.
+//
+// borg's tag takes the whole archive-filter group and an *optional* archive name, and acts
+// on the whole selection - with no selector at all, on every archive in the repository.
+// borge required exactly one name, so eight of borg's options were missing here.
+//
+// # What is deliberately not copied
+//
+// borg spells the tag options as "--add [TAG ...]", variadic, and argparse's greedy
+// nargs="*" then swallows the positional: "borg tag --add Z a2" does not tag archive a2,
+// it adds the tags "Z" and "a2" to *every* archive in the repository. Measured, not
+// inferred. borge's --add takes one value and is repeatable, so the same command line is
+// unambiguous, and reproducing borg's spelling would import a footgun that silently
+// rewrites every archive. See docs/DIVERGENCES.md #27.
 func cmdTag(e *Env, args []string) int {
 	fs := newFlagSet(e, "tag")
 	var common commonFlags
+	var sel listSelectors
 	common.register(fs)
+	sel.register(fs)
 	var add, remove multiFlag
 	fs.Var(&add, "add", "add a tag (repeatable)")
 	fs.Var(&remove, "remove", "remove a tag (repeatable)")
@@ -197,16 +213,23 @@ func cmdTag(e *Env, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
-	if fs.NArg() != 1 {
-		e.errorf("tag needs an archive")
+	if fs.NArg() > 1 {
+		e.errorf("tag takes at most one archive name; use -a to select several")
 		return ExitError
+	}
+	if sel.match == "" && fs.NArg() == 1 {
+		sel.match = fs.Arg(0)
 	}
 	if len(add) == 0 && len(remove) == 0 && *set == "" {
 		e.errorf("tag needs --add, --remove or --set")
 		return ExitError
 	}
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
+	}
 
-	return e.rewriteArchive(common, fs.Arg(0), func(meta *item.ArchiveItem) error {
+	return e.rewriteArchives(common, opts, func(meta *item.ArchiveItem) error {
 		tags := map[string]bool{}
 		if *set == "" {
 			for _, t := range meta.Tags {
@@ -256,6 +279,51 @@ func (e *Env) rewriteArchive(common commonFlags, selector string, change func(*i
 	if err != nil {
 		return e.fail(err)
 	}
+	return e.rewriteOne(o, common, a, change)
+}
+
+// rewriteArchives is rewriteArchive over a selection: every archive the filters match,
+// each rewritten in turn under one repository lock.
+//
+// An empty selection is an error, not a quiet success. borg exits 0 having done nothing,
+// but borge already refuses that for delete, and a write command that changed nothing
+// while reporting success is the failure §2.3 of the porting plan is about: a typo in
+// "-a 'sh:dayly-*'" would leave the user believing their archives were tagged. See
+// docs/DIVERGENCES.md #28.
+func (e *Env) rewriteArchives(common commonFlags, opts manifest.ListOptions, change func(*item.ArchiveItem) error) int {
+	path, err := e.resolveRepo(common.repo)
+	if err != nil {
+		return e.fail(err)
+	}
+	o, err := e.openRepo(path, true, manifest.OpWrite)
+	if err != nil {
+		return e.fail(err)
+	}
+	defer o.Close()
+
+	infos, err := o.manifest.Archives.List(opts)
+	if err != nil {
+		return e.fail(err)
+	}
+	if len(infos) == 0 {
+		e.errorf("no archive matched; nothing was changed")
+		return ExitError
+	}
+	for _, info := range infos {
+		a, err := archive.Open(o.manifest, info.ID)
+		if err != nil {
+			return e.fail(err)
+		}
+		if code := e.rewriteOne(o, common, a, change); code != ExitOK {
+			return code
+		}
+	}
+	return ExitOK
+}
+
+// rewriteOne reads an archive's metadata object, lets the caller change it, writes the new
+// object and swaps the directory entry.
+func (e *Env) rewriteOne(o *opened, common commonFlags, a *archive.Archive, change func(*item.ArchiveItem) error) int {
 	meta := a.Meta
 	if err := change(meta); err != nil {
 		return e.fail(err)

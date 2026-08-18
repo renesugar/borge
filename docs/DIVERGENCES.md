@@ -762,3 +762,62 @@ option written after the paths.
 
 **How it was found:** measuring what `--patterns-from` did, while fixing #25. The two
 defects are one restructuring apart, so they were fixed together.
+
+## 27. `tag` takes one tag per option, where borg takes a list
+
+**Stage 8 · `internal/cli/manage.go` · deliberate — and it declines a borg bug**
+
+borg spells the tag options variadically: `--set [TAG ...]`, `--add [TAG ...]`,
+`--remove [TAG ...]`. borge's take exactly one value each and are repeatable, so
+`--add a --add b` is how two tags are added.
+
+This is not a cosmetic difference. argparse's greedy `nargs="*"` swallows the positional
+archive name, so in borg:
+
+```
+borg tag --add Z a2      adds the tags "Z" AND "a2" to EVERY archive in the repository
+borg tag a2 --add Z      adds the tag "Z" to archive a2          (the intended reading)
+borg tag --add Z -- a2   the same, spelled defensively
+```
+
+Measured, not inferred: the first form left all three archives of a test repository tagged
+`Z,a2`. There is no warning; the command reports what it did in terms of archive ids, and
+a reader checking that the tag was added sees that it was.
+
+borge's spelling cannot express the ambiguity, so `borge tag -add Z a2` means the one thing
+it looks like. Every borg command line that is *unambiguous* still works, because a
+repeated single-value option accepts each tag in turn; what borge declines is the shape
+that silently rewrites the whole repository.
+
+**How it was found:** giving `tag` the archive-filter group, and checking what borg does
+with a positional and an option together before copying it.
+
+## 28. A write command whose selector matched nothing is an error
+
+**Stage 8 · `internal/cli` · deliberate**
+
+borg exits 0, having done nothing, when an archive filter matches no archive — for
+`delete`, for `tag`, and for the rest. borge refuses:
+
+```
+borge tag -add PROT -a 'sh:dayly-*'
+borge: no archive matched; nothing was changed        exit 2
+```
+
+The typo is the point. `sh:dayly-*` matches nothing, borg reports success, and the user
+believes their archives are tagged until the day pruning removes them. A write command that
+changed nothing while reporting success is the failure shape `PORTING_PLAN.md` §2.3
+collects, and it is the one that hides longest.
+
+**Read-only commands are not affected**, and that asymmetry is the whole design: `borge
+info -a no-such-archive` and `borge repo-list -a 'sh:no-such*'` print nothing and exit 0,
+exactly as borg does. Asking to list a set that turns out to be empty *has* been answered.
+Asking to change a set that turns out to be empty has not.
+
+borge already behaved this way for `delete` before this entry existed; `tag` was brought
+into line when it gained the archive filters, and the policy is written down here so the
+next command to take a selector does the same rather than choosing afresh.
+
+**Scripts that rely on borg's exit 0** will see a failure where borg reported success. That
+is the intended trade: the alternative is a backup script whose retention tagging silently
+stopped working.

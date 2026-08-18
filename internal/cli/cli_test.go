@@ -351,11 +351,14 @@ func TestErrorsAreReportedNotPanicked(t *testing.T) {
 
 	cases := [][]string{
 		{"list", "no-such-archive"},
-		{"info", "-a", "no-such-archive"},
 		{"list"},
 		{"extract"},
 		{"nonsense"},
 	}
+	// "info -a no-such-archive" was here until 2026-08-18, when info started describing
+	// the *set* an archive filter selects rather than one archive. An empty set is now
+	// an empty report and exit 0, which is what borg does - measured, and asserted by
+	// TestInfoSelectingNothingIsNotAnError below.
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			_, stderr, code := r.borge(t, args...)
@@ -605,4 +608,34 @@ func borgArchiveNames(t *testing.T, r *borgRepo, extra ...string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// TestInfoSelectingNothingIsNotAnError: a read-only command asked for a set that turns out
+// to be empty has answered the question. borg exits 0 and prints nothing, and so does
+// borge - unlike the write commands, where §2.3 of the porting plan applies and an empty
+// selection is refused.
+func TestInfoSelectingNothingIsNotAnError(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	r.makeArchives("exists")
+
+	for _, args := range [][]string{
+		{"info", "-a", "no-such-archive"},
+		{"info", "-a", "sh:no-such*"},
+		{"repo-list", "-a", "sh:no-such*"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			// borg first, so the expectation is measured rather than assumed.
+			out, err := r.runErr(append(args, "-r", r.path)...)
+			if err != nil {
+				t.Fatalf("borg %v failed: %v\n%s", args, err, out)
+			}
+			stdout, stderr, code := r.borge(t, args...)
+			if code != ExitOK {
+				t.Errorf("borge %v exited %d, borg exited 0\n%s", args, code, stderr)
+			}
+			if strings.TrimSpace(stdout) != "" {
+				t.Errorf("borge %v printed something for an empty selection:\n%s", args, stdout)
+			}
+		})
+	}
 }

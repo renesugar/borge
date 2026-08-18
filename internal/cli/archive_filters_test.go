@@ -201,6 +201,9 @@ func TestEveryArchiveFilterCommandOffersTheDateOptions(t *testing.T) {
 	// command without the filters, or dropping them from one, fails.
 	filtered := []string{
 		"repo-list", "delete", "undelete", "prune", "check", "recreate", "find", "analyze",
+		// info and tag took a single archive until 2026-08-18; borg has always given
+		// them the whole filter group.
+		"info", "tag",
 	}
 	want := []string{"--older", "--newer", "--oldest", "--newest"}
 
@@ -228,5 +231,136 @@ func TestEveryArchiveFilterCommandOffersTheDateOptions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestInfoDescribesEveryMatchingArchive: borg's info describes a *set*. borge described
+// exactly one archive and refused to run without a selector, which is a different question
+// answered by the same command name.
+func TestInfoDescribesEveryMatchingArchive(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a1", "a2", "b3"} {
+		r.mustRun("create", "-r", r.path, name, src)
+	}
+
+	count := func(out string) int {
+		return strings.Count(out, "Archive name: ")
+	}
+	borgeInfo := func(args ...string) string {
+		t.Helper()
+		stdout, stderr, code := r.borge(t, append([]string{"info"}, args...)...)
+		if code != ExitOK {
+			t.Fatalf("borge info %v exited %d\n%s", args, code, stderr)
+		}
+		return stdout
+	}
+
+	// No selector at all: the set is the repository.
+	if got, want := count(borgeInfo()), count(r.mustRun("info", "-r", r.path)); got != want {
+		t.Errorf("borge info described %d archives, borg %d", got, want)
+	}
+	if got := count(borgeInfo()); got != 3 {
+		t.Fatalf("described %d archives; the fixture is not what this test needs", got)
+	}
+	// And the filters narrow it, which is what proves they reach info at all.
+	if got := count(borgeInfo("-a", "sh:a*")); got != 2 {
+		t.Errorf("-a sh:a* described %d archives, want 2", got)
+	}
+	if got := count(borgeInfo("--last", "1")); got != 1 {
+		t.Errorf("--last 1 described %d archives, want 1", got)
+	}
+	if got := count(borgeInfo("--newer", "1d")); got != 3 {
+		t.Errorf("--newer 1d described %d archives, want 3", got)
+	}
+	// The positional name borge accepts and borg does not still works.
+	if got := count(borgeInfo("b3")); got != 1 {
+		t.Errorf("a positional name described %d archives, want 1", got)
+	}
+}
+
+// TestTagAppliesToTheWholeSelection checks tag against borg over the three shapes that
+// matter: a filter, no selector at all, and one name.
+func TestTagAppliesToTheWholeSelection(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a1", "a2", "b3"} {
+		r.mustRun("create", "-r", r.path, name, src)
+	}
+
+	// tags reads the repository as borg sees it, so the assertion is about what was
+	// stored rather than about borge's own report of it.
+	tags := func() map[string]string {
+		t.Helper()
+		// borg reports tags as one comma-separated string, already sorted - not as a
+		// list. Reading it as a list is a parse error, which is how this test found out.
+		var doc struct {
+			Archives []struct {
+				Name string `json:"name"`
+				Tags string `json:"tags"`
+			} `json:"archives"`
+		}
+		out := r.mustRun("repo-list", "-r", r.path, "--json")
+		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("repo-list --json does not parse: %v\n%s", err, out)
+		}
+		got := map[string]string{}
+		for _, a := range doc.Archives {
+			got[a.Name] = a.Tags
+		}
+		return got
+	}
+	mustTag := func(args ...string) {
+		t.Helper()
+		if _, stderr, code := r.borge(t, append([]string{"tag"}, args...)...); code != ExitOK {
+			t.Fatalf("borge tag %v exited %d\n%s", args, code, stderr)
+		}
+	}
+
+	mustTag("-add", "T", "-a", "sh:a*")
+	if got := tags(); got["a1"] != "T" || got["a2"] != "T" || got["b3"] != "" {
+		t.Fatalf("after -a sh:a*: %v", got)
+	}
+	// No selector means every archive, which is borg's behaviour and worth pinning
+	// because it is the dangerous one.
+	mustTag("-add", "ALL")
+	if got := tags(); got["a1"] != "ALL,T" || got["b3"] != "ALL" {
+		t.Fatalf("after no selector: %v", got)
+	}
+	mustTag("-add", "ONE", "b3")
+	if got := tags(); got["b3"] != "ALL,ONE" || got["a1"] != "ALL,T" {
+		t.Fatalf("after one name: %v", got)
+	}
+}
+
+// TestTagWithNoMatchSaysSo: a selection that matches nothing must not look like a change
+// that happened. borg exits 0 here; borge refuses, as it already does for delete. See
+// PORTING_PLAN.md §2.3 and DIVERGENCES.md #28.
+func TestTagWithNoMatchSaysSo(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.mustRun("create", "-r", r.path, "only", src)
+
+	_, stderr, code := r.borge(t, "tag", "-add", "X", "-a", "sh:nothing-matches-this*")
+	if code != ExitError {
+		t.Errorf("a selection matching nothing exited %d, want %d", code, ExitError)
+	}
+	if !strings.Contains(stderr, "no archive matched") {
+		t.Errorf("nothing said about the empty selection: %q", stderr)
+	}
+	if strings.Contains(r.mustRun("repo-list", "-r", r.path), "X") {
+		t.Error("a tag was applied despite nothing matching")
 	}
 }

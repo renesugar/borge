@@ -354,23 +354,30 @@ func cmdList(e *Env, args []string) int {
 	return ExitOK
 }
 
-// cmdInfo prints an archive's metadata.
+// cmdInfo prints the metadata of every archive the filters select.
+//
+// borg's info takes the whole archive-filter group and no positional at all: it describes
+// a *set*, and with no filter that set is the repository. borge described exactly one
+// archive and refused to run without a selector, so eight of borg's options were missing
+// here and "borge info" answered a different question from "borg info".
+//
+// The positional archive name is kept as a convenience borge already had; borg has no such
+// positional, so it is an addition rather than a difference in a shared spelling.
 func cmdInfo(e *Env, args []string) int {
 	fs := newFlagSet(e, "info")
 	var common commonFlags
+	var sel listSelectors
 	common.register(fs)
-	selector := fs.String("a", "", "the archive to describe")
-	fs.StringVar(selector, "match-archives", "", "the archive to describe")
+	sel.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
-	name := *selector
-	if name == "" && fs.NArg() > 0 {
-		name = fs.Arg(0)
+	if sel.match == "" && fs.NArg() > 0 {
+		sel.match = fs.Arg(0)
 	}
-	if name == "" {
-		e.errorf("info needs an archive; pass -a NAME")
-		return ExitError
+	opts, err := sel.options(e)
+	if err != nil {
+		return e.fail(err)
 	}
 
 	path, err := e.resolveRepo(common.repo)
@@ -383,14 +390,24 @@ func cmdInfo(e *Env, args []string) int {
 	}
 	defer o.Close()
 
-	a, err := openArchive(o.manifest, name)
+	infos, err := o.manifest.Archives.List(opts)
 	if err != nil {
 		return e.fail(err)
 	}
 
+	archives := make([]*archive.Archive, 0, len(infos))
+	for _, info := range infos {
+		a, err := archive.Open(o.manifest, info.ID)
+		if err != nil {
+			return e.fail(err)
+		}
+		archives = append(archives, a)
+	}
+
 	if common.json {
-		out := map[string]any{
-			"archives": []map[string]any{{
+		list := make([]map[string]any, 0, len(archives))
+		for _, a := range archives {
+			list = append(list, map[string]any{
 				"name":     a.Info.Name,
 				"id":       hex.EncodeToString(a.ID),
 				"hostname": a.Info.Host,
@@ -401,16 +418,24 @@ func cmdInfo(e *Env, args []string) int {
 				"time":     a.Info.Time.Local().Format("2006-01-02T15:04:05.000000-07:00"),
 				"nfiles":   a.Info.NFiles,
 				"tags":     a.Info.Tags,
-			}},
+			})
 		}
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "    ")
-		if err := enc.Encode(out); err != nil {
+		if err := enc.Encode(map[string]any{"archives": list}); err != nil {
 			return e.fail(err)
 		}
 		return ExitOK
 	}
 
+	for _, a := range archives {
+		printArchiveInfo(e, a)
+	}
+	return ExitOK
+}
+
+// printArchiveInfo writes one archive's block of the text report.
+func printArchiveInfo(e *Env, a *archive.Archive) {
 	fmt.Fprintf(e.Stdout, "Archive name: %s\n", a.Info.Name)
 	fmt.Fprintf(e.Stdout, "Archive fingerprint: %s\n", hex.EncodeToString(a.ID))
 	fmt.Fprintf(e.Stdout, "Comment: %s\n", a.Info.Comment)
@@ -434,7 +459,6 @@ func cmdInfo(e *Env, args []string) int {
 	if a.Meta.ChunkerParamsSet {
 		fmt.Fprintf(e.Stdout, "Chunker params: %v\n", a.Meta.ChunkerParams)
 	}
-	return ExitOK
 }
 
 // cmdExtract restores an archive.

@@ -141,6 +141,16 @@ entry saying what it should do, and every entry needs a command — so adding an
 topic fails the test until somebody says what it is for. That is deliberate: an example
 nobody can state the expected outcome of is an example nobody has checked.
 
+**Check what the code does with absence.** Four stage-8 defects were the same defect: the
+feature was right and its handling of an empty or missing input was wrong, and each read
+the user's explicit input as "nothing was given" and reported success. `create A ""`
+archived the working directory; `repo-list --newer ""` listed everything; an `R` root in a
+patterns file was parsed and dropped. For every option you add, ask whether *empty* is
+distinguishable from *absent*, whether absent silently means "everything", and where the
+parsed value actually ends up. `PORTING_PLAN.md` §2.3 has the pattern and the test to write.
+A silent no-op looks exactly like success, which is why none of the four was caught by
+seven stages of differential testing.
+
 **Say what you did not do.** A stage note that lists only successes is not a record.
 
 ---

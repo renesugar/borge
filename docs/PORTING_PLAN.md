@@ -561,6 +561,48 @@ For each borg module, in order:
    unit tests written from the same misunderstanding will not.
 5. Record any intentional behaviour difference in `docs/DIVERGENCES.md`.
 
+### 2.3 Check what the code does with *absence*
+
+Four defects in stage 8 were the same defect. In each, the feature itself was right and its
+handling of an empty, missing or unusable input was wrong — and every one of them read the
+user's explicit input as "nothing was given" and then **reported success**:
+
+| what was given | what borge did | what borg does |
+| --- | --- | --- |
+| `create A ""` — an unset shell variable | archived the working directory (`filepath.Clean("")` is `"."`) | exit 2 |
+| `repo-list --newer ""` — likewise | listed every archive, exit 0 | exit 2 |
+| a patterns file whose only root is `R PATH` | "create needs at least one path" | archives the root |
+| `--exclude` written after the paths | archived what was excluded, exit 1 | excludes it |
+
+None of these is exotic. `--newer "$SPAN"` with `SPAN` unset is an ordinary shell mistake,
+and it is the one where a filter that silently matches everything is least likely to be
+noticed — a backup script that then deletes what it "found" is the shape of the accident.
+
+**So this is now a review step of its own, not something to be stumbled on.** For every
+option and argument added or ported, ask the three questions and write the answer down as a
+test:
+
+1. **Empty is not absent.** Can the option be *given* an empty value, and is that
+   distinguishable from not giving it? Go's `flag` makes them look identical for a string
+   option; a `flag.Value` that records `set` makes them different. `internal/cli/repo.go`'s
+   `timespanFlag` is the pattern.
+2. **Absent must not mean "everything" without saying so.** A filter that fails to parse
+   and defaults to no filter, or a selector that matches nothing and is treated as matching
+   all, is the dangerous direction. Prefer the failure that stops the command.
+3. **Parsed input that reaches nothing is still an answer.** `R` roots were parsed and
+   dropped; the pattern order was collected and regrouped. Grep for where the value goes,
+   not just where it is read.
+
+The recurring shape is worth stating plainly: **a silent no-op looks exactly like success,**
+which is why none of the four was caught by the seven stages of differential testing that
+preceded them. They were caught by running a command and looking at the result.
+
+**The asymmetry that falls out of this.** Applying the rule to selectors produced a policy
+worth naming: a **write** command whose filter matched nothing is an error (DIVERGENCES
+#28), a **read** command's is not. Asking to list a set that turns out to be empty has been
+answered; asking to change one has not. borg exits 0 for both, so this is a deliberate
+divergence and the only one §2.3 has produced so far.
+
 ---
 
 ## 3. Stage 0 — foundation
@@ -1706,9 +1748,13 @@ Everything needed for feature parity, once correctness is established.
   - **`--format`** on `list`, `repo-list`, `prune`, `check`, `diff`, `find` — borg's
     placeholder formatter. The largest single group left.
   - **`--sort-by`** where `listSelectors` does not already reach it (`info`, `tag`, `diff`).
-  - **`info` and `tag` do not use `listSelectors` at all** and so gained nothing from the
-    filter work: seven and eight options respectively, most of them the filter group they
-    should be sharing.
+  - ~~**`info` and `tag` do not use `listSelectors` at all**~~ — **done 2026-08-18**, and
+    both are now complete against borg. **79 → 64.** It was not only options: borg's `info`
+    describes the *set* of archives the filters select, and borge described exactly one and
+    refused to run without a selector; borg's `tag` acts on the whole selection, and with
+    no selector at all on every archive in the repository. Both now match. Declined on the
+    way: borg's variadic `--add [TAG ...]`, whose greedy parsing turns
+    `borg tag --add Z a2` into "add the tags Z and a2 to every archive" — DIVERGENCES #27.
 
   The rest is genuine per-command work, `create` being the largest at 23 — `--dry-run`,
   `--sparse`, `--timestamp`, `--tags`, `--exclude-caches`, `--exclude-if-present`,
@@ -2328,7 +2374,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 79 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 64 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
