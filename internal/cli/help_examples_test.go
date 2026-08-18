@@ -779,6 +779,12 @@ func TestHelpExamplesRun(t *testing.T) {
 					"expects it to fail", ex.topic, ex.line, ex.cmd)
 			}
 		}
+		// An entry that neither declines to run nor says what running it should
+		// produce is an entry that checks nothing.
+		if check.notRunnable == "" && check.check == nil {
+			t.Errorf("%s topic, line %d: the entry for %q runs the command and then "+
+				"asserts nothing about what it did", ex.topic, ex.line, ex.cmd)
+		}
 		// Declining to run something is only defensible for a command quoted inside a
 		// sentence. An indented example is there to be copied.
 		if check.notRunnable != "" && !ex.prose {
