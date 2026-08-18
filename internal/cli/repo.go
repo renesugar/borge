@@ -12,7 +12,6 @@ package cli
 import (
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"strings"
 	"time"
@@ -70,7 +69,7 @@ type listSelectors struct {
 	deleted bool
 }
 
-func (s *listSelectors) register(fs *flag.FlagSet) {
+func (s *listSelectors) register(fs *flagSet) {
 	fs.StringVar(&s.match, "a", "", "select archives (name, sh:, re:, aid:, tags:, user:, host:)")
 	fs.StringVar(&s.match, "match-archives", "", "select archives")
 	fs.IntVar(&s.first, "first", 0, "keep only the first N archives")

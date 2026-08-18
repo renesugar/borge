@@ -109,7 +109,7 @@ func lockKind(exclusive bool) string {
 // borge is a wrapper here, and a wrapper that swallows the exit code of what it wrapped
 // makes "borge with-lock ... && something-else" silently wrong.
 func cmdWithLock(e *Env, args []string) int {
-	fs := newFlagSet(e, "with-lock")
+	fs := newPassthroughFlagSet(e, "with-lock")
 	var common commonFlags
 	common.register(fs)
 	if err := fs.Parse(args); err != nil {

@@ -410,10 +410,11 @@ was not a documentation bug at all:
 
 - `borge find --pattern 'sh:…'` — `--pattern` needs an action prefix; the documented form
   is an error.
-- `borge create -r REPO archive ~ --exclude 'sh:**/.cache'` — **the exclusion silently does
+- `borge create -r REPO archive ~ --exclude 'sh:**/.cache'` — **the exclusion silently did
   not happen.** Go's `flag` stops at the first positional, so the option became two more
   paths to archive. borg's archive had 0 `.cache` entries; borge's had 2. Recorded as
-  DIVERGENCES #20 and as a fix in §11.
+  DIVERGENCES #20 and **fixed on 2026-08-18**; the topic now promises both orders mean the
+  same thing, and both are executed.
 
 A defect that stores data the user asked to exclude was sitting in the help text, and
 running the examples is what surfaced it. That is the argument for this item over every
@@ -1634,12 +1635,15 @@ Everything needed for feature parity, once correctness is established.
   is a decision still to make rather than one already taken.
 - **Archive-name placeholders**, which are not a command and so are invisible to the
   coverage gate — see DIVERGENCES #17 and the note below.
-- **Options must be accepted after positional arguments** (DIVERGENCES #20). Go's `flag`
-  stops at the first non-option, so `borge create -r REPO archive ~ --exclude …` archives
-  the directory it was told to exclude. The fix is to permute arguments before `fs.Parse`,
-  honouring `--` as an end-of-options marker. It touches every command's argument handling,
-  so it wants its own change and its own tests — including one that asserts a path
-  beginning with a dash still works after `--`.
+- ~~**Options must be accepted after positional arguments**~~ (DIVERGENCES #20).
+  **Done 2026-08-18**, `internal/cli/args.go`. A `flagSet` wrapping `flag.FlagSet` permutes
+  the arguments in its `Parse`, so no call site changed. Three things carried the work:
+  whether an option takes a value is asked of the `FlagSet` rather than guessed (`-e` means
+  different things to `create` and `repo-create`, and `--keep-daily -1` must keep its
+  argument); `--` ends the options and is re-emitted ahead of the positionals so a
+  dash-leading path survives; and `with-lock` opts out, because permuting `sh -c '…'` would
+  take the `-c` for borge's own. A mistyped option is now an error rather than a filename,
+  which is argparse's behaviour and the reason the old defect was invisible.
 - **A relative source path must be stored as typed** (DIVERGENCES #21). `archive.Create`
   calls `filepath.Abs` on each root, so `borge create A home/me` stores
   `<cwd>/home/me/...` where borg stores `home/me/...`. Same command, same tree, a
@@ -2098,10 +2102,10 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 **What "in progress" means for stage 8.** The command list is gated by
 `tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
-the other two are `serve` and an undecided `transfer`. Three argument-handling defects are
-also open and are listed in §11: options after positionals (#20), relative source paths
-(#21) and relative repository paths (#22). All three are borg habits that borge answers
-differently, and #20 and #21 both change what ends up in the archive.
+the other two are `serve` and an undecided `transfer`. Two argument-handling defects remain
+open and are listed in §11: relative source paths (#21) and relative repository paths
+(#22). The third, options after positionals (#20), was fixed on 2026-08-18; it was the one
+that changed what ended up in the archive, and #21 still does.
 
 **What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been
 changed as a result. The three pure-Go fixes (zstd encoder reuse, chunker reuse,

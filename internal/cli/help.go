@@ -142,18 +142,17 @@ PATHS INSIDE AN ARCHIVE
 Paths are stored without a leading slash, so an archive of /home/me holds "home/me/...".
 A pattern is matched against that stored form.
 
-OPTIONS COME BEFORE PATHS
+OPTIONS AND PATHS
 
-borge stops reading options at the first non-option argument, so every option has to
-precede the paths:
+Options may come before or after the paths; both of these exclude the same thing:
 
-  borge create -r REPO --exclude 'sh:**/.cache' archive ~     correct
-  borge create -r REPO archive ~ --exclude 'sh:**/.cache'     WRONG
+  borge create -r REPO --exclude 'sh:**/.cache' archive ~
+  borge create -r REPO archive ~ --exclude 'sh:**/.cache'
 
-borg accepts the second form. borge treats "--exclude" and the pattern after it as two
-more paths to archive, warns that they do not exist, and archives everything the exclude
-was meant to leave out. Use "--" to end the options when a path itself begins with a dash.
-This is a known defect, not a design decision; see docs/DIVERGENCES.md #20.
+An argument that begins with a dash and is not one of the command's options is an error,
+not a filename. A path that really does begin with a dash needs "--" to end the options:
+
+  borge create -r REPO archive -- ~/-weird-name
 
 ORDER
 

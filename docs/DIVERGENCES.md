@@ -427,9 +427,14 @@ wrong default.
 `--key-location repokey|keyfile` overrides it in both tools, and the two agree whenever it
 is given.
 
-## 20. Options must precede positional arguments
+## 20. Options must precede positional arguments — **fixed 2026-08-18**
 
-**Stage 8 · `internal/cli` · a defect, not a decision — and it loses data**
+**Stage 8 · `internal/cli` · a defect, not a decision — and it lost data**
+
+**Resolved.** `internal/cli/args.go` permutes the arguments before `flag.Parse` sees them,
+so an option is accepted wherever borg accepts one. The entry is kept because it is cited
+from the plan and the tests, and because what it was is worth remembering. What follows
+describes the defect; the fix is at the end.
 
 borg parses with Python's `argparse`, which accepts options anywhere on the command line.
 borge parses with Go's `flag`, which **stops reading options at the first non-option
@@ -450,22 +455,36 @@ warnings scroll past in the middle of a backup's output, and the archive looks f
 the same command meaning something else, silently, in the direction of storing data the
 user tried to keep out. Anyone carrying a borg habit or a borg crontab across hits it.
 
-The correct form today is options first:
-
-```
-borge create -r REPO --exclude 'sh:**/.cache' archive ~
-```
-
-**It should be fixed rather than documented.** The fix is to permute arguments before
-`fs.Parse` — move options ahead of positionals, the way GNU `getopt` does — honouring `--`
-as an end-of-options marker so a path that begins with a dash stays a path. That touches
-every command's argument handling and needs its own change and its own tests; it is
-recorded in `docs/PORTING_PLAN.md` §11. Until then the help text says so out loud, because
-a user who does not know this will not discover it from the output.
-
 **How it was found:** by executing the command-line examples in borge's own help topics.
 Two of fifteen were wrong, and this one was wrong in a way that mattered. See
 `PORTING_PLAN.md` §2.1.2.
+
+### The fix
+
+`internal/cli/args.go` wraps `flag.FlagSet` in a `flagSet` whose `Parse` moves the options
+ahead of the positionals first, the way GNU `getopt` does. Three things make that safe, and
+each of them is a case that would otherwise be silently wrong:
+
+- **An option that takes a value carries the next argument with it.** Whether it does is
+  asked of the `FlagSet` rather than guessed from the spelling, because the answer differs
+  per command — `-e` is `create`'s `--exclude` and `repo-create`'s `--encryption` — and
+  because `--keep-daily -1` must not lose its argument to the positionals.
+- **`--` ends the options**, and one is re-emitted ahead of the positionals, so a path
+  beginning with a dash still arrives as a path.
+- **`with-lock` opts out entirely.** It runs another program, and permuting that program's
+  arguments would pull the `-c` out of `borge with-lock sh -c '...'` and make borge reject
+  its own command line.
+
+One deliberate behaviour change comes with it: **an argument that begins with a dash and is
+not one of the command's options is now an error** rather than a filename. Before, a
+mistyped `--exlude` became a path and the only sign was a warning. That is argparse's
+behaviour too.
+
+Verified by `TestExcludeAfterPositionalsMatchesBorg`, which gives borg and borge the same
+command with the option last and requires the same archive contents, and by
+`TestPermute`'s thirteen cases. The help topic's `OPTIONS COME BEFORE PATHS` section is
+gone; `OPTIONS AND PATHS` replaces it and both of its example forms are executed by
+`TestHelpExamplesRun`.
 
 ## 21. A relative source path is archived under its absolute path
 

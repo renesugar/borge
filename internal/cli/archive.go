@@ -12,7 +12,6 @@ package cli
 import (
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -45,7 +44,7 @@ func (m *multiFlag) Set(v string) error {
 	return nil
 }
 
-func (p *patternFlags) register(fs *flag.FlagSet) {
+func (p *patternFlags) register(fs *flagSet) {
 	fs.Var(&p.excludes, "e", "exclude paths matching this pattern (repeatable)")
 	fs.Var(&p.excludes, "exclude", "exclude paths matching this pattern (repeatable)")
 	fs.Var(&p.excludeFrom, "exclude-from", "read exclude patterns from a file (repeatable)")

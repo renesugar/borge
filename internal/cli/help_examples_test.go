@@ -191,6 +191,8 @@ func newHelpFixture(t *testing.T) *helpFixture {
 	write("home/me/pics/raw.tiff", "tiff data\n")
 	write("home/me/invoice-2026-01.pdf", "invoice\n")
 	write("home/me/.cache/junk.bin", "junk\n")
+	// A path that begins with a dash, for the "--" example in the patterns topic.
+	write("home/me/-weird-name", "weird\n")
 	write("srv/data.txt", "server data\n")
 	// Large enough that "borge analyze" prints a size with a unit prefix, which is what
 	// the BORGE_UNITS example checks. Incompressible so the stored size stays large.
@@ -312,7 +314,7 @@ func (f *helpFixture) substitutions() []substitution {
 	return []substitution{
 		{doc: "REPO", real: f.repo, whole: true,
 			why: "the topics write REPO for a repository path, and borge requires an absolute one"},
-		{doc: "~", real: filepath.Join(f.root, "home", "me"), whole: true,
+		{doc: "~", real: filepath.Join(f.root, "home", "me"),
 			why: "the test must not archive the real home directory"},
 		{doc: "/srv", real: filepath.Join(f.root, "srv"), whole: true,
 			why: "the test must not archive the real /srv"},
@@ -384,31 +386,36 @@ var patternsExamples = map[string]exampleCheck{
 		},
 	},
 
-	// The example the topic labels WRONG, run to prove it is. This pins
-	// docs/DIVERGENCES.md #20: the option lands after a positional, Go's flag package
-	// stops reading options there, and the exclusion silently does not happen.
-	//
-	// When the argument permutation fix lands (docs/PORTING_PLAN.md §11) this entry
-	// fails. That is the point: delete it, delete the OPTIONS COME BEFORE PATHS section
-	// of the patterns topic, and close divergence #20.
+	// The same command with the option after the paths. It used to archive the .cache
+	// tree it was told to leave out (docs/DIVERGENCES.md #20, fixed); it is kept as a
+	// separate entry from the one above because the topic now promises the two forms
+	// mean the same thing, and only running both proves it.
 	`borge create -r REPO archive ~ --exclude 'sh:**/.cache'`: {
-		wantExit: ExitWarning,
+		wantExit: ExitOK,
 		check: func(t *testing.T, f *helpFixture, stdout, stderr string) {
-			if !strings.Contains(stderr, "no such file or directory") {
-				t.Errorf("expected borge to warn about the option it took for a path:\n%s", stderr)
-			}
 			paths := f.archivePaths("archive")
-			cached := false
+			if len(paths) < 6 {
+				t.Fatalf("the archive holds %d paths; the fixture cannot have been "+
+					"archived and this check proves nothing: %v", len(paths), paths)
+			}
 			for _, p := range paths {
 				if strings.Contains(p, "/.cache") {
-					cached = true
+					t.Errorf("an --exclude written after the paths did not exclude %q", p)
 				}
 			}
-			if !cached {
-				t.Errorf("the exclusion took effect after a positional argument: the " +
-					"defect this example documents is fixed, so remove the OPTIONS COME " +
-					"BEFORE PATHS section, this table entry and docs/DIVERGENCES.md #20")
+			mustHaveSuffix(t, paths, "/home/me/notes.txt")
+		},
+	},
+
+	// A path that begins with a dash, reached through "--".
+	`borge create -r REPO archive -- ~/-weird-name`: {
+		wantExit: ExitOK,
+		check: func(t *testing.T, f *helpFixture, stdout, stderr string) {
+			paths := f.archivePaths("archive")
+			if len(paths) != 1 {
+				t.Fatalf("expected the one dash-leading path, got %v", paths)
 			}
+			mustHaveSuffix(t, paths, "/home/me/-weird-name")
 		},
 	},
 

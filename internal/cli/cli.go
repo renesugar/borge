@@ -178,7 +178,7 @@ type commonFlags struct {
 	json    bool
 }
 
-func (c *commonFlags) register(fs *flag.FlagSet) {
+func (c *commonFlags) register(fs *flagSet) {
 	fs.StringVar(&c.repo, "r", "", "repository path (or BORGE_REPO / BORG_REPO)")
 	fs.StringVar(&c.repo, "repo", "", "repository path (or BORGE_REPO / BORG_REPO)")
 	fs.BoolVar(&c.verbose, "v", false, "more output")
@@ -188,12 +188,20 @@ func (c *commonFlags) register(fs *flag.FlagSet) {
 
 // newFlagSet builds a flag set that reports usage the way borg does and does not exit the
 // process on a parse error.
-func newFlagSet(e *Env, name string) *flag.FlagSet {
-	fs := flag.NewFlagSet("borge "+name, flag.ContinueOnError)
-	fs.SetOutput(e.Stderr)
+func newFlagSet(e *Env, name string) *flagSet {
+	inner := flag.NewFlagSet("borge "+name, flag.ContinueOnError)
+	inner.SetOutput(e.Stderr)
 	if e.captureFlags != nil {
-		e.captureFlags(fs)
+		e.captureFlags(inner)
 	}
+	return &flagSet{FlagSet: inner}
+}
+
+// newPassthroughFlagSet is newFlagSet for a command whose trailing arguments are another
+// program's; see the note in args.go.
+func newPassthroughFlagSet(e *Env, name string) *flagSet {
+	fs := newFlagSet(e, name)
+	fs.passthrough = true
 	return fs
 }
 
