@@ -268,7 +268,111 @@ organised so that an interruption is cheap:
 5. **Ask before advancing a stage.** After a stage gate passes, stop and ask before
    starting the next one.
 
-### 2.1 Porting discipline, per module
+### 2.1 Doc anchors: tying help text to the code that implements it
+
+**The problem this solves.** Four documentation claims went false during stage 8 while the
+code around them was correct: the placeholders topic (twice, in opposite directions), the
+stage tracker, and `borge help environment` telling users that borge never prompts for a
+passphrase — after prompting had been implemented. The two that were caught automatically
+had tests behind them. The two that needed a human to notice were prose.
+
+The cause is structural rather than careless: the sentence lives in `internal/cli/help.go`
+and the behaviour lives in `internal/cli/passphrase.go`, so a change to one does not put
+the other in the diff. Reviewing a change cannot catch a claim the reviewer never sees.
+
+**The method.** Put the user-facing prose in a Go doc comment *on the declaration that
+implements it*, and mark it with a directive that names where it belongs. Go's own doc
+tooling makes this work: a comment line matching `^//[a-z0-9]+:[a-z0-9]` is a **directive**,
+so it is stripped from `go doc` output and from `ast.CommentGroup.Text()`, while remaining
+readable from `CommentGroup.List`. Verified 2026-08-17 against Go 1.26 before designing
+around it.
+
+Four anchors:
+
+| directive | meaning |
+| --- | --- |
+| `//borge:doc user` / `//borge:doc api` | which documentation subset this comment belongs to |
+| `//borge:help <topic>[/<section>]` | this comment is the source of that help topic or section |
+| `//borge:enumerates <expr>` | the comment lists a set the code defines; the list is **generated**, not written |
+| `//borge:claim <id>` | this comment makes a behavioural claim checked by a registered test |
+
+```go
+// unlockWithPrompt opens a repository's key, asking for the passphrase when the
+// environment did not supply a working one.
+//
+// The environment is tried first and a terminal is asked only on failure, up to three
+// times, with echo off. Only a repository that actually has a passphrase can produce that
+// failure, so the unencrypted modes never prompt.
+//
+//borge:doc user
+//borge:help environment/passphrases
+//borge:claim prompts-only-on-tty
+func (e *Env) unlockWithPrompt(...) { ... }
+```
+
+**Three grades of verification, reported honestly.** The point is not to pretend prose can
+be tested; it is to make the untested share *visible and small*.
+
+- **Generated** — produced from code: enumerations, flag lists, environment variables.
+  Cannot drift, because there is one source.
+- **Claimed** — prose linked by id to an executable check. Drifts only if the check is
+  deleted, which the audit catches.
+- **Unverified** — everything else. Permitted: "this exists because the key type is not
+  known until the manifest is read" is rationale, not a testable assertion. But it is
+  **counted**, so the gap is a number rather than an assumption.
+
+**The pipeline.**
+
+```
+doc comments with anchors
+   ├─ docaudit          report: grade coverage, anchors naming topics that do not exist,
+   │                    claims with no check, checks with no claim
+   ├─ docgen --help  →  internal/cli/help_generated.go   (the "user" subset)
+   └─ docgen --api   →  docs/INTERNALS.md                (the "api" subset)
+```
+
+with `TestDocsAreCurrent` re-running the extraction in memory and diffing — the standard Go
+generated-code freshness pattern, so an edit to a doc comment without regeneration fails
+the build rather than shipping.
+
+**Two design points that are not obvious.**
+
+- **Topic structure needs a template, not concatenation.** Assembling a topic by
+  concatenating comments in source order makes the document's shape depend on file order,
+  which is fragile and unreviewable. Each topic gets a small template naming the fragments
+  it wants, in the order it wants them; `docgen` interpolates.
+- **Mixing audiences in one comment is the real risk.** A doc comment already serves the
+  maintainer, and user-facing prose has a different register. Keep the user paragraph as its
+  own block marked `//borge:doc user`, and leave rationale unmarked — a comment that tries
+  to be both usually does neither well.
+
+**Why this and not the alternatives.** Generating help from a separate data file keeps the
+drift, just in a new location. Testing the rendered text against golden files pins what the
+text *is*, not whether it is *true*. Colocation is the mechanism: it puts the user-visible
+sentence into the diff of the change that falsifies it.
+
+**Work items** (not started; sized deliberately so the first is useful alone):
+
+1. **`docaudit`** — a read-only tool and a test. Parse anchors, report the three grades per
+   topic, fail on a `//borge:help` naming a topic that does not exist and on a
+   `//borge:claim` with no registered check. No generation yet. This alone makes the
+   existing hand-written topics auditable and would have caught the prompting claim, because
+   the sentence would have carried a claim id with no check behind it.
+2. **`//borge:enumerates`** — convert the lists that are already checked ad hoc
+   (environment variables, pattern styles, compression specs, placeholders,
+   `TestHelpEnvironmentTopicListsEveryVariable` and `TestHelpTopicsCoverTheCode`) into
+   generated fragments. Deletes those bespoke tests in favour of one mechanism.
+3. **`docgen --help`** plus per-topic templates and `TestDocsAreCurrent`; move the five
+   topics out of `help.go` string constants and into anchored comments.
+4. **`docgen --api`** → `docs/INTERNALS.md`. Lowest value of the four: borge has no exported
+   API — everything is under `internal/` — so this is maintainer documentation that
+   `go doc ./internal/...` already serves. Do it last, or not at all.
+
+**Gate:** `docaudit` reports zero dangling anchors and zero orphan claims; every help topic
+has a grade breakdown recorded; and the unverified share is stated in the plan rather than
+discovered later.
+
+### 2.2 Porting discipline, per module
 
 For each borg module, in order:
 
@@ -1799,6 +1903,7 @@ than no tracker: it is the document a new reader trusts first.
 | 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve` and the remote backends remain | not yet bundled |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | not started — 4 items, the first useful alone | — |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see

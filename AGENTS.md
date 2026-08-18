@@ -126,6 +126,12 @@ was written from borg's behaviour and was false for borge, which had none. It wa
 running the command. `TestHelpPlaceholdersTopicIsTrue` now checks the claim against the
 behaviour, and has since caught the *opposite* error when placeholders were implemented.
 
+**Documentation goes stale silently, and prose is the part that does.** Four claims went
+false during stage 8; the two with tests behind them failed loudly, the two that were prose
+needed a human to notice. Until the doc-anchor work in `PORTING_PLAN.md` §2.1 lands, the
+rule is manual: **if you change behaviour, grep the help topics for what you just made
+false.** `borge help <topic>` renders them; `internal/cli/help.go` holds them.
+
 **Say what you did not do.** A stage note that lists only successes is not a record.
 
 ---
