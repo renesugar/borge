@@ -128,9 +128,17 @@ behaviour, and has since caught the *opposite* error when placeholders were impl
 
 **Documentation goes stale silently, and prose is the part that does.** Four claims went
 false during stage 8; the two with tests behind them failed loudly, the two that were prose
-needed a human to notice. Until the doc-anchor work in `PORTING_PLAN.md` §2.1 lands, the
-rule is manual: **if you change behaviour, grep the help topics for what you just made
-false.** `borge help <topic>` renders them; `internal/cli/help.go` holds them.
+needed a human to notice. Until the rest of the doc-anchor work in `PORTING_PLAN.md` §2.1
+lands, the rule for prose is manual: **if you change behaviour, grep the help topics for
+what you just made false.** `borge help <topic>` renders them; `internal/cli/help.go` holds
+them.
+
+The *examples* in those topics are no longer manual. `TestHelpExamplesRun`
+(`internal/cli/help_examples_test.go`) runs every command in every topic against a scratch
+repository and checks what it did, not just that it exited 0. Every command needs a table
+entry saying what it should do, and every entry needs a command — so adding an example to a
+topic fails the test until somebody says what it is for. That is deliberate: an example
+nobody can state the expected outcome of is an example nobody has checked.
 
 **Say what you did not do.** A stage note that lists only successes is not a record.
 

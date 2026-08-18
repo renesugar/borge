@@ -466,3 +466,58 @@ a user who does not know this will not discover it from the output.
 **How it was found:** by executing the command-line examples in borge's own help topics.
 Two of fifteen were wrong, and this one was wrong in a way that mattered. See
 `PORTING_PLAN.md` §2.1.2.
+
+## 21. A relative source path is archived under its absolute path
+
+**Stage 8 · `internal/archive/create_linux.go` · a defect, not a decision**
+
+borg stores a source path **as it was typed**, normalised. borge calls `filepath.Abs` on
+each root before walking it and stores the result with its leading slash removed. From
+`/srv/work`, with `home/me` beneath it:
+
+| command | borg stores | borge stores |
+| --- | --- | --- |
+| `create A home/me` | `home/me/...` | `srv/work/home/me/...` |
+| `create A ./home/me` | `home/me/...` | `srv/work/home/me/...` |
+| `create A home/me/` | `home/me/...` | `srv/work/home/me/...` |
+| `create A .` | `.`, `home`, `home/me/...` | `srv/work/...` |
+
+An absolute source path behaves identically in both tools, which is why the stage 7 interop
+matrix never saw this: every row in it passes absolute paths.
+
+**Why it matters.** The stored path is the path a restore recreates. `borg create A .` run
+in a project directory produces an archive that extracts into whatever directory the user
+is standing in; borge's produces one that recreates the whole absolute path. Same command,
+same tree, different archive — and the difference only becomes visible during a restore,
+which is the worst time to discover it.
+
+It also makes a documented pattern wrong: the patterns topic says an archive of `/home/me`
+holds `home/me/...`, which is true of an absolute path and false of a relative one.
+
+**The fix** is to keep the given path for the stored form and walk it as given — relative
+paths already resolve against the process working directory — matching borg's
+normalisation of `./x`, `x/` and `.`. Recorded in `PORTING_PLAN.md` §11.
+
+**How it was found:** building the fixture for `TestHelpExamplesRun` (§2.1.2). The
+patterns topic's `sh:home/me/**/*.txt` example could not be made to match, and the reason
+was not the pattern.
+
+## 22. A repository path must be absolute
+
+**Stage 8 · `internal/store` · a defect, not a decision**
+
+`borg repo-create -r REPO` works. borge answers:
+
+```
+borge: store: path must be absolute: "REPO"
+```
+
+borg accepts a relative repository path and resolves it against the working directory.
+borge refuses it in the store layer before anything else runs.
+
+This is smaller than #21 — it fails loudly, and the user simply types more — but it breaks
+the same borg habit, and `-r .` or `-r ../backups` is a normal thing to type. Recorded in
+`PORTING_PLAN.md` §11.
+
+**How it was found:** the same fixture. The help topics write `-r REPO`, and the first
+attempt to run them verbatim in a scratch directory was refused.

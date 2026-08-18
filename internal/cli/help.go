@@ -212,7 +212,7 @@ Selectors combine with the ordering and limiting options:
 THE PROTECTED TAG
 
 An archive tagged @PROT is never pruned and never counts against a retention rule's
-quota. Tag one with "borge tag ARCHIVE --add @PROT".
+quota. Tag one with "borge tag --add @PROT ARCHIVE".
 
 EXAMPLES
 
@@ -375,6 +375,11 @@ NOT BORGE'S
 
 SSH_ORIGINAL_COMMAND is read by "borge debug info" only, to report what a remote
 invocation was asked to run.
+
+EXAMPLES
+
+  BORGE_REPO=/backups/{hostname} borge repo-list
+  BORGE_UNITS=iec borge analyze
 `
 
 // helpEnvVarNames lists the variables the environment topic documents, so a test can
@@ -387,6 +392,8 @@ func helpEnvVarNames() []string {
 			continue
 		}
 		if name, ok := strings.CutPrefix(fields[0], "BORGE_"); ok {
+			// An examples line starts with an assignment: BORGE_UNITS=iec borge ...
+			name, _, _ = strings.Cut(name, "=")
 			out = append(out, name)
 		}
 	}

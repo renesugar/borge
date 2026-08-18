@@ -371,17 +371,18 @@ sentence into the diff of the change that falsifies it.
    Build the five-case calibration set from git *first*, then the checker. Advisory output,
    not a gate. Worth doing after item 1 and independently of items 2–4: it needs the anchors
    for pairing, and nothing else.
-6. **`TestHelpExamplesRun`** — §2.1.2(a). Execute every `borge …` line in every help topic
-   against a scratch repository and require the documented exit status. **Do this first of
-   all six.** It needs no anchors, no model and no new syntax; it is an ordinary Go test; and
-   it has already found a data-correctness bug by hand. Deterministic, so unlike items 5 and
-   7 it can gate the build.
+6. **`TestHelpExamplesRun`** — §2.1.2(a). **Done 2026-08-18**, first of the seven, in
+   `internal/cli/help_examples_test.go`. 25 commands from the five topics: 23 run against a
+   scratch repository, 2 are prose fragments marked unrunnable with the reason. It found
+   two more divergences on its first day (#21, #22) and the discipline that made it worth
+   the effort is in §2.1.2 below.
 7. **`docactionable`** — §2.1.2(b). Generate a command from each topic and run it. Advisory.
    Last, because it depends on item 6's scratch-repository harness for execution.
 
 **Gate:** `docaudit` reports zero dangling anchors and zero orphan claims; every help topic
 has a grade breakdown recorded; and the unverified share is stated in the plan rather than
-discovered later.
+discovered later. Item 6's own gate is already in place: every command in every topic has
+an entry saying what it should do, in both directions.
 
 #### 2.1.2 The strongest check: run the examples, and generate them from the prose
 
@@ -429,6 +430,48 @@ This is stronger than the contradiction check of §2.1.1 and subsumes part of it
 that cannot be turned into a command is one the reader cannot act on, whatever its truth.
 It is also non-deterministic and advisory, for the same reasons, and it wants the same
 calibration discipline — the two examples above are the first known-answer cases.
+
+**Built 2026-08-18** as `internal/cli/help_examples_test.go`. What it actually took, since
+none of it was obvious from the description above:
+
+- **Exit status is not the assertion.** `borge list ARCHIVE 're:…'` exits 0 whether it
+  matches the right files, the wrong files or nothing at all. Every entry checks what the
+  command *did*: which paths the archive holds, which files landed on disk, which archives
+  survived a `delete`. A table of expected exit codes would have passed on half the bugs
+  below.
+- **The fixture is built so that every example has something real to act on** — an archive
+  literally named `ARCHIVE`, one matching `sh:daily-*`, one tagged `temporary`, one named
+  after this host. An example that matched nothing would exit 0 and prove nothing. That is
+  the same vacuity trap as everywhere else in this port, arriving by a new route.
+- **Each example gets its own repository, rebuilt from scratch** (0.26 s). Order cannot
+  matter, and the destructive examples — `delete`, `prune` — run for real rather than with
+  `--dry-run`, which would test something other than what is documented.
+- **The commands quoted in prose are in the table too**, not only the indented examples.
+  Fragments like "that is why `borge repo-compress` exists" are marked unrunnable with the
+  reason. Listing them rather than skipping them is what caught the third broken example.
+- **Substitutions are the risk.** Each one is a step away from running what the user reads,
+  so each carries its reason in the source. One of them — replacing `REPO` wherever it
+  appeared — corrupted `BORGE_REPO=…` into nonsense, so whole-token and substring rules are
+  now distinguished.
+
+**What it found on its first run**, beyond the two already known:
+
+- `borge tag ARCHIVE --add @PROT`, in the match-archives topic, **fails**: "tag needs an
+  archive". Divergence #20 again, in a command quoted in prose rather than set out as an
+  example. Corrected to `borge tag --add @PROT ARCHIVE`.
+- The environment topic carried **no example at all**. It now has two, and they are the
+  ones worth having: `BORGE_REPO=…` replacing `-r`, which every other topic's examples
+  silently depend on, and `BORGE_UNITS=iec`, whose effect nothing tested.
+- **DIVERGENCES #21** — a relative source path is archived under its absolute path. Found
+  because the patterns topic's `sh:home/me/**/*.txt` could not be made to match, and the
+  pattern was not the reason.
+- **DIVERGENCES #22** — a repository path must be absolute, where borg accepts a relative
+  one. Found on the first attempt to run `-r REPO` verbatim.
+
+**Two mutation checks**, because a test that cannot fail is worse than none. Breaking an
+example in a topic fails in both directions at once (the command has no entry; the entry
+has no command). Breaking the *code* — making `BORGE_UNITS=iec` return SI units — fails the
+environment example, which is the case a doc-only test would have missed.
 
 **A fourth grade.** §2.1's grades gain one, and it sits at the top:
 
@@ -1597,6 +1640,14 @@ Everything needed for feature parity, once correctness is established.
   honouring `--` as an end-of-options marker. It touches every command's argument handling,
   so it wants its own change and its own tests — including one that asserts a path
   beginning with a dash still works after `--`.
+- **A relative source path must be stored as typed** (DIVERGENCES #21). `archive.Create`
+  calls `filepath.Abs` on each root, so `borge create A home/me` stores
+  `<cwd>/home/me/...` where borg stores `home/me/...`. Same command, same tree, a
+  different archive — visible only at restore. The stage 7 matrix missed it because every
+  row passes absolute paths, so the fix wants an interop row that does not.
+- **A relative repository path must be accepted** (DIVERGENCES #22). The store layer
+  refuses `-r REPO` outright; borg resolves it against the working directory. Small, loud,
+  and a borg habit all the same.
 
 > **`key`, `repo-delete` and `help` done 2026-08-17**, closing the three gaps the coverage
 > gate found.
@@ -2037,7 +2088,7 @@ than no tracker: it is the document a new reader trusts first.
 | 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve` and the remote backends remain | not yet bundled |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | not started — 7 items; **item 6 (run the help examples) is the one to do first** | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see
@@ -2047,7 +2098,10 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 **What "in progress" means for stage 8.** The command list is gated by
 `tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
-the other two are `serve` and an undecided `transfer`.
+the other two are `serve` and an undecided `transfer`. Three argument-handling defects are
+also open and are listed in §11: options after positionals (#20), relative source paths
+(#21) and relative repository paths (#22). All three are borg habits that borge answers
+differently, and #20 and #21 both change what ends up in the archive.
 
 **What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been
 changed as a result. The three pure-Go fixes (zstd encoder reuse, chunker reuse,
