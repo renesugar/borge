@@ -12,9 +12,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
 )
@@ -46,8 +46,17 @@ func cmdFind(e *Env, args []string) int {
 	sel.register(fs)
 	jsonLines := fs.Bool("json-lines", false, "print one JSON object per match")
 	short := fs.Bool("short", false, "print only archive id and path")
+	format := fs.String("format", "", "output format, e.g. '{archivename} {path}{NL}'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
+	}
+	// borg's default carries the archive id and name, because a find crosses archives and
+	// a bare path would not say which one it came from.
+	findFormat, _ := e.lookupBorg("FIND_FORMAT")
+	template := itemFormat(*format, false, findFormat,
+		"{archiveid:.8} {archivename} {mode} {user:6} {group:6} {size:8} {mtime} {path}{extra}{NL}")
+	if err := checkItemFormat(template); err != nil {
+		return e.fail(err)
 	}
 	paths := fs.Args()
 	if len(paths) == 0 && !pf.any() {
@@ -125,7 +134,11 @@ func cmdFind(e *Env, args []string) int {
 				_, err := fmt.Fprintf(e.Stdout, "%s %s\n", id[:8], it.Path)
 				return err
 			default:
-				_, err := fmt.Fprintf(e.Stdout, "%s %s %s\n", id[:8], info.Name, findItemLine(it))
+				line, err := formatter.Format(template, itemValues(it, info.Name, id))
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprint(e.Stdout, line)
 				return err
 			}
 		})
@@ -148,26 +161,4 @@ type foundJSON struct {
 	ArchiveName string   `json:"archive_name"`
 	Time        string   `json:"archive_time"`
 	Item        itemJSON `json:"item"`
-}
-
-// findItemLine renders one item the way list's default format does.
-func findItemLine(it *item.Item) string {
-	mode := it.ModeOr(0)
-	owner, group := "", ""
-	if it.User != nil {
-		owner = *it.User
-	}
-	if it.Group != nil {
-		group = *it.Group
-	}
-	mtime := ""
-	if it.MTime != nil {
-		mtime = formatTime(time.Unix(0, *it.MTime))
-	}
-	line := fmt.Sprintf("%s %-6s %-6s %8d %s %s",
-		item.FormatMode(mode), owner, group, itemSize(it), mtime, it.Path)
-	if it.IsSymlink() && it.Target != nil {
-		line += " -> " + *it.Target
-	}
-	return line
 }

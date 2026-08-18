@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/patterns"
@@ -288,12 +289,21 @@ func cmdList(e *Env, args []string) int {
 	pf.register(fs)
 	jsonLines := fs.Bool("json-lines", false, "print one JSON object per item")
 	short := fs.Bool("short", false, "print only paths")
+	format := fs.String("format", "", "output format, e.g. '{mode} {path}{NL}'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
 	if fs.NArg() < 1 {
 		e.errorf("list needs an archive name")
 		return ExitError
+	}
+	// Validated before the archive is opened, as borg does: a bad key found on the ten
+	// thousandth item has already printed nine thousand lines.
+	listFormat, _ := e.lookupBorg("LIST_FORMAT")
+	template := itemFormat(*format, *short, listFormat,
+		"{mode} {user:6} {group:6} {size:8} {mtime} {path}{extra}{NL}")
+	if err := checkItemFormat(template); err != nil {
+		return e.fail(err)
 	}
 
 	path, err := e.resolveRepo(common.repo)
@@ -320,33 +330,15 @@ func cmdList(e *Env, args []string) int {
 		if !matcher.Match(it.Path) {
 			return nil
 		}
-		switch {
-		case *jsonLines:
+		if *jsonLines {
 			return enc.Encode(toItemJSON(it))
-		case *short:
-			_, err := fmt.Fprintln(e.Stdout, it.Path)
-			return err
-		default:
-			mode := it.ModeOr(0)
-			owner, group := "", ""
-			if it.User != nil {
-				owner = *it.User
-			}
-			if it.Group != nil {
-				group = *it.Group
-			}
-			mtime := ""
-			if it.MTime != nil {
-				mtime = formatTime(time.Unix(0, *it.MTime))
-			}
-			line := fmt.Sprintf("%s %-6s %-6s %8d %s %s",
-				item.FormatMode(mode), owner, group, itemSize(it), mtime, it.Path)
-			if it.IsSymlink() && it.Target != nil {
-				line += " -> " + *it.Target
-			}
-			_, err := fmt.Fprintln(e.Stdout, line)
+		}
+		line, err := formatter.Format(template, itemValues(it, a.Info.Name, hex.EncodeToString(a.ID)))
+		if err != nil {
 			return err
 		}
+		_, err = fmt.Fprint(e.Stdout, line)
+		return err
 	})
 	if err != nil {
 		return e.fail(err)

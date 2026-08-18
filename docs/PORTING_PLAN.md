@@ -1749,9 +1749,21 @@ Everything needed for feature parity, once correctness is established.
     placeholder formatter. **Started 2026-08-18**: `internal/formatter` implements the
     Python format-spec subset borg's own templates use (fill, alignment, width,
     precision), and `repo-list` is wired to it, with `BORGE_REPO_LIST_FORMAT`. The five
-    remaining commands are wiring plus their key sets — `list`, `find` and `diff` need
-    borg's *item* keys (`path`, `mode`, `size`, `mtime`, `user`, `group`, `type`), which
-    is the other half of the work.
+    remaining commands are wiring plus their key sets.
+
+    **`list` and `find` followed the same day**, with borg's *item* key set in
+    `internal/cli/itemformat.go` and `BORGE_LIST_FORMAT` / `BORGE_FIND_FORMAT`. **61
+    options left.** Still to do: `diff`, whose items are change records rather than paths,
+    and `prune` and `check`, which need more than the option — borge prints its own
+    listing layout there where borg prints a formatted template, so wiring `--format`
+    means reworking the output and its differential at the same time. Both of borg's
+    templates for those two also lack a trailing `{NL}`, the command supplying the newline
+    itself; porting them with one appended puts a whole listing on one line.
+
+    Not ported with the key set: `fingerprint` and the content hashes (`md5`, `sha256`,
+    `blake3`…). Those read every chunk of every file, turning a listing into a restore's
+    worth of I/O — borg guards them behind `format_needs_cache` and a warning. Asking for
+    one is an error naming the available keys, not an empty column.
 
     The reason `repo-list` came first is not that it is easiest. Its default column layout
     was a `Printf` with a comment above it *quoting* borg's default template as though the
@@ -2386,7 +2398,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 63 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 61 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
