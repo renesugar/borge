@@ -67,6 +67,18 @@ type CreateOptions struct {
 	// so what it reports through OnItem has to be exactly what a real run would store.
 	DryRun bool
 
+	// StoreATime records each item's access time. Off by default, as in borg, and the
+	// default is the interesting half: atime changes whenever a file is *read*, so
+	// storing it makes an item stream differ between two backups of a tree that did not
+	// change, which costs space and makes "diff" report files nobody touched.
+	StoreATime bool
+	// NoCTime leaves out the inode change time, which borg stores by default.
+	NoCTime bool
+	// NoBirthTime leaves out the creation time. Accepted for borg compatibility and
+	// currently a no-op: Linux exposes birthtime only through statx, which neither tool
+	// reads here, so neither stores it. Recorded rather than silently ignored.
+	NoBirthTime bool
+
 	// Files is the files cache, or nil to read every file. It is consulted before a file
 	// is opened and updated after it is chunked.
 	Files *cache.FilesCache
@@ -581,10 +593,21 @@ func (w *walker) fillMetadata(it *item.Item, abs string, st *unix.Stat_t) {
 		}
 	}
 
+	// borg stores mtime always, ctime unless --noctime, and atime only with --atime.
+	// borge stored all three, which made every archive carry a timestamp borg leaves out
+	// - larger, different from borg's for the same tree, and noisy, because atime moves
+	// when a file is merely read. The stage 7 comparator comes nowhere near it: it checks
+	// mtime and deliberately excludes atime and ctime from the contract.
 	mtime := st.Mtim.Sec*1e9 + st.Mtim.Nsec
-	atime := st.Atim.Sec*1e9 + st.Atim.Nsec
-	ctime := st.Ctim.Sec*1e9 + st.Ctim.Nsec
-	it.MTime, it.ATime, it.CTime = &mtime, &atime, &ctime
+	it.MTime = &mtime
+	if w.opts.StoreATime {
+		atime := st.Atim.Sec*1e9 + st.Atim.Nsec
+		it.ATime = &atime
+	}
+	if !w.opts.NoCTime {
+		ctime := st.Ctim.Sec*1e9 + st.Ctim.Nsec
+		it.CTime = &ctime
+	}
 
 	size := int64(st.Size)
 	if st.Mode&unix.S_IFMT == unix.S_IFREG {

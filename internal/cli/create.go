@@ -197,6 +197,9 @@ func cmdCreate(e *Env, args []string) int {
 		"archive the excluded directory and the tag files that excluded it")
 	var timestamp timestampFlag
 	timestamp.register(fs)
+	storeATime := fs.Bool("atime", false, "store each item's access time")
+	noCTime := fs.Bool("noctime", false, "do not store the inode change time")
+	noBirthTime := fs.Bool("nobirthtime", false, "do not store the creation time")
 	dryRun := fs.Bool("dry-run", false, "say what would be archived, archive nothing")
 	fs.BoolVar(dryRun, "n", false, "say what would be archived, archive nothing")
 	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
@@ -319,6 +322,9 @@ func cmdCreate(e *Env, args []string) int {
 		NoFlags:       *noFlags,
 		ReadSpecial:   *readSpecial,
 		DryRun:        *dryRun,
+		StoreATime:    *storeATime,
+		NoCTime:       *noCTime,
+		NoBirthTime:   *noBirthTime,
 		ExcludeCaches: *excludeCaches,
 		// A copy: the option value outlives this call in the caller's flag set, and a
 		// walker holding the same slice would see a later change.

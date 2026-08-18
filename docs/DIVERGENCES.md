@@ -849,3 +849,36 @@ same paths in two different orders, and a differential test compares them as set
 **Not to be confused with the statuses**, which do match: `A` added, `d` directory, `s`
 symlink, `i` special file, `h` a further hard link, `U` unchanged, `-` excluded, and `+`
 for everything a dry run would have stored.
+
+## 30. borge stored an access time borg leaves out — **fixed 2026-08-18**
+
+**Stage 6 · `internal/archive/create_linux.go` · a defect, not a decision**
+
+**Resolved.** `create` now stores `mtime` always, `ctime` unless `--noctime`, and `atime`
+only with `--atime`, which is borg's rule.
+
+borge set all three on every item. borg stores `atime` only when asked. So every borge
+archive carried a timestamp borg leaves out:
+
+| | stored per item |
+| --- | --- |
+| borg, default | `ctime`, `mtime` |
+| borge, before | `atime`, `ctime`, `mtime` |
+
+**The cost was not the bytes.** `atime` moves when a file is merely *read*, so two backups
+of a tree that nobody changed produced different item metadata — a `borge diff` reporting
+files nobody touched, and item-stream chunks that dedupe against nothing. A backup that
+changes because something read the disk is a backup that cannot be compared with itself.
+
+**Why no gate saw it.** The stage 7 comparator's `entry` type carries `MTimeNsec` and
+nothing else of the three: atime and ctime are *deliberately* excluded from the restore
+contract, and rightly — a restore is not expected to reproduce them. But that means the
+whole interoperability matrix could run forever without noticing that borge *stored* one
+borg does not. It is the third gate in stage 8 found to be measuring only what it looks at,
+after the all-absolute source paths (#21) and the corpus with no bsdflags (#8).
+
+**How it was found:** implementing `--atime`, `--noctime` and `--nobirthtime`, and asking
+what the defaults were before adding options to change them.
+
+`--nobirthtime` is accepted and does nothing on Linux, in both tools: birthtime is only
+reachable through `statx`, which neither reads here. Recorded rather than silently ignored.
