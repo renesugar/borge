@@ -367,10 +367,76 @@ sentence into the diff of the change that falsifies it.
 4. **`docgen --api`** → `docs/INTERNALS.md`. Lowest value of the four: borge has no exported
    API — everything is under `internal/` — so this is maintainer documentation that
    `go doc ./internal/...` already serves. Do it last, or not at all.
+5. **`doccheck`** — the contradiction pass of §2.1.1, over `//borge:doc user` blocks only.
+   Build the five-case calibration set from git *first*, then the checker. Advisory output,
+   not a gate. Worth doing after item 1 and independently of items 2–4: it needs the anchors
+   for pairing, and nothing else.
 
 **Gate:** `docaudit` reports zero dangling anchors and zero orphan claims; every help topic
 has a grade breakdown recorded; and the unverified share is stated in the plan rather than
 discovered later.
+
+#### 2.1.1 Attacking the unverified share: does the code contradict the prose?
+
+The three grades leave a bucket that no test reaches — prose that is neither generated nor
+claim-linked. The proposal for it: read the anchored code *independently*, then ask whether
+that reading contradicts the user-facing sentence, and put the disagreements in front of a
+human. This is the only technique here that touches prose as prose.
+
+**Two corrections to the obvious form of it, both load-bearing.**
+
+**Similarity is the wrong measure.** The instinct is to explain the code, embed both texts
+and threshold the cosine distance. That would probably have missed the very bug that
+motivated this. The false claim was *"borge does not prompt for a passphrase"*; an accurate
+explanation of `unlockWithPrompt` says *"prompts for a passphrase, up to three times"*.
+Those two sentences are **highly similar** by any embedding measure — negation moves an
+embedding very little — so a similarity threshold scores the pair as agreeing. The useful
+question is not *are these alike* but **does the code contradict the claim**: entailment,
+with three outcomes (supported / contradicted / not determinable), which handles negation
+because contradiction is what it is built to detect.
+
+**The two-step is right, for a reason worth stating.** It is tempting to collapse it — show
+the model the code and the claim together and ask "is this true?" — but that anchors the
+reading on the claim, and a model shown an assertion tends to find support for it. So:
+generate the explanation **blind**, with the doc comment withheld, and only then compare.
+The lossy extra hop buys independence, which is the whole value.
+
+**Scope matters more than it looks.** `unlockWithPrompt` reads as "prompts in a loop"; that
+echo is disabled lives one call down in `promptPassphrase`. Explaining a declaration in
+isolation produces confident, incomplete readings. The unit is the declaration plus its
+direct callees within the package, to a token budget — and a claim that needs more than that
+is a claim that should be anchored somewhere else.
+
+**Exclude rationale.** "This exists because the key type is not known until the manifest is
+read" is not entailed by any code and never will be. Checking it produces permanent
+*not determinable* noise that trains everyone to ignore the report. Only blocks marked
+`//borge:doc user` are checked; rationale stays unmarked and unchecked.
+
+**Advisory, never a gate.** The check is non-deterministic and cannot fail a build
+honestly. It emits a triage list — claim, anchor, verdict, the reading that disagreed — for
+review by whoever is making the change, and by the human co-author. A *contradicted* verdict
+means "look at this", not "this is wrong".
+
+**Calibrate it, or nobody will believe it.** A checker with no known-answer set is a checker
+whose silence means nothing. Stage 8 supplies real labelled cases, which is unusual luck:
+
+| case | expected verdict |
+| --- | --- |
+| `help.go` before `094e7b4`: "borge does not prompt" vs `unlockWithPrompt` | **contradicted** |
+| the same topic after `094e7b4` | supported |
+| the placeholders topic before `1a97426` ("borge does not substitute") vs `internal/placeholders` | **contradicted** |
+| the placeholders topic after `1a97426` | supported |
+| any rationale paragraph | not determinable |
+
+Run the checker against those five before trusting it on anything else. A version that
+cannot separate the before-and-after pairs is not ready, and the pairs are cheap to keep as
+a regression suite because they are recorded in git.
+
+**Honest limits.** An independent reading can share the author's wrong assumption and agree
+with a false claim — correlated error, not eliminated by any of the above. It cannot see
+behaviour that emerges across packages. And it will produce false alarms on prose that is
+true but distant from the code's shape, which is the cost of catching the ones that matter.
+It reduces the unverified bucket; it does not empty it.
 
 ### 2.2 Porting discipline, per module
 
@@ -1903,7 +1969,7 @@ than no tracker: it is the document a new reader trusts first.
 | 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve` and the remote backends remain | not yet bundled |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | not started — 4 items, the first useful alone | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | not started — 5 items, items 1 and 5 useful alone | — |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see
