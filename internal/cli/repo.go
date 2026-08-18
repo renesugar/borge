@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/manifest"
 )
 
@@ -179,6 +180,55 @@ func (s *listSelectors) rawOptions() (manifest.ListOptions, error) {
 	return opts, nil
 }
 
+// repoListFormat is the template repo-list renders each archive with.
+//
+// borg's precedence, reproduced: an explicit --format wins, then --short, then
+// BORGE_REPO_LIST_FORMAT (BORG_REPO_LIST_FORMAT), then borg's built-in default. Writing
+// the default as a template rather than a Printf is what keeps --format honest: the
+// columns a user sees without the option are the ones the documented template produces.
+func (e *Env) repoListFormat(given string, short bool) string {
+	switch {
+	case given != "":
+		return given
+	case short:
+		return "{id}{NL}"
+	}
+	if v, ok := e.lookupBorg("REPO_LIST_FORMAT"); ok && v != "" {
+		return v
+	}
+	return "{id:.8}  {time}  {archive:<15}  {tags:<10}  {username:<10}  {hostname:<10}  {comment:.40}{NL}"
+}
+
+// archiveValues are the keys borg's ArchiveFormatter offers.
+//
+// Every one comes from the directory entry, which borge already reads in full, so there is
+// no equivalent of borg's used_call_keys laziness to port: nothing here costs an extra
+// read. "name" is borg's alias for "archive".
+func archiveValues(info manifest.Info) map[string]any {
+	return map[string]any{
+		"archive":  info.Name,
+		"name":     info.Name,
+		"id":       hex.EncodeToString(info.ID),
+		"time":     formatTime(info.Time),
+		"start":    formatTime(info.Start),
+		"end":      formatTime(info.End),
+		"comment":  info.Comment,
+		"tags":     strings.Join(info.Tags, ","),
+		"hostname": info.Host,
+		"username": info.User,
+		"size":     info.Size,
+		"nfiles":   info.NFiles,
+	}
+}
+
+func shortID(id []byte) string {
+	s := hex.EncodeToString(id)
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
 // cmdRepoList lists a repository's archives.
 func cmdRepoList(e *Env, args []string) int {
 	fs := newFlagSet(e, "repo-list")
@@ -190,6 +240,7 @@ func cmdRepoList(e *Env, args []string) int {
 	// selects an archive, and names are not unique. Printing names here would look
 	// friendlier and would be wrong.
 	short := fs.Bool("short", false, "print only the archive ids")
+	format := fs.String("format", "", "output format, e.g. '{archive} {time}{NL}'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -228,32 +279,25 @@ func cmdRepoList(e *Env, args []string) int {
 		return ExitOK
 	}
 
+	// The layout is a format string now rather than a Printf, which is what makes
+	// --format possible at all: the default *is* what borg's default expands to, so the
+	// column widths cannot drift from the documented template.
+	template := e.repoListFormat(*format, *short)
+	if _, err := formatter.Keys(template); err != nil {
+		return e.fail(err)
+	}
+
 	status := ExitOK
 	for _, info := range infos {
-		full := hex.EncodeToString(info.ID)
-		if *short {
-			fmt.Fprintln(e.Stdout, full)
-			continue
+		line, err := formatter.Format(template, archiveValues(info))
+		if err != nil {
+			return e.fail(err)
 		}
-		// The column layout is borg's default BORG_REPO_LIST_FORMAT:
-		// "{id:.8}  {time}  {archive:<15}  {tags:<10}  {username:<10}  {hostname:<10}  {comment:.40}".
-		// Eight hex characters of the id is enough to name an archive and short enough to
-		// read; the comment is truncated for the same reason.
-		id := full
-		if len(id) > 8 {
-			id = id[:8]
-		}
-		comment := info.Comment
-		if len(comment) > 40 {
-			comment = comment[:40]
-		}
-		fmt.Fprintf(e.Stdout, "%s  %s  %-15s  %-10s  %-10s  %-10s  %s\n",
-			id, formatTime(info.Time), info.Name, strings.Join(info.Tags, ","),
-			info.User, info.Host, comment)
+		fmt.Fprint(e.Stdout, line)
 		if !info.Exists {
 			// A pointer with no readable archive behind it is damage, and a listing that
 			// showed it as an ordinary row would hide that.
-			e.warnf("%s: %s", id, info.Problem)
+			e.warnf("%s: %s", shortID(info.ID), info.Problem)
 			status = ExitWarning
 		}
 	}
