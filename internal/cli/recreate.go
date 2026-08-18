@@ -43,6 +43,8 @@ func cmdRecreate(e *Env, args []string) int {
 	dryRun := fs.Bool("dry-run", false, "say what would happen, change nothing")
 	list := fs.Bool("list", false, "print each item as it is processed")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	var timestamp timestampFlag
+	timestamp.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -128,6 +130,7 @@ func cmdRecreate(e *Env, args []string) int {
 	}
 
 	opts := archive.RecreateOptions{
+		Timestamp:      timestamp.value(),
 		Target:         *target,
 		Comment:        commentPtr,
 		ChunkerParams:  params,

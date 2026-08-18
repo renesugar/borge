@@ -48,6 +48,8 @@ func cmdImportTar(e *Env, args []string) int {
 		"keep reading past the end-of-archive marker, for concatenated tars")
 	list := fs.Bool("list", false, "print each item as it is imported")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	var timestamp timestampFlag
+	timestamp.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -139,6 +141,7 @@ func cmdImportTar(e *Env, args []string) int {
 		ChunkSeed:     chunkSeed,
 		Compressor:    compressor,
 		IgnoreZeros:   *ignoreZeros,
+		Timestamp:     timestamp.value(),
 		OnItem: func(s byte, p string) {
 			if *list {
 				fmt.Fprintf(e.Stdout, "%c %s\n", s, p)

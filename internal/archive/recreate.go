@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/renesugar/borge/internal/chunker"
 	"github.com/renesugar/borge/internal/compress"
@@ -50,6 +51,9 @@ type RecreateOptions struct {
 	Target string
 	// Comment replaces the archive's comment when non-nil.
 	Comment *string
+	// Timestamp replaces the archive's nominal time. The zero value keeps the source
+	// archive's, which is what a rewrite should do by default.
+	Timestamp time.Time
 
 	// ChunkerParams re-chunks the content. The zero value keeps the existing chunks,
 	// which is much cheaper: nothing is read at all.
@@ -183,11 +187,16 @@ func Recreate(m *manifest.Manifest, id []byte, opts RecreateOptions) (*RecreateS
 		Hostname: a.Info.Host,
 		Username: a.Info.User,
 	}
-	// The archive keeps its original time: a recreate is a rewriting of an existing
-	// backup, not a new one, and redating it would misplace it in the history.
-	if a.Info.Time.IsZero() {
+	// The archive keeps its original time unless one is given: a recreate is a rewriting
+	// of an existing backup, not a new one, and redating it would misplace it in the
+	// history. borg's rule is the same - "if no timestamp is specified, keep the original
+	// timestamp".
+	switch {
+	case !opts.Timestamp.IsZero():
+		saveOpts.Timestamp = opts.Timestamp
+	case a.Info.Time.IsZero():
 		saveOpts.Timestamp = b.Start()
-	} else {
+	default:
 		saveOpts.Timestamp = a.Info.Time
 	}
 	if a.Meta.CommandLine != nil {

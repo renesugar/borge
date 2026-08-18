@@ -195,6 +195,8 @@ func cmdCreate(e *Env, args []string) int {
 	fs.Var(&excludeIfPresent, "exclude-if-present", "skip directories holding this file (repeatable)")
 	keepExcludeTags := fs.Bool("keep-exclude-tags", false,
 		"archive the excluded directory and the tag files that excluded it")
+	var timestamp timestampFlag
+	timestamp.register(fs)
 	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
 	list := fs.Bool("list", false, "print each item as it is archived")
 	stats := fs.Bool("stats", false, "print statistics when finished")
@@ -346,6 +348,9 @@ func cmdCreate(e *Env, args []string) int {
 
 	cwd, _ := os.Getwd()
 	meta, id, err := b.Save(archive.SaveOptions{
+		// Zero means "use the start time", which is borg's default: an archive is dated
+		// when it began, not when it finished.
+		Timestamp:   timestamp.value(),
 		Name:        name,
 		Comment:     comm,
 		CommandLine: commandLine(args),

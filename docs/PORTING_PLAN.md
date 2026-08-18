@@ -1786,9 +1786,18 @@ Everything needed for feature parity, once correctness is established.
   The rest is genuine per-command work, `create` being the largest. **Tag-based exclusion
   landed 2026-08-18** — `--exclude-caches`, `--exclude-if-present` and
   `--keep-exclude-tags`, the CACHEDIR.TAG protocol — taking `create` from 23 to 20 and the
-  total to **58**. Still there: `--dry-run`, `--sparse`, `--timestamp`, `--tags`,
-  `--atime`, `--noctime`, `--nobirthtime`, the four `--stdin-*` and the four
-  `--paths-from-*`.
+  total to **58**. **`--timestamp` followed** on `create`, `recreate` and `import-tar`
+  — three commands, one parser — taking the total to **55**. Still there: `--dry-run`,
+  `--sparse`, `--tags`, `--atime`, `--noctime`, `--nobirthtime`, the four `--stdin-*` and
+  the four `--paths-from-*`.
+
+  Two things about `--timestamp` are worth having written down. It takes **a reference
+  file or an instant**, and borg stats the argument *before* parsing it, so a file whose
+  name looks like a timestamp wins — observable, and reproduced rather than tidied. And
+  `recreate --timestamp` **on its own does nothing**, in both tools, because recreate skips
+  an archive that needs no rewriting: a test that only ran that form would pass while
+  exercising none of the code it claims to cover. The test forces a rewrite with
+  `--chunker-params` and asserts the no-op form separately.
 
   **`recreate` was the other half of that group and is deliberately not done.** borg's
   `recreate --exclude-caches` works — measured: it removed a tagged directory from an
@@ -2494,7 +2503,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 58 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 55 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
