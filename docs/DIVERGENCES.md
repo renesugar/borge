@@ -821,3 +821,31 @@ next command to take a selector does the same rather than choosing afresh.
 **Scripts that rely on borg's exit 0** will see a failure where borg reported success. That
 is the intended trade: the alternative is a backup script whose retention tagging silently
 stopped working.
+
+## 29. `create --list` reports a directory before its contents
+
+**Stage 8 · `internal/archive/create_linux.go` · deliberate**
+
+borg prints a directory's `--list` line *after* the lines for everything inside it; borge
+prints it before. The archives are identical — both store the directory ahead of its
+contents — and only the progress listing differs.
+
+```
+borg                        borge
++ src/sub/g.txt             + src
++ src/sub                   + src/f.txt
++ src/f.txt                 + src/sub
++ src                       + src/sub/g.txt
+```
+
+borg reports an item once its subtree is finished, which is what puts the parent last.
+borge reports as it goes, which means a long backup names the directory it is working in
+*before* spending an hour in it, rather than after.
+
+The sibling order differs too, and for a different reason: borge walks each directory's
+entries sorted and borg takes them in `readdir` order (#23). So the two listings hold the
+same paths in two different orders, and a differential test compares them as sets.
+
+**Not to be confused with the statuses**, which do match: `A` added, `d` directory, `s`
+symlink, `i` special file, `h` a further hard link, `U` unchanged, `-` excluded, and `+`
+for everything a dry run would have stored.

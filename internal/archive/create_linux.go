@@ -62,6 +62,11 @@ type CreateOptions struct {
 	// from a tagged directory is stored - not even its entry.
 	KeepExcludeTags bool
 
+	// DryRun walks and decides but stores nothing: no file is read, no chunk is written,
+	// no item is added. It is how a user checks an exclude pattern before trusting it,
+	// so what it reports through OnItem has to be exactly what a real run would store.
+	DryRun bool
+
 	// Files is the files cache, or nil to read every file. It is consulted before a file
 	// is opened and updated after it is chunked.
 	Files *cache.FilesCache
@@ -130,7 +135,12 @@ func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
 			return w.stats, err
 		}
 	}
-	w.stats.Stats = b.stats
+	if !opts.DryRun {
+		// A dry run has its own counts, taken from stat rather than from chunking;
+		// the builder's are empty because nothing was stored, and copying them over
+		// would report a backup of nothing.
+		w.stats.Stats = b.stats
+	}
 	return w.stats, nil
 }
 
@@ -315,6 +325,7 @@ func (w *walker) walk(abs string, depth int) error {
 		}
 		if len(tags) > 0 {
 			w.stats.Skipped++
+			w.report('-', stored)
 			if !included || !storable || !w.opts.KeepExcludeTags {
 				// Nothing from here, and no recursion either way: borg returns at this
 				// point whether or not it kept the tags.
@@ -334,12 +345,25 @@ func (w *walker) walk(abs string, depth int) error {
 		}
 	}
 
-	if included && storable {
+	switch {
+	case !included || !storable:
+		// borg prints these too, and for a dry run they are the whole point: a listing
+		// that only showed what would be kept could not confirm that an --exclude did
+		// anything.
+		w.stats.Skipped++
+		w.report('-', stored)
+	case w.opts.DryRun:
+		// Nothing is read and nothing is stored, but the counting is real so that
+		// --stats means something.
+		if st.Mode&unix.S_IFMT == unix.S_IFREG {
+			w.stats.Stats.NFiles++
+			w.stats.Stats.OriginalSize += st.Size
+		}
+		w.report('+', stored)
+	default:
 		if err := w.archive(abs, stored, &st); err != nil {
 			return err
 		}
-	} else {
-		w.stats.Skipped++
 	}
 
 	// Descend into a directory unless the matcher said not to. An excluded directory is
@@ -440,10 +464,17 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 	if err := w.builder.AddItem(it); err != nil {
 		return w.fail(abs, err)
 	}
+	w.report(status, stored)
+	return nil
+}
+
+// report tells the caller what happened to one path. borg's status characters: "A" added,
+// "d" directory, "s" symlink, "i" special file, "h" a further hard link, "U" unchanged,
+// "-" excluded, and "+" for anything a dry run would have stored.
+func (w *walker) report(status byte, stored string) {
 	if w.opts.OnItem != nil {
 		w.opts.OnItem(status, stored)
 	}
-	return nil
 }
 
 // fileChunks reads and chunks a regular file, reusing the chunk list of an inode already

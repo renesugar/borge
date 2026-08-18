@@ -197,6 +197,8 @@ func cmdCreate(e *Env, args []string) int {
 		"archive the excluded directory and the tag files that excluded it")
 	var timestamp timestampFlag
 	timestamp.register(fs)
+	dryRun := fs.Bool("dry-run", false, "say what would be archived, archive nothing")
+	fs.BoolVar(dryRun, "n", false, "say what would be archived, archive nothing")
 	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
 	list := fs.Bool("list", false, "print each item as it is archived")
 	stats := fs.Bool("stats", false, "print statistics when finished")
@@ -316,6 +318,7 @@ func cmdCreate(e *Env, args []string) int {
 		NoACLs:        *noACLs,
 		NoFlags:       *noFlags,
 		ReadSpecial:   *readSpecial,
+		DryRun:        *dryRun,
 		ExcludeCaches: *excludeCaches,
 		// A copy: the option value outlives this call in the caller's flag set, and a
 		// walker holding the same slice would see a later change.
@@ -337,6 +340,19 @@ func cmdCreate(e *Env, args []string) int {
 	created, err := b.Create(opts)
 	if err != nil {
 		return e.fail(err)
+	}
+
+	// A dry run stops here. Nothing was read and nothing was stored, so there is no
+	// archive to save, no manifest to rewrite and no files cache to update - a cache
+	// recording a backup that did not happen would make the *next* real run skip the
+	// files it claims are already there.
+	if *dryRun {
+		if *stats || common.verbose {
+			s := created.Stats
+			fmt.Fprintf(e.Stdout, "Number of files: %d\n", s.NFiles)
+			fmt.Fprintf(e.Stdout, "Original size: %d\n", s.OriginalSize)
+		}
+		return status
 	}
 
 	// The cache is saved only after the archive is complete: an interrupted backup must

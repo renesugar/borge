@@ -1,0 +1,157 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// create --dry-run: walk and decide, store nothing.
+//
+// It is the option a user reaches for before trusting a new exclude pattern, so the thing
+// it has to get right is not "no archive appears" but "the report is what a real run would
+// have done".
+func TestCreateDryRun(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	for _, rel := range []string{"f.txt", "sub/g.txt", "sub/h.txt", "other/i.txt"} {
+		p := filepath.Join(src, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// statuses splits a --list run into the paths it said it would keep and drop.
+	statuses := func(out string) (kept, dropped []string) {
+		for _, line := range strings.Split(out, "\n") {
+			if len(line) < 3 {
+				continue
+			}
+			path := strings.TrimPrefix(line[2:], strings.TrimPrefix(filepath.ToSlash(src), "/")+"/")
+			switch line[0] {
+			case '+':
+				kept = append(kept, path)
+			case '-':
+				dropped = append(dropped, path)
+			}
+		}
+		sort.Strings(kept)
+		sort.Strings(dropped)
+		return kept, dropped
+	}
+
+	// A dry run with an exclusion says what it would keep and what it would drop.
+	stdout, stderr, code := r.borge(t, "create", "-n", "--list", "--exclude", "sh:**/sub", "a", src)
+	if code != ExitOK {
+		t.Fatalf("borge create -n exited %d\n%s", code, stderr)
+	}
+	kept, dropped := statuses(stdout)
+	if len(kept) == 0 || len(dropped) == 0 {
+		t.Fatalf("a dry run that reported %d kept and %d dropped proves nothing about "+
+			"either\n%s", len(kept), len(dropped), stdout)
+	}
+	if strings.Join(dropped, ",") != strings.TrimPrefix(filepath.ToSlash(src), "/")+"/sub" &&
+		!strings.HasSuffix(dropped[0], "sub") {
+		t.Errorf("the excluded directory is not what was reported dropped: %v", dropped)
+	}
+
+	// Nothing was written.
+	if names := borgArchiveNames(t, r); len(names) != 0 {
+		t.Fatalf("a dry run created an archive: %v", names)
+	}
+
+	// And the report matches what a real run stores. This is the assertion that makes the
+	// option worth anything: a dry run whose list did not match reality would be worse
+	// than no dry run, because it would be believed.
+	if _, stderr, code := r.borge(t, "create", "--exclude", "sh:**/sub", "real", src); code != ExitOK {
+		t.Fatalf("borge create exited %d\n%s", code, stderr)
+	}
+	var stored []string
+	for _, p := range sortedItemPaths(t, r.mustRun("list", "-r", r.path, "real", "--json-lines")) {
+		stored = append(stored, strings.TrimPrefix(p, strings.TrimPrefix(filepath.ToSlash(src), "/")+"/"))
+	}
+	sort.Strings(stored)
+	if strings.Join(kept, "\n") != strings.Join(stored, "\n") {
+		t.Errorf("the dry run said it would store\n  %s\nand the real run stored\n  %s",
+			strings.Join(kept, "\n  "), strings.Join(stored, "\n  "))
+	}
+}
+
+// TestDryRunDoesNotPoisonTheFilesCache is the failure that would be silent and expensive.
+//
+// The files cache spares a file from being read when it looks unchanged. If a dry run
+// updated it, the *next* real backup would skip files the dry run never stored, and the
+// archive would be missing them - with no error anywhere.
+func TestDryRunDoesNotPoisonTheFilesCache(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "f.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, stderr, code := r.borge(t, "create", "-n", "same-name", src); code != ExitOK {
+		t.Fatalf("dry run exited %d\n%s", code, stderr)
+	}
+	// The archive name is what the files cache is keyed by, so the real run below is the
+	// one that would be affected.
+	stdout, stderr, code := r.borge(t, "create", "--list", "same-name", src)
+	if code != ExitOK {
+		t.Fatalf("real run exited %d\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "U ") {
+		t.Errorf("the real run treated a file as unchanged after a dry run:\n%s", stdout)
+	}
+	// And the file really is in the archive.
+	paths := sortedItemPaths(t, r.mustRun("list", "-r", r.path, "same-name", "--json-lines"))
+	found := false
+	for _, p := range paths {
+		if strings.HasSuffix(p, "f.txt") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the file is missing from the archive the real run wrote: %v", paths)
+	}
+}
+
+// TestCreateListReportsExclusions: borg prints a "-" line for every excluded path, and
+// borge printed nothing at all - so "--list --exclude" showed only what was kept and could
+// not confirm the exclusion had happened. That is the same silent-about-absence shape as
+// PORTING_PLAN.md §2.3 collects.
+func TestCreateListReportsExclusions(t *testing.T) {
+	r := newBorgRepo(t, "none-sha256")
+	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
+
+	src := t.TempDir()
+	for _, rel := range []string{"keep.txt", "skip/x.txt"} {
+		p := filepath.Join(src, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stdout, stderr, code := r.borge(t, "create", "--list", "--exclude", "sh:**/skip", "a", src)
+	if code != ExitOK {
+		t.Fatalf("borge create exited %d\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "- ") {
+		t.Errorf("a real create with an exclusion reported nothing excluded:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "skip") {
+		t.Errorf("the excluded path is not named:\n%s", stdout)
+	}
+}
