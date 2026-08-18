@@ -1228,6 +1228,21 @@ The matrix, for each corpus × each key mode × each compression setting:
 | 6 | borge, then borg create (2nd archive, same repo) | borge extract both, borge check |
 | 7 | borg create, borge delete + compact | borg check |
 | 8 | borge create, borg delete + compact | borge check |
+| 9 | rows 1–2 with a **relative** source path | added 2026-08-18 |
+
+**Row 9 and why it exists.** Rows 1–8 all pass an absolute source path, and that is a blind
+spot rather than a choice: borge resolved every path to an absolute one before storing it,
+which is a no-op when the path is already absolute, so the matrix could not have caught
+DIVERGENCES #21 however long it ran. Row 9 names the tree relatively, from the directory
+above it, and requires the round trip — the archive one tool wrote has to extract, in the
+other tool, to the same tree — as well as requiring the stored names to be the relative
+ones, because an archive holding the absolute path would still extract and still compare
+equal.
+
+Writing it taught something about the corpus, twice. The name assertion first split
+`list --short` on whitespace, and the synthetic tree contains a filename with a space; then
+it split on lines, and the tree contains a filename with a **newline**. Any parsing of
+`--short` is wrong for real data; `--json-lines` is what to read.
 
 Rows 5–8 matter more than 1–4: they are where a shared chunk index, shared packs and
 a shared archive directory get exercised, and where a format misunderstanding that
@@ -1644,11 +1659,18 @@ Everything needed for feature parity, once correctness is established.
   dash-leading path survives; and `with-lock` opts out, because permuting `sh -c '…'` would
   take the `-c` for borge's own. A mistyped option is now an error rather than a filename,
   which is argparse's behaviour and the reason the old defect was invisible.
-- **A relative source path must be stored as typed** (DIVERGENCES #21). `archive.Create`
-  calls `filepath.Abs` on each root, so `borge create A home/me` stores
-  `<cwd>/home/me/...` where borg stores `home/me/...`. Same command, same tree, a
-  different archive — visible only at restore. The stage 7 matrix missed it because every
-  row passes absolute paths, so the fix wants an interop row that does not.
+- ~~**A relative source path must be stored as typed**~~ (DIVERGENCES #21).
+  **Done 2026-08-18.** `filepath.Abs` is gone; each root is cleaned, the walk joins with
+  `filepath.Join`, and `archivedPath` is borg's `remove_dotdot_prefixes`. An empty path is
+  refused outright, as borg's argument parser refuses it, rather than cleaning to `"."` and
+  archiving the working directory. `TestRelativeSourcePathRoundTrip` is the interop row the
+  matrix was missing — every other row passes an absolute path, and absolutising an
+  absolute path is a no-op, so the gate could not have caught this however long it ran.
+- **The rsync slashdot hack** (DIVERGENCES #24). `borg create A /a/b/./c/d` stores `c/d`;
+  borge cleans the `.` away and stores `a/b/c/d`. Same command, different archive layout,
+  visible only at restore — the same shape as #21 and found while porting its fix. It is a
+  feature rather than a defect in what borge claims today, and it reaches `--pattern` roots
+  as well as paths, so it wants its own change.
 - **A relative repository path must be accepted** (DIVERGENCES #22). The store layer
   refuses `-r REPO` outright; borg resolves it against the working directory. Small, loud,
   and a borg habit all the same.
@@ -2102,11 +2124,17 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 **What "in progress" means for stage 8.** The command list is gated by
 `tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
-the other two are `serve` and an undecided `transfer`. Two argument-handling defects remain
-open and are listed in §11: relative source paths (#21) and relative repository paths
-(#22). Sorted directory order (#23) is deliberate and was written down only when a
-differential test tripped over it. The third, options after positionals (#20), was fixed on 2026-08-18; it was the one
-that changed what ended up in the archive, and #21 still does.
+the other two are `serve` and an undecided `transfer`. Of the path and argument defects,
+options after positionals (#20) and relative source paths (#21) were both fixed on
+2026-08-18; relative repository paths (#22) and the rsync slashdot hack (#24) are still
+open and are listed in §11. Sorted directory order (#23) is deliberate and was written down
+only when a differential test tripped over it.
+
+**Three of those four came out of one activity**: running the examples in borge's own help
+text. #20 was the example that lost data, #21 and #22 were found building the fixture for
+it, and #24 was found reading borg's source closely enough to fix #21. Seven stages of
+differential testing had not surfaced any of them, because each lives in the gap between
+what the tests exercise and what a user types.
 
 **What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been
 changed as a result. The three pure-Go fixes (zstd encoder reuse, chunker reuse,

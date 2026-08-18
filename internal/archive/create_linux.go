@@ -74,10 +74,16 @@ type CreateStats struct {
 //
 // # Path form
 //
-// Archived paths are relative and use "/": an absolute path loses its leading slash, so
-// "/home/alice" is stored as "home/alice". That is what makes an archive restorable
-// somewhere other than where it came from, and it is why extraction refuses a stored path
+// A path is stored as it was typed, cleaned: "/home/alice" becomes "home/alice",
+// "./home/alice" and "home/alice/" both become "home/alice", and "." stays ".". Stored
+// paths are always relative and always use "/", which is what makes an archive restorable
+// somewhere other than where it came from and why extraction refuses a stored path
 // containing "..".
+//
+// borge used to resolve every path to an absolute one first, so "borge create A home/me"
+// run in /srv/work stored "srv/work/home/me/..." where borg stores "home/me/...". Same
+// command, same tree, a different archive - and the difference only shows at restore
+// time. See docs/DIVERGENCES.md #21.
 func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
 	if len(opts.Paths) == 0 {
 		return nil, errors.New("archive: no paths to back up")
@@ -91,11 +97,13 @@ func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
 		groups:    map[uint32]string{},
 	}
 	for _, root := range opts.Paths {
-		abs, err := filepath.Abs(root)
-		if err != nil {
-			return w.stats, err
+		// An empty path would clean to "." and quietly archive the working directory,
+		// which is never what an empty argument meant. borg rejects it outright, before
+		// anything is written, and so does this.
+		if root == "" {
+			return w.stats, errors.New("archive: an empty string is not a path")
 		}
-		if err := w.walk(abs, 0); err != nil {
+		if err := w.walk(filepath.Clean(root), 0); err != nil {
 			return w.stats, err
 		}
 	}
@@ -132,9 +140,25 @@ func (w *walker) fail(path string, err error) error {
 	return w.opts.OnError(path, err)
 }
 
-// archivedPath turns an absolute path into the form stored in the archive.
-func archivedPath(abs string) string {
-	return strings.TrimPrefix(filepath.ToSlash(abs), "/")
+// archivedPath turns the path being walked into the form stored in the archive.
+//
+// This is borg's remove_dotdot_prefixes (helpers/fs.py): every leading slash goes, then
+// every leading "../", and a path left as "" or ".." becomes ".". The walk itself keeps
+// each path cleaned - filepath.Join cleans, as borg's normpath(join(...)) does - so there
+// is nothing else left to normalise here.
+//
+// Dropping the "../" rather than refusing it is borg's choice and worth stating: an
+// archive of "../sibling" stores "sibling", so what comes back out is a tree the user can
+// place anywhere, not one that climbs out of wherever it is extracted.
+func archivedPath(p string) string {
+	s := strings.TrimLeft(filepath.ToSlash(p), "/")
+	for strings.HasPrefix(s, "../") {
+		s = strings.TrimPrefix(s, "../")
+	}
+	if s == "" || s == ".." {
+		return "."
+	}
+	return s
 }
 
 func (w *walker) walk(abs string, depth int) error {

@@ -343,3 +343,40 @@ func TestFilesCacheSkipsUnchangedFiles(t *testing.T) {
 		t.Error("f0.txt is not in the newest archive")
 	}
 }
+
+// TestArchivedPath pins the stored form of a path, which is borg's
+// remove_dotdot_prefixes (helpers/fs.py) applied to a path the walk has already cleaned.
+//
+// borge used to resolve every path to an absolute one before storing it, so an archive of
+// "home/me" made in /srv/work held "srv/work/home/me/..." where borg's holds "home/me/...".
+// docs/DIVERGENCES.md #21.
+func TestArchivedPath(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"home/me", "home/me"},
+		{"/home/me", "home/me"},
+		{"///home/me", "home/me"},
+		{".", "."},
+		{"..", "."},
+		{"../sibling", "sibling"},
+		{"../../sibling", "sibling"},
+		{"../..", "."},
+		{"/", "."},
+		{"", "."},
+		// Not the walk's job: a ".." in the middle is resolved by cleaning, before this
+		// is ever called. Recorded here so that the split of responsibility is visible.
+		{"home/me/sub", "home/me/sub"},
+	}
+	for _, c := range cases {
+		if got := archivedPath(c.in); got != c.want {
+			t.Errorf("archivedPath(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// A stored path that still began with a slash or a ".." would be one extraction
+	// refuses, so the property matters more than any single row above.
+	for _, c := range cases {
+		got := archivedPath(c.in)
+		if strings.HasPrefix(got, "/") || got == ".." || strings.HasPrefix(got, "../") {
+			t.Errorf("archivedPath(%q) = %q, which extraction would refuse", c.in, got)
+		}
+	}
+}

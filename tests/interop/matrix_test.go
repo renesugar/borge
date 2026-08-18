@@ -360,3 +360,90 @@ func TestRealCorpora(t *testing.T) {
 		})
 	}
 }
+
+// TestRelativeSourcePathRoundTrip is rows 1 and 2 again with the one shape of input the
+// matrix never had: a source path that is not absolute.
+//
+// Every other row passes an absolute path, and that is exactly why docs/DIVERGENCES.md #21
+// went unseen for the whole port - borge resolved each path to an absolute one before
+// storing it, which is a no-op when the path is already absolute. A gate that only ever
+// exercises one shape of input has a blind spot the size of the other shape.
+//
+// What this adds over the unit-level check is the round trip: the archive one tool wrote
+// from a relative path has to extract, in the other tool, to the same tree.
+func TestRelativeSourcePathRoundTrip(t *testing.T) {
+	tl := newTools(t, "aes256-ocb")
+	src := syntheticTree(t)
+	parent, name := filepath.Split(strings.TrimSuffix(filepath.ToSlash(src), "/"))
+	parent = filepath.FromSlash(parent)
+
+	// Named relatively, from the directory above it, by both tools.
+	if out, err := tl.run(tl.borg, parent, "create", "-r", tl.repo, "by-borg", name); err != nil {
+		t.Fatalf("borg create from a relative path: %v\n%s", err, out)
+	}
+	if out, err := tl.run(tl.borge, parent, "create", "by-borge", name); err != nil {
+		t.Fatalf("borge create from a relative path: %v\n%s", err, out)
+	}
+
+	// Both archives have to hold the same names, and those names have to be the relative
+	// ones. An archive holding the absolute path would still extract and still compare
+	// equal below, so this is checked separately.
+	for _, archive := range []string{"by-borg", "by-borge"} {
+		// Read as JSON. The synthetic tree holds a name with a space in it and a name
+		// with a newline in it, so any line- or field-splitting of "list --short" is
+		// wrong here - which is how this assertion failed twice before it was right.
+		paths := jsonListedPaths(t, tl.mustBorg("list", "-r", tl.repo, archive, "--json-lines"))
+		if len(paths) == 0 {
+			t.Fatalf("%s is empty; the comparison would be vacuous", archive)
+		}
+		for _, p := range paths {
+			if p != name && !strings.HasPrefix(p, name+"/") {
+				t.Errorf("%s stores %q, which is not relative to the directory the "+
+					"command ran in", archive, p)
+				break
+			}
+		}
+	}
+
+	extract := func(bin, archive string) string {
+		t.Helper()
+		dest := t.TempDir()
+		var err error
+		var out string
+		if bin == tl.borg {
+			out, err = tl.run(bin, dest, "extract", "-r", tl.repo, archive)
+		} else {
+			out, err = tl.run(bin, "", "extract", "-C", dest, archive)
+		}
+		if err != nil {
+			t.Fatalf("extracting %s: %v\n%s", archive, err, out)
+		}
+		return filepath.Join(dest, name)
+	}
+
+	t.Run("borg-writes-borge-extracts", func(t *testing.T) {
+		checkTrees(t, src, extract(tl.borge, "by-borg"), false)
+	})
+	t.Run("borge-writes-borg-extracts", func(t *testing.T) {
+		checkTrees(t, src, extract(tl.borg, "by-borge"), false)
+	})
+}
+
+// jsonListedPaths reads the "path" of every item from "list --json-lines" output.
+func jsonListedPaths(t *testing.T, out string) []string {
+	t.Helper()
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var item struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(line), &item); err != nil {
+			t.Fatalf("a --json-lines line does not parse: %v\n%s", err, line)
+		}
+		paths = append(paths, item.Path)
+	}
+	return paths
+}

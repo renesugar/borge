@@ -6,7 +6,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -178,14 +177,12 @@ func TestExcludeAfterPositionalsMatchesBorg(t *testing.T) {
 	// borg keeps readdir order (docs/DIVERGENCES.md #23). Comparing sequences here would
 	// fail for a reason that has nothing to do with argument parsing, which is exactly
 	// what it did first time round.
-	borgPaths := strings.Fields(r.mustRun("list", "-r", r.path, "byborg", "--short"))
-	stdout, stderr, code := r.borge(t, "list", "--short", "byborge")
+	borgPaths := sortedItemPaths(t, r.mustRun("list", "-r", r.path, "byborg", "--json-lines"))
+	stdout, stderr, code := r.borge(t, "list", "--json-lines", "byborge")
 	if code != ExitOK {
 		t.Fatalf("borge list exited %d\n%s", code, stderr)
 	}
-	borgePaths := strings.Fields(stdout)
-	sort.Strings(borgPaths)
-	sort.Strings(borgePaths)
+	borgePaths := sortedItemPaths(t, stdout)
 
 	// Both tools excluding everything would compare equal and mean nothing.
 	if len(borgPaths) < 3 {

@@ -486,9 +486,13 @@ command with the option last and requires the same archive contents, and by
 gone; `OPTIONS AND PATHS` replaces it and both of its example forms are executed by
 `TestHelpExamplesRun`.
 
-## 21. A relative source path is archived under its absolute path
+## 21. A relative source path is archived under its absolute path — **fixed 2026-08-18**
 
 **Stage 8 · `internal/archive/create_linux.go` · a defect, not a decision**
+
+**Resolved.** `Create` cleans each path instead of absolutising it, and `archivedPath` is
+now borg's `remove_dotdot_prefixes`. The entry is kept for what it says about how the gate
+missed it. What follows describes the defect; the fix is at the end.
 
 borg stores a source path **as it was typed**, normalised. borge calls `filepath.Abs` on
 each root before walking it and stores the result with its leading slash removed. From
@@ -513,13 +517,37 @@ which is the worst time to discover it.
 It also makes a documented pattern wrong: the patterns topic says an archive of `/home/me`
 holds `home/me/...`, which is true of an absolute path and false of a relative one.
 
-**The fix** is to keep the given path for the stored form and walk it as given — relative
-paths already resolve against the process working directory — matching borg's
-normalisation of `./x`, `x/` and `.`. Recorded in `PORTING_PLAN.md` §11.
-
 **How it was found:** building the fixture for `TestHelpExamplesRun` (§2.1.2). The
 patterns topic's `sh:home/me/**/*.txt` example could not be made to match, and the reason
 was not the pattern.
+
+### The fix
+
+`filepath.Abs` is gone. Each root is cleaned instead, the walk joins with `filepath.Join`
+(which cleans, as borg's `normpath(join(...))` does), and `archivedPath` is borg's
+`remove_dotdot_prefixes`: strip every leading `/`, then every leading `../`, and map `""`
+and `".."` to `"."`. Dropping the `../` rather than refusing it is borg's choice and worth
+stating — an archive of `../sibling` stores `sibling`, so what comes back out is a tree the
+user can place anywhere rather than one that climbs out of wherever it is extracted.
+
+An empty path is now refused outright, with exit 2, as borg's argument parser refuses it.
+It would otherwise clean to `"."` and quietly archive the working directory, which is never
+what an empty argument meant.
+
+Verified across `home/me`, `./home/me`, `home/me/`, `home/me/../me`, `.`, `../sibling` and
+an absolute path: borg and borge store the same names for all of them.
+
+**The gate had a blind spot, and that is the part worth keeping.** Every row of the stage 7
+interoperability matrix passes an *absolute* source path, and absolutising an absolute path
+is a no-op — so the matrix could not have caught this however long it ran.
+`TestRelativeSourcePathRoundTrip` is now a row that passes a relative one, and it checks
+the round trip rather than just the names: the archive one tool wrote from a relative path
+has to extract, in the other tool, to the same tree.
+
+Writing that row taught its own lesson twice. The assertion first split `list --short` on
+whitespace, and the synthetic corpus contains a filename with a space; then it split on
+lines, and the corpus contains a filename with a **newline**. Any parsing of `--short` is
+wrong for real data. It reads `--json-lines` now, and so do the other new path tests.
 
 ## 22. A repository path must be absolute
 
@@ -566,3 +594,29 @@ first compared the two tools' `list` output as a sequence and failed, having arc
 exactly the same four paths. A differential test that cares *which* items were stored has
 to sort both sides; one that compares sequences is asserting this divergence rather than
 whatever it meant to check.
+
+## 24. The rsync slashdot hack is not implemented
+
+**Stage 8 · `internal/archive` · a gap, not a decision**
+
+borg lets a source path say where the stored path should start, the way rsync does: a `/./`
+in the middle splits "the part used to read from the filesystem" from "the part that is
+archived".
+
+```
+borg  create A /a/b/./c/d     stores  c/d, c/d/f.txt
+borge create A /a/b/./c/d     stores  a/b/c/d, a/b/c/d/f.txt
+```
+
+borge cleans the path, which removes the `.` element and with it the instruction. The same
+command therefore produces a different archive layout in the two tools — silently, and only
+visibly at restore, which is the same shape of problem as #21.
+
+It is a feature rather than a bug in what borge already claims to do, and it is not small:
+borg computes a `strip_prefix` per root (`get_strip_prefix`), applies it in `create_helper`
+with three cases including one that archives the pointed-at directory as `.`, and passes it
+through `--pattern` roots as well. It wants its own change and its own tests. Recorded in
+`PORTING_PLAN.md` §11.
+
+**How it was found:** reading borg's `create_cmd.py` closely enough to port the path rule
+for #21.
