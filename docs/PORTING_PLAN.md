@@ -1641,15 +1641,23 @@ Everything needed for feature parity, once correctness is established.
 > and `repo-compress` is thirteen characters against borge's twelve-wide column, so the
 > gate reported a command borge *has* as missing.
 >
-> Current state: 28 implemented, 8 absent with a recorded reason, 0 unexplained. Of the
-> eight, three are non-goals (`mount`, `umount`, `webdav`, §0.6) and five are work:
+> Current state (2026-08-18): 31 implemented, 5 absent with a recorded reason, 0
+> unexplained. Of the five, three are non-goals (`mount`, `umount`, `webdav`, §0.6); the
+> other two are `serve` and an undecided `transfer`. The list below is the whole of what
+> stage 8 still owes, commands and otherwise:
 
 - **`serve`** and the remote store backends: `sftp`, `rest`, `s3`, `rclone`.
+- **bsdflags restoration** (DIVERGENCES #8). Read, stored and round-tripped, but not applied
+  at extraction. It was filed as "to be closed before the stage 7 gate" and was not; the
+  gate passed because nothing in the corpus carries a flag, which makes it a second example
+  of a gate measuring only what its corpus happens to contain.
+- **`debug convert-profile`** (DIVERGENCES #14), the only `debug` subcommand not ported.
 - **`transfer`** between two borg 2 repositories. §0.6 rules out transfer *from borg 1.x*
   because it depends on the borg 1 reader; it says nothing about borg 2 to borg 2, which
   is a decision still to make rather than one already taken.
-- **Archive-name placeholders**, which are not a command and so are invisible to the
-  coverage gate — see DIVERGENCES #17 and the note below.
+- ~~**Archive-name placeholders**~~ (DIVERGENCES #17). **Done 2026-08-17**,
+  `internal/placeholders`. Not a command, so the coverage gate never saw it; it was found
+  by writing `borge help placeholders` from borg's behaviour and then running the command.
 - ~~**Options must be accepted after positional arguments**~~ (DIVERGENCES #20).
   **Done 2026-08-18**, `internal/cli/args.go`. A `flagSet` wrapping `flag.FlagSet` permutes
   the arguments in its `Parse`, so no call site changed. Three things carried the work:
@@ -1666,11 +1674,37 @@ Everything needed for feature parity, once correctness is established.
   archiving the working directory. `TestRelativeSourcePathRoundTrip` is the interop row the
   matrix was missing — every other row passes an absolute path, and absolutising an
   absolute path is a no-op, so the gate could not have caught this however long it ran.
-- **The rsync slashdot hack** (DIVERGENCES #24). `borg create A /a/b/./c/d` stores `c/d`;
-  borge cleans the `.` away and stores `a/b/c/d`. Same command, different archive layout,
-  visible only at restore — the same shape as #21 and found while porting its fix. It is a
-  feature rather than a defect in what borge claims today, and it reaches `--pattern` roots
-  as well as paths, so it wants its own change.
+- ~~**The rsync slashdot hack**~~ (DIVERGENCES #24). **Done 2026-08-18.** `stripPrefix`
+  reads it from the path as typed, before cleaning removes the `.` with the instruction;
+  `walker.storedPath` is borg's three-case `create_helper`. Patterns match the **walked**
+  path rather than the stored one, which is the half that is easy to get backwards, so the
+  test asserts the negative case as well as the positive.
+- **Per-command options.** The coverage gate compares *command names* and nothing else, so
+  every missing option is invisible to it. Measured on 2026-08-18 by extracting both tools'
+  `--help` output: thirteen of the differences are borg's common options, present on every
+  command (`--info`, `--debug`, `--warning`, `--error`, `--critical`, `--debug-topic`,
+  `--log-json`, `--lock-wait`, `--progress`, `--show-rc`, `--show-version`, `--umask`,
+  `--help`); the rest are per-command work. `create` alone is missing about
+  twenty-five, including `--dry-run`, `--sparse`, `--timestamp`, `--tags`,
+  `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--atime`,
+  `--noctime`, `--nobirthtime`, the four `--stdin-*` and the four `--paths-from-*`.
+  `extract` is missing `--stdout` and `--continue`; `list` and `repo-list` are missing
+  `--format` and `--sort-by`/`--newer`/`--older`; `prune` is missing `--list-kept`,
+  `--list-pruned` and the `--keep-13weekly`/`--keep-3monthly` rules; `check` is missing
+  `--max-age` and `--max-duration`.
+
+  **The first task is the gate, not the options.** `tests/evidence/command-coverage.sh`
+  exists because a stage was declared complete against a hand-maintained list; counting
+  options by hand now would repeat that mistake one level down. `borge completion` already
+  enumerates each command's flags by running it with `-help` and collecting the `FlagSet`,
+  so the machinery to ask borge is in place; borg's side is its `--help` output. The gate
+  should report, per command, implemented / absent-with-a-reason / unexplained, exactly as
+  the command gate does, and the numbers above should come from it rather than from this
+  paragraph.
+- **`R` roots in a patterns file** (DIVERGENCES #25). `--patterns-from` may add recursion
+  roots; borge parses them and discards them, so a patterns file whose only root is an `R`
+  line makes borge refuse the command that borg runs. The roots have to join the positional
+  paths, and carry #24's slashdot handling when they do.
 - ~~**A relative repository path must be accepted**~~ (DIVERGENCES #22).
   **Done 2026-08-18.** `Env.resolveRepo` makes the path absolute after expanding its
   placeholders; the store keeps its absolute-only rule, because a backend rooted at
@@ -2113,7 +2147,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve` and the remote backends remain | not yet bundled |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, per-command options, bsdflags restore and `R` roots remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
@@ -2127,16 +2161,16 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 `tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
 the other two are `serve` and an undecided `transfer`. Of the path and argument defects,
-options after positionals (#20), relative source paths (#21) and relative repository paths
-(#22) were all fixed on 2026-08-18; the rsync slashdot hack (#24) is still open and is
-listed in §11. Sorted directory order (#23) is deliberate and was written down
+options after positionals (#20), relative source paths (#21), relative repository paths
+(#22) and the rsync slashdot hack (#24) were all closed on 2026-08-18. `R` roots in a
+patterns file (#25) is the one still open, and is listed in §11. Sorted directory order (#23) is deliberate and was written down
 only when a differential test tripped over it.
 
-**Three of those four came out of one activity**: running the examples in borge's own help
-text. #20 was the example that lost data, #21 and #22 were found building the fixture for
-it, and #24 was found reading borg's source closely enough to fix #21. Seven stages of
-differential testing had not surfaced any of them, because each lives in the gap between
-what the tests exercise and what a user types.
+**All five came out of one activity**: running the examples in borge's own help text. #20
+was the example that lost data; #21 and #22 were found building the fixture for it; #24 was
+found reading borg's source closely enough to fix #21; #25 was found checking how far #24
+reached. Seven stages of differential testing had not surfaced any of them, because each
+lives in the gap between what the tests exercise and what a user types.
 
 **What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been
 changed as a result. The three pure-Go fixes (zstd encoder reuse, chunker reuse,

@@ -84,6 +84,14 @@ type CreateStats struct {
 // run in /srv/work stored "srv/work/home/me/..." where borg stores "home/me/...". Same
 // command, same tree, a different archive - and the difference only shows at restore
 // time. See docs/DIVERGENCES.md #21.
+//
+// # The slashdot hack
+//
+// A "/./" in the middle of a path says where the stored path should start, the way rsync's
+// does: "/a/b/./c/d" reads from /a/b/c/d and stores it as "c/d". The whole path is used to
+// reach the filesystem; only what follows the dot is archived. It is the way to back up
+// /srv/www/site and have it restore as "site" rather than "srv/www/site". See
+// docs/DIVERGENCES.md #24.
 func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
 	if len(opts.Paths) == 0 {
 		return nil, errors.New("archive: no paths to back up")
@@ -103,6 +111,9 @@ func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
 		if root == "" {
 			return w.stats, errors.New("archive: an empty string is not a path")
 		}
+		// Taken from the path as typed: cleaning removes the "." element, and with it
+		// the instruction.
+		w.strip = stripPrefix(root)
 		if err := w.walk(filepath.Clean(root), 0); err != nil {
 			return w.stats, err
 		}
@@ -125,6 +136,11 @@ type walker struct {
 	// rootDev is the device of the first root, for --one-file-system.
 	rootDev uint64
 	haveDev bool
+
+	// strip is the slashdot prefix of the root being walked, with a trailing "/", or ""
+	// when this root carried no "/./". It is per-root: two paths on one command line may
+	// disagree about where their stored paths start.
+	strip string
 
 	// users and groups cache id-to-name lookups, which otherwise cost a syscall or an
 	// NSS round trip per file.
@@ -161,6 +177,44 @@ func archivedPath(p string) string {
 	return s
 }
 
+// stripPrefix reads the slashdot hack out of a path as the user typed it, returning the
+// part to remove from the front of every stored path, with a trailing "/", or "" for none.
+//
+// This is borg's get_strip_prefix (helpers/fs.py), including its two edges: only the
+// *first* "/./" counts, so "/a/./b/./c" stores "b/c"; and a "/./" at position zero does
+// not count, so "/./x" is an ordinary path. A trailing "/." is not the hack either - the
+// string has no "/./" in it - which is why "/a/b/." stores the whole path while "/a/b/./"
+// stores ".".
+func stripPrefix(given string) string {
+	pos := strings.Index(given, "/./")
+	if pos <= 0 {
+		return ""
+	}
+	return filepath.Clean(given[:pos]) + "/"
+}
+
+// storedPath turns a walked path into the one to archive, applying the slashdot prefix.
+// The second result is false when this level is above the dot and gets no item at all.
+func (w *walker) storedPath(p string) (string, bool) {
+	if w.strip == "" {
+		return archivedPath(p), true
+	}
+	switch {
+	case p+"/" == w.strip:
+		// This is the directory the dot points at: it is the archive's root.
+		return ".", true
+	case strings.HasPrefix(w.strip, p+"/"):
+		// Still above the dot, so there is nothing to store for this level - borg
+		// yields no item here. A walk that starts at the cleaned root never reaches
+		// this, since that root is always at or below the dot; it is here because it is
+		// borg's third case and leaving it out would be a silent difference if a future
+		// caller ever did walk from higher up.
+		return "", false
+	default:
+		return archivedPath(strings.TrimPrefix(p, w.strip)), true
+	}
+}
+
 func (w *walker) walk(abs string, depth int) error {
 	var st unix.Stat_t
 	if err := unix.Lstat(abs, &st); err != nil {
@@ -176,13 +230,16 @@ func (w *walker) walk(abs string, depth int) error {
 		}
 	}
 
-	stored := archivedPath(abs)
+	// Patterns are matched against the path as walked, not as stored. Without the
+	// slashdot hack those are the same string; with it they are not, and borg matches the
+	// walked one - an --exclude is written against the filesystem the user is looking at.
 	included := true
 	if w.opts.Matcher != nil {
-		included = w.opts.Matcher.Match(stored)
+		included = w.opts.Matcher.Match(archivedPath(abs))
 	}
+	stored, storable := w.storedPath(abs)
 
-	if included {
+	if included && storable {
 		if err := w.archive(abs, stored, &st); err != nil {
 			return err
 		}

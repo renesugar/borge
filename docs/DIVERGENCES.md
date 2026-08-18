@@ -356,9 +356,18 @@ it, and borg reads borge's objects and vice versa. What it costs is compression 
 asked for and did not get, which is worth being able to see rather than discovering from a
 repository that is larger than expected.
 
-## 17. Archive names are stored literally: no placeholder substitution
+## 17. Archive names are stored literally: no placeholder substitution — **fixed 2026-08-17**
 
-**Stage 8 · not implemented · a gap, not a decision**
+**Stage 8 · `internal/placeholders` · a gap, not a decision**
+
+**Resolved.** borge substitutes the same placeholders borg does, in archive names and in
+repository paths, with a hand-written `strftime` verified against CPython across 31
+directives. `TestHelpExamplesRun` runs `borge create -r REPO '{hostname}-{now:%Y-%m-%d}' ~`
+and requires an archive named `<hostname>-<date>` to exist afterwards.
+
+This entry was itself stale for a day after the feature landed, which is the hazard the
+whole of §2.1 is about: prose describing an absence goes false the moment the absence is
+filled, and nothing fails. What follows is what the gap was.
 
 borg substitutes placeholders in an archive name when the archive is created: `{now}`,
 `{utcnow}`, `{hostname}`, `{fqdn}`, `{user}`, `{pid}`, `{borgversion}`, and the
@@ -479,6 +488,13 @@ One deliberate behaviour change comes with it: **an argument that begins with a 
 not one of the command's options is now an error** rather than a filename. Before, a
 mistyped `--exlude` became a path and the only sign was a warning. That is argparse's
 behaviour too.
+
+It also leaves borge *more* permissive than borg in one spot. argparse cannot place an
+option between two positionals when the second has `nargs="*"`, so
+`borg create -r REPO NAME --exclude P PATH` fails with "unrecognized arguments"; borge
+accepts it. Being more permissive than the tool being ported is not a compatibility
+problem — every command borg accepts, borge accepts — but it is worth knowing that a
+command line tested only against borge may not run under borg.
 
 Verified by `TestExcludeAfterPositionalsMatchesBorg`, which gives borg and borge the same
 command with the option last and requires the same archive contents, and by
@@ -620,9 +636,13 @@ exactly the same four paths. A differential test that cares *which* items were s
 to sort both sides; one that compares sequences is asserting this divergence rather than
 whatever it meant to check.
 
-## 24. The rsync slashdot hack is not implemented
+## 24. The rsync slashdot hack — **implemented 2026-08-18**
 
 **Stage 8 · `internal/archive` · a gap, not a decision**
+
+**Resolved.** `stripPrefix` and `walker.storedPath` port borg's `get_strip_prefix` and the
+prefix handling in `create_helper`. What follows describes the gap; the implementation is
+at the end.
 
 borg lets a source path say where the stored path should start, the way rsync does: a `/./`
 in the middle splits "the part used to read from the filesystem" from "the part that is
@@ -645,3 +665,54 @@ through `--pattern` roots as well. It wants its own change and its own tests. Re
 
 **How it was found:** reading borg's `create_cmd.py` closely enough to port the path rule
 for #21.
+
+### The implementation
+
+`stripPrefix` reads the hack out of the path *as typed*, before cleaning removes the `.`
+element along with the instruction. It is borg's `get_strip_prefix`, including the three
+edges that are easy to get wrong and are each a test row:
+
+- Only the **first** `/./` counts, so `/a/./b/./c` stores `b/c` and not `c`.
+- A `/./` at position zero is not the hack, so `/./x` is an ordinary path.
+- A trailing `/.` is not the hack either — the string contains no `/./` — so `/a/b/.`
+  stores the whole path, while `/a/b/./` stores `.`.
+
+`walker.storedPath` is borg's `create_helper`: at the dot the item becomes `.`, below it
+the prefix is trimmed, and above it there is no item at all. That third case cannot be
+reached by a walk that starts at the cleaned root, since that root is always at or below
+the dot; it is written anyway, because leaving out one of borg's three cases is the kind of
+omission that is silent until something else changes.
+
+**Patterns match the walked path, not the stored one.** With the hack in play those are
+different strings, and this is the half that is easy to get backwards: an `--exclude` is
+written against the filesystem the user is looking at, not against an archive that does not
+exist yet. So `--exclude 'pp:a/b/c/d'` excludes and `--exclude 'pp:d'` does not, in both
+tools. `TestPatternsMatchTheWalkedPathNotTheStoredOne` asserts the negative case as well as
+the positive one, because matching on the stored path is the plausible wrong implementation
+and it would pass a test that only checked the positive.
+
+Verified against borg on ten path shapes including two controls, and mutation-checked:
+making `stripPrefix` always return `""` fails every positive row and leaves the controls
+passing.
+
+## 25. `R` roots in a patterns file are not used
+
+**Stage 8 · `internal/cli/archive.go` · a gap, not a decision**
+
+borg's `--patterns-from` file may contain `R PATH` lines, which add recursion roots — paths
+to back up — alongside the include and exclude rules. borge parses them and throws them
+away: `LoadPatternFile` returns them and the caller assigns them to `_`.
+
+With a patterns file whose only root is an `R` line:
+
+```
+borg  create -r REPO A --patterns-from pf.txt     archives the root
+borge create -r REPO A --patterns-from pf.txt     borge: create needs an archive name and at least one path
+```
+
+It fails loudly rather than backing up the wrong thing, which is the better of the two ways
+to be wrong, but it is still a valid borg command that borge refuses. The roots need to join
+the positional paths — and, once they do, to carry the slashdot hack of #24 with them, since
+borg treats them exactly as it treats a path on the command line.
+
+**How it was found:** checking whether #24 reached `--pattern` roots as well as paths.

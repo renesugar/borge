@@ -380,3 +380,67 @@ func TestArchivedPath(t *testing.T) {
 		}
 	}
 }
+
+// TestStripPrefix pins borg's get_strip_prefix, the rsync slashdot hack: a "/./" in a
+// source path says where the stored path begins. docs/DIVERGENCES.md #24.
+func TestStripPrefix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/a/b/./c/d", "/a/b/"},
+		{"/a/b/./c", "/a/b/"},
+		{"/a/./b", "/a/"},
+		{"a/b/./c/d", "a/b/"},
+		// Only the first "/./" counts, so this stores "b/c" and not "c".
+		{"/a/./b/./c", "/a/"},
+		// The prefix is cleaned, so "./a/b" becomes "a/b/".
+		{"./a/b/./c", "a/b/"},
+		{"/a/b//./c", "/a/b/"},
+		// A trailing "/." is not the hack: the string holds no "/./".
+		{"/a/b/.", ""},
+		// A trailing "/./" is, and it points at the directory itself.
+		{"/a/b/./", "/a/b/"},
+		// At position zero it is an ordinary path, not an instruction.
+		{"/./x", ""},
+		{"./x", ""},
+		{"/a/b/c", ""},
+		{".", ""},
+		{"", ""},
+	}
+	found := 0
+	for _, c := range cases {
+		if got := stripPrefix(c.in); got != c.want {
+			t.Errorf("stripPrefix(%q) = %q, want %q", c.in, got, c.want)
+		} else if got != "" {
+			found++
+		}
+	}
+	// A stripPrefix that always returned "" would satisfy every negative row above.
+	if found < 6 {
+		t.Errorf("only %d rows found a prefix; the table is not exercising the hack", found)
+	}
+}
+
+// TestStoredPathUnderTheHack covers the three cases of borg's create_helper.
+func TestStoredPathUnderTheHack(t *testing.T) {
+	w := &walker{strip: "/a/b/"}
+
+	if got, ok := w.storedPath("/a/b/c/d"); !ok || got != "c/d" {
+		t.Errorf("below the dot: got %q, %v", got, ok)
+	}
+	// The directory the dot points at is the archive's root.
+	if got, ok := w.storedPath("/a/b"); !ok || got != "." {
+		t.Errorf("at the dot: got %q, %v", got, ok)
+	}
+	// Above the dot there is no item at all.
+	if _, ok := w.storedPath("/a"); ok {
+		t.Error("above the dot: expected no item")
+	}
+	// A path the prefix does not cover is stored whole, as borg's removeprefix leaves it.
+	if got, ok := w.storedPath("/elsewhere/x"); !ok || got != "elsewhere/x" {
+		t.Errorf("outside the prefix: got %q, %v", got, ok)
+	}
+	// And with no hack in play, nothing changes.
+	plain := &walker{}
+	if got, ok := plain.storedPath("/a/b/c"); !ok || got != "a/b/c" {
+		t.Errorf("without the hack: got %q, %v", got, ok)
+	}
+}
