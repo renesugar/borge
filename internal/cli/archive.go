@@ -23,19 +23,29 @@ import (
 	"github.com/renesugar/borge/internal/patterns"
 )
 
-// patternFlags are the include/exclude options shared by list and extract.
+// patternFlags are the include/exclude options shared by create, list, extract and the
+// rest.
 //
-// They are collected in the order the user wrote them, because order decides the outcome:
-// the first matching pattern wins, so "--exclude X --pattern +X" and the reverse mean
-// different things.
+// # One list, in the order the user wrote them
+//
+// The first matching pattern decides, so "--exclude X --pattern +X" and the reverse mean
+// different things - and the four options interleave: an --exclude written before a
+// --pattern has to be tried before it. borge kept a slice per option and processed all the
+// --patterns, then all the --excludes, so the order the user wrote was thrown away and
+// "--exclude 'sh:**/drop' --pattern '+sh:**/drop'" archived the file borg leaves out. See
+// docs/DIVERGENCES.md #26.
+//
+// Go's flag calls Set in command-line order across every option, so one shared slice with
+// a tag per entry is all it takes to keep it. (Argument permutation preserves the relative
+// order of the options it moves, so this survives an option written after the paths; see
+// args.go.)
 type patternFlags struct {
-	excludes     multiFlag
-	excludeFrom  multiFlag
-	patternsFrom multiFlag
-	pattern      multiFlag
+	specs []patternSpec
 }
 
-// multiFlag collects a repeated option in order.
+// multiFlag collects a repeated option in order. Still used by the options where order is
+// all a caller needs - "borge tag --add a --add b" - as against the pattern options, where
+// the order has to be kept *across* four different flags and patternSpec does that.
 type multiFlag []string
 
 func (m *multiFlag) String() string { return strings.Join(*m, ",") }
@@ -44,76 +54,152 @@ func (m *multiFlag) Set(v string) error {
 	return nil
 }
 
+// patternSpecKind says which option a spec came from.
+type patternSpecKind int
+
+const (
+	specExclude patternSpecKind = iota
+	specExcludeFrom
+	specPattern
+	specPatternsFrom
+)
+
+type patternSpec struct {
+	kind  patternSpecKind
+	value string
+}
+
+// patternSpecFlag appends to the shared list, tagging each entry with its option.
+type patternSpecFlag struct {
+	specs *[]patternSpec
+	kind  patternSpecKind
+}
+
+func (f patternSpecFlag) String() string { return "" }
+
+func (f patternSpecFlag) Set(v string) error {
+	*f.specs = append(*f.specs, patternSpec{kind: f.kind, value: v})
+	return nil
+}
+
 func (p *patternFlags) register(fs *flagSet) {
-	fs.Var(&p.excludes, "e", "exclude paths matching this pattern (repeatable)")
-	fs.Var(&p.excludes, "exclude", "exclude paths matching this pattern (repeatable)")
-	fs.Var(&p.excludeFrom, "exclude-from", "read exclude patterns from a file (repeatable)")
-	fs.Var(&p.pattern, "pattern", "an include/exclude pattern with a leading +, - or ! (repeatable)")
-	fs.Var(&p.patternsFrom, "patterns-from", "read include/exclude patterns from a file (repeatable)")
+	excl := patternSpecFlag{&p.specs, specExclude}
+	fs.Var(excl, "e", "exclude paths matching this pattern (repeatable)")
+	fs.Var(excl, "exclude", "exclude paths matching this pattern (repeatable)")
+	fs.Var(patternSpecFlag{&p.specs, specExcludeFrom}, "exclude-from",
+		"read exclude patterns from a file (repeatable)")
+	fs.Var(patternSpecFlag{&p.specs, specPattern}, "pattern",
+		"an include/exclude pattern with a leading +, - or ! (repeatable)")
+	fs.Var(patternSpecFlag{&p.specs, specPatternsFrom}, "patterns-from",
+		"read include/exclude patterns from a file (repeatable)")
 }
 
 // any reports whether any pattern option was given. A command that would otherwise match
 // everything uses it to tell "no filter asked for" from "a filter that matches all".
-func (p *patternFlags) any() bool {
-	return len(p.excludes) > 0 || len(p.excludeFrom) > 0 ||
-		len(p.pattern) > 0 || len(p.patternsFrom) > 0
-}
+func (p *patternFlags) any() bool { return len(p.specs) > 0 }
 
-// matcher builds the pattern matcher from the flags and the positional paths.
+// matcher builds the pattern matcher from the flags and the positional paths, walking the
+// specs in the order they were written.
 func (p *patternFlags) matcher(paths []string) (*patterns.Matcher, error) {
 	m := patterns.NewMatcher(true)
 
-	for _, spec := range p.pattern {
-		e, err := patterns.ParseInclExclCommand(spec, patterns.StyleShellPath)
-		if err != nil {
-			return nil, err
-		}
-		if e.Pattern != nil {
-			m.Add(e.Pattern, e.Cmd)
-		}
-	}
-	for _, path := range p.patternsFrom {
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		entries, _, err := patterns.LoadPatternFile(f, patterns.StyleShellPath)
-		f.Close()
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		for _, e := range entries {
-			m.Add(e.Pattern, e.Cmd)
-		}
-	}
-	for _, spec := range p.excludes {
-		// --exclude defaults to fnmatch and does not recurse, which is borg's shape.
-		pat, err := patterns.ParsePattern(spec, patterns.StyleFnmatch, false)
-		if err != nil {
-			return nil, err
-		}
-		m.Add(pat, patterns.CmdExcludeNoRecurse)
-	}
-	for _, path := range p.excludeFrom {
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		pats, err := patterns.LoadExcludeFile(f)
-		f.Close()
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		for _, pat := range pats {
+	for _, spec := range p.specs {
+		switch spec.kind {
+		case specPattern:
+			e, err := patterns.ParseInclExclCommand(spec.value, patterns.StyleShellPath)
+			if err != nil {
+				return nil, err
+			}
+			// An "R" root carries no pattern, and a "P" style on the command line
+			// changes nothing - borg ignores it there too, and only honours it inside a
+			// patterns file, where the following lines are what it applies to.
+			if e.Pattern != nil {
+				m.Add(e.Pattern, e.Cmd)
+			}
+
+		case specPatternsFrom:
+			entries, _, err := loadPatternFile(spec.value)
+			if err != nil {
+				return nil, err
+			}
+			for _, e := range entries {
+				m.Add(e.Pattern, e.Cmd)
+			}
+
+		case specExclude:
+			// --exclude defaults to fnmatch and does not recurse, which is borg's shape.
+			pat, err := patterns.ParsePattern(spec.value, patterns.StyleFnmatch, false)
+			if err != nil {
+				return nil, err
+			}
 			m.Add(pat, patterns.CmdExcludeNoRecurse)
+
+		case specExcludeFrom:
+			f, err := os.Open(spec.value)
+			if err != nil {
+				return nil, err
+			}
+			pats, err := patterns.LoadExcludeFile(f)
+			f.Close()
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", spec.value, err)
+			}
+			for _, pat := range pats {
+				m.Add(pat, patterns.CmdExcludeNoRecurse)
+			}
 		}
 	}
+
 	if len(paths) > 0 {
 		if err := m.AddIncludePaths(paths); err != nil {
 			return nil, err
 		}
 	}
 	return m, nil
+}
+
+// roots are the "R PATH" recursion roots: extra paths to back up, named in a patterns file
+// or in a --pattern option rather than on the command line.
+//
+// borge parsed them and threw them away, so a patterns file whose only root was an R line
+// made borge refuse a command borg runs. See docs/DIVERGENCES.md #25.
+//
+// Only "create" uses these, as in borg: for every other command a pattern file describes
+// what to select from an archive, and a root has nothing to select.
+func (p *patternFlags) roots() ([]string, error) {
+	var out []string
+	for _, spec := range p.specs {
+		switch spec.kind {
+		case specPattern:
+			e, err := patterns.ParseInclExclCommand(spec.value, patterns.StyleShellPath)
+			if err != nil {
+				return nil, err
+			}
+			if e.Cmd == patterns.CmdRootPath {
+				out = append(out, e.Value)
+			}
+		case specPatternsFrom:
+			_, roots, err := loadPatternFile(spec.value)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, roots...)
+		}
+	}
+	return out, nil
+}
+
+func loadPatternFile(path string) ([]patterns.FileEntry, []string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	entries, roots, err := patterns.LoadPatternFile(f, patterns.StyleShellPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return entries, roots, nil
 }
 
 // openArchive resolves an archive selector - a name, or "aid:<hex prefix>".

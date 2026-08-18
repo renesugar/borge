@@ -36,7 +36,18 @@ declare -A deferred=(
     [umount]="non-goal for 1.0 (PORTING_PLAN 0.6): pairs with mount"
     [webdav]="non-goal for 1.0 (PORTING_PLAN 0.6)"
     [serve]="stage 8 remote backends (PORTING_PLAN 0.6, 11): not yet implemented"
-    [transfer]="non-goal for 1.0 from borg 1.x (PORTING_PLAN 0.6); borg2-to-borg2 transfer is NOT yet decided"
+    [transfer]="stage 8 (PORTING_PLAN 11.1): borg2-to-borg2 decided in scope 2026-08-18, not yet implemented; from borg 1.x stays a non-goal (0.6)"
+)
+
+# gap says which of the deferred commands are work still to do, as against settled
+# non-goals. It is a field of its own rather than something inferred from the wording of
+# the reason above, because that is what it used to be: the classification pattern matched
+# "NOT IMPLEMENTED*" and "*NOT yet decided*" against the reason text, so serve's lowercase
+# "not yet implemented" matched neither and the largest gap in stage 8 was silently left
+# out of the very list this script prints to name the gaps.
+declare -A gap=(
+    [serve]=1
+    [transfer]=1
 )
 
 borg_commands() {
@@ -125,11 +136,19 @@ echo "absent, unexplained:  $unexplained"
 # otherwise report finished work as a gap.
 echo
 echo "Of the recorded absences, these are gaps rather than decisions:"
+# Collected into a variable rather than piped straight into sort: a counter incremented
+# inside "done | sort" is incremented in a subshell, so the "none" branch below would
+# have fired every time - a check that cannot fail.
+gap_lines=""
 for c in "${!deferred[@]}"; do
     [ -n "${have[$c]:-}" ] && continue
-    case "${deferred[$c]}" in
-        NOT\ IMPLEMENTED*|*NOT\ yet\ decided*) printf '  %-14s %s\n' "$c" "${deferred[$c]}" ;;
-    esac
-done | sort
+    [ -z "${gap[$c]:-}" ] && continue
+    gap_lines+="$(printf '  %-14s %s' "$c" "${deferred[$c]}")"$'\n'
+done
+if [ -n "$gap_lines" ]; then
+    printf '%s' "$gap_lines" | sort
+else
+    echo "  (none - every recorded absence is a settled non-goal)"
+fi
 
 [ "$unexplained" -eq 0 ]

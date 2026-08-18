@@ -695,9 +695,12 @@ Verified against borg on ten path shapes including two controls, and mutation-ch
 making `stripPrefix` always return `""` fails every positive row and leaves the controls
 passing.
 
-## 25. `R` roots in a patterns file are not used
+## 25. `R` roots in a patterns file are not used — **fixed 2026-08-18**
 
 **Stage 8 · `internal/cli/archive.go` · a gap, not a decision**
+
+**Resolved.** `patternFlags.roots()` collects them and `create` puts them ahead of the
+command-line paths, as borg orders them. What follows describes the gap.
 
 borg's `--patterns-from` file may contain `R PATH` lines, which add recursion roots — paths
 to back up — alongside the include and exclude rules. borge parses them and throws them
@@ -716,3 +719,46 @@ the positional paths — and, once they do, to carry the slashdot hack of #24 wi
 borg treats them exactly as it treats a path on the command line.
 
 **How it was found:** checking whether #24 reached `--pattern` roots as well as paths.
+
+### The fix
+
+`patternFlags.roots()` walks the pattern specs and returns every `CmdRootPath` value, from
+a `--patterns-from` file or from a `--pattern 'R PATH'` on the command line — borg accepts
+both. `create` puts them ahead of the positional paths, which is borg's order
+(`args.pattern_roots + args.paths`), and counts them when deciding whether it has anything
+to do: `create NAME` with a patterns file whose only root is an `R` line is now a valid
+command, and `create NAME` with no paths anywhere is still refused.
+
+Only `create` uses them, as in borg. For every other command a pattern file describes what
+to select out of an archive, and a root has nothing to select.
+
+## 26. Pattern options were applied grouped, not in the order written
+
+**Stage 8 · `internal/cli/archive.go` · a defect, not a decision — fixed 2026-08-18**
+
+The first matching pattern decides, so the order of `--exclude`, `--exclude-from`,
+`--pattern` and `--patterns-from` *relative to each other* is the whole meaning of a
+command line. borge kept a slice per option and walked them in a fixed order — all the
+`--pattern`s, then all the `--patterns-from`s, then the `--exclude`s — so the order the
+user wrote was discarded:
+
+```
+borge create -r REPO --exclude 'sh:**/keep.txt' --pattern '+sh:**/keep.txt' A tree
+```
+
+archives `keep.txt`, because the `+` was applied first whatever the user typed. borg leaves
+it out. Reversing the two options changes nothing in borge and everything in borg.
+
+The comment above `patternFlags` claimed the options were "collected in the order the user
+wrote them, because order decides the outcome". They were collected that way *per option*
+and then thrown into groups, so the comment described an intention rather than the code —
+which is why nobody looking at the file would have doubted it.
+
+**The fix.** One slice of `patternSpec{kind, value}` shared by all four options. Go's
+`flag` calls `Set` in command-line order across every option, so a single `flag.Value` per
+kind appending to one list keeps the order for free, and `matcher` walks it once. Argument
+permutation preserves the relative order of the options it moves (#20), so this survives an
+option written after the paths.
+
+**How it was found:** measuring what `--patterns-from` did, while fixing #25. The two
+defects are one restructuring apart, so they were fixed together.

@@ -195,15 +195,28 @@ func cmdCreate(e *Env, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
-	if fs.NArg() < 2 {
-		e.errorf("create needs an archive name and at least one path")
+	// "R PATH" lines in a patterns file are paths to back up, so they count towards
+	// having something to do: borg accepts a create whose only root came from a patterns
+	// file, and borge used to refuse it (docs/DIVERGENCES.md #25).
+	roots, err := pf.roots()
+	if err != nil {
+		return e.fail(err)
+	}
+	if fs.NArg() < 1 {
+		e.errorf("create needs an archive name")
+		return ExitError
+	}
+	if fs.NArg() < 2 && len(roots) == 0 {
+		e.errorf("create needs at least one path, on the command line or as an " +
+			"\"R PATH\" line in a --patterns-from file")
 		return ExitError
 	}
 	name, err := e.expand(fs.Arg(0))
 	if err != nil {
 		return e.fail(err)
 	}
-	paths := fs.Args()[1:]
+	// Roots first, then the command line, as borg orders them.
+	paths := append(append([]string{}, roots...), fs.Args()[1:]...)
 
 	comm, err := e.expand(*comment)
 	if err != nil {

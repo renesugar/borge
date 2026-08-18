@@ -157,7 +157,9 @@ the chunks cache are rebuilt from the repository when absent, so nothing is lost
 Explicitly out of scope, to keep the port finishable:
 
 - borg 1.x repository read support (see §9)
-- `borg transfer` from borg 1.x repos (depends on the above)
+- `borg transfer` from borg 1.x repos (depends on the above). Transfer *between borg 2
+  repositories* is a different thing and **is** in scope — decided 2026-08-18, §11.1 — so
+  this line rules out the `--from-borg1` / `--upgrader=From12To20` path, not the command.
 - FUSE mount (`borg mount`) — deferred to §9; a large platform-specific subsystem
 - the `cockpit` TUI
 - the WebDAV server (`borg webdav`)
@@ -1643,8 +1645,9 @@ Everything needed for feature parity, once correctness is established.
 >
 > Current state (2026-08-18): 31 implemented, 5 absent with a recorded reason, 0
 > unexplained. Of the five, three are non-goals (`mount`, `umount`, `webdav`, §0.6); the
-> other two are `serve` and an undecided `transfer`. The list below is the whole of what
-> stage 8 still owes, commands and otherwise:
+> other two are `serve` and `transfer`, and `transfer` is **decided as of 2026-08-18**: it
+> is in scope for borg 2 to borg 2. The list below is the whole of what stage 8 still owes,
+> commands and otherwise:
 
 - **`serve`** and the remote store backends: `sftp`, `rest`, `s3`, `rclone`.
 - **bsdflags restoration** (DIVERGENCES #8). Read, stored and round-tripped, but not applied
@@ -1652,9 +1655,9 @@ Everything needed for feature parity, once correctness is established.
   gate passed because nothing in the corpus carries a flag, which makes it a second example
   of a gate measuring only what its corpus happens to contain.
 - **`debug convert-profile`** (DIVERGENCES #14), the only `debug` subcommand not ported.
-- **`transfer`** between two borg 2 repositories. §0.6 rules out transfer *from borg 1.x*
-  because it depends on the borg 1 reader; it says nothing about borg 2 to borg 2, which
-  is a decision still to make rather than one already taken.
+- **`transfer`** between two borg 2 repositories — **in scope, decided 2026-08-18.** With
+  it, `repo-create --other-repo` and a `BORGE_OTHER_PASSPHRASE` variable, which it cannot
+  work without. Design and the accuracy notes behind the decision are in §11.1.
 - ~~**Archive-name placeholders**~~ (DIVERGENCES #17). **Done 2026-08-17**,
   `internal/placeholders`. Not a command, so the coverage gate never saw it; it was found
   by writing `borge help placeholders` from borg's behaviour and then running the command.
@@ -1701,15 +1704,158 @@ Everything needed for feature parity, once correctness is established.
   should report, per command, implemented / absent-with-a-reason / unexplained, exactly as
   the command gate does, and the numbers above should come from it rather than from this
   paragraph.
-- **`R` roots in a patterns file** (DIVERGENCES #25). `--patterns-from` may add recursion
-  roots; borge parses them and discards them, so a patterns file whose only root is an `R`
-  line makes borge refuse the command that borg runs. The roots have to join the positional
-  paths, and carry #24's slashdot handling when they do.
+- ~~**`R` roots in a patterns file**~~ (DIVERGENCES #25). **Done 2026-08-18.**
+  `patternFlags.roots()` collects them from a patterns file or a `--pattern 'R PATH'`, and
+  `create` puts them ahead of the command-line paths as borg does. Fixing it turned up
+  **DIVERGENCES #26**, fixed in the same change: the four pattern options were applied in
+  fixed groups rather than in the order written, so `--exclude X --pattern +X` archived
+  what borg leaves out. The comment on `patternFlags` claimed the opposite, which is why
+  reading the file would not have found it.
 - ~~**A relative repository path must be accepted**~~ (DIVERGENCES #22).
   **Done 2026-08-18.** `Env.resolveRepo` makes the path absolute after expanding its
   placeholders; the store keeps its absolute-only rule, because a backend rooted at
   something that depends on the process working directory is one nothing else can reason
   about. No `~` expansion — borg does none, and inventing it would surprise a borg script.
+
+### 11.1 `transfer`, borge to borge — decided 2026-08-18
+
+**The decision: in scope.** It copies archives from one repository into another without
+re-reading the source data, and the case that settles it is the ordinary one — moving a
+repository to a new drive, and upgrading it on the way. Nothing else borge has does that:
+`repo-compress` and `recreate` rewrite chunks *in place*, so neither can move a repository,
+and an `rsync` of the directory copies the old format and the old key along with it.
+
+Transfer *from borg 1.x* stays a §0.6 non-goal: it needs the borg 1 reader, which is a
+larger piece of work with its own format reference. So borge's `transfer` implements borg's
+`--upgrader=NoOp` path only, and must refuse `--from-borg1` and `--upgrader=From12To20`
+with a message that says where the limit is written down rather than "unknown option".
+
+#### What borg's `transfer` actually does
+
+Read from `src/borg/archiver/transfer_cmd.py` and `src/borg/crypto/key.py` at the pinned
+commit, not from the documentation:
+
+- **The destination must be a *related* repository.** Two hard checks, before anything is
+  written (`transfer_cmd.py:137-144`):
+
+  ```python
+  if not using_same_id_hash and not rechunking:
+      raise Error("You must either keep the same ID hash or use --chunker-params.")
+  if not rechunking and not uses_same_chunker_secret(other_key, key):
+      raise Error("You must use the same chunker secret or deduplication will break. Use a related repository!")
+  ```
+
+  `uses_same_chunker_secret` is `other_key.chunk_seed == key.chunk_seed`.
+  `uses_same_id_hash` compares *families*: keyed HMAC-SHA256, keyed blake3, unkeyed sha256
+  (`none-sha256`), unkeyed blake3 (`none-blake3`). So `aes256-ocb` → `chacha20-poly1305` is
+  allowed and `aes256-ocb` → `none-sha256` is not, unless `--chunker-params` re-chunks
+  everything and re-hashes it under new ids.
+
+- **`repo-create --other-repo SRC` is what makes a repository related** (`key.py:660-679`).
+  It inherits the **id key** (so chunk ids match) and the **chunk seed** (so chunk
+  boundaries match), and generates a **fresh AE key** — the comment says "borg transfer
+  re-encrypts all data anyway, thus we can default to a new, random AE key".
+  `--copy-crypt-key` keeps the source's AE key instead. Copying from an unencrypted source
+  is refused outright: the `none-*` modes have no key material, and need none, because
+  their ids are unkeyed and dedup identically anyway.
+
+- **`--recompress` defaults to `never`**, which keeps each chunk's compressed payload
+  byte-for-byte and only decompresses to re-verify the id. `--recompress always`
+  decompresses and re-compresses under `--compression`. `--compression` is used for the
+  *metadata* either way.
+
+- **It re-verifies chunk ids by default.** `other_manifest.repo_objs.set_assert_id_place("transfer")`,
+  with the reasoning in a comment worth keeping: transferring re-anchors content in another
+  repository, so this is the trust boundary at which `chunkid == id_hash(content)` should be
+  re-certified. borge already reserved this: `BORGE_ASSERT_ID` documents `transfer` as one of
+  its four places and includes it in the default `repair,transfer,rechunk`. The place exists
+  and nothing uses it yet, which is a small piece of documentation that becomes true when
+  this lands.
+
+- **It is resumable, and that is a design property rather than a nicety.** An archive
+  already in the destination is skipped, checked by *both* (name, timestamp) and (name, id),
+  because borg 2 allows duplicate archive names, so neither key alone identifies an archive.
+  Re-running finishes what was interrupted, which is exactly what a multi-hour move to a new
+  drive needs.
+
+- **It validates every archive name and comment up front** and refuses the whole transfer if
+  any is invalid, rather than failing part-way through.
+
+- **A chunk missing from the source** does not abort: the chunk list entry is written with
+  the correct id and size and nothing is transferred, so the gap is recorded rather than
+  papered over with zeros.
+
+- **`--dry-run`** reports `transfer_size` and `present_size` per archive and says
+  "completed" or "incomplete", which is what makes the documented
+  transfer / dry-run / transfer-again idiom work.
+
+#### Accuracy notes on the material this decision was made from
+
+Three of the four purposes given in the reference hold up; one is wrong in a way that
+matters, and one needs a borge-specific caveat.
+
+- *"Copy archives from one deduplicating repository to another, handling conversion,
+  re-encryption or restructuring without re-creating backups from the source data"* —
+  **accurate**, and it is the reason to have the command.
+- *"Upgrading repositories … such as from Borg 1.x"* — **accurate for borg, out of scope for
+  borge.** The upgrade borge's `transfer` performs is between borg 2 repositories: a new
+  format version, a new key, or new chunker parameters. Not 1.x.
+- *"Changing encryption or security boundaries: re-encrypting data chunks under a new,
+  **independent** key structure"* — **the word "independent" is wrong, and it is the single
+  most important correction here.** The AE key is new, which is the re-encryption and the
+  new trust boundary; but the id key and the chunker secret are deliberately **inherited**,
+  and borg refuses the transfer if they are not. An independent key structure is precisely
+  what a related repository is not. Anyone reading "independent" would try
+  `repo-create -e aes256-ocb` on a fresh directory and hit
+  "You must use the same chunker secret" with no idea why. borge's help text has to say
+  *related*, and say why: different secrets mean different chunk boundaries and different
+  ids, so every chunk would be stored again.
+- *"Global compression changes"* — **accurate** (`--recompress always` with
+  `--compression`), with the caveat that borge already has `repo-compress` for doing this
+  in place; transfer's version is for doing it while moving.
+- *"Re-chunking data"* — **accurate** (`--chunker-params`), and worth noting it is also the
+  escape hatch from the same-id-hash rule, because re-chunked content is hashed afresh.
+
+#### Work items
+
+1. **`BORGE_OTHER_PASSPHRASE`** (borg: `BORG_OTHER_PASSPHRASE`, alongside
+   `BORG_OTHER_PASSCOMMAND` and `BORG_OTHER_PASSPHRASE_FD`). Two repositories are open at
+   once and they need not share a passphrase. It goes in `borge help environment`, which
+   `TestHelpEnvironmentTopicListsEveryVariable` checks in both directions.
+2. **`repo-create --other-repo SRC`**, plus `--copy-crypt-key`. borge's `item.Key` already
+   carries `CryptKey`, `IDKey` and `ChunkSeed` as separate fields, so this is: unlock the
+   source key, inherit `IDKey` and `ChunkSeed`, generate a fresh `CryptKey` unless
+   `--copy-crypt-key`, refuse an unencrypted source. Gated against borg both ways — borg
+   must be able to open a related repository borge created, and transfer into it.
+3. **`transfer --other-repo SRC`** with `-n/--dry-run`, `-C/--compression`, `--recompress`,
+   `--chunker-params` and the archive filters. Refuse `--from-borg1` and
+   `--upgrader=From12To20` pointing at §0.6. Two pieces of prose go false the moment this
+   lands and neither has a test behind it: the header comment of `internal/cli/help.go`
+   says borge "does not implement `mount` or `transfer`", and DIVERGENCES #14's neighbours
+   describe `transfer` as undecided. Grep for `transfer` across `docs/` and `internal/`
+   before calling the item done — this is the fourth time in stage 8 that a sentence
+   describing an absence outlived it.
+4. **The relatedness guards**, ported with their messages, and tested for *refusal*: an
+   unrelated destination has to be rejected before a single chunk is written. A transfer
+   that silently re-stores every chunk is the failure this prevents, and it looks like
+   success.
+5. **Resumability test.** Transfer, interrupt, transfer again, and require the result to
+   equal a single uninterrupted transfer — and that the second run reports the archives as
+   already present rather than duplicating them.
+6. **Interop rows.** borge transfers a borg-written repository and borg reads the result;
+   borg transfers a borge-written one and borge reads that. Both with `--recompress never`
+   (the payload-preserving path) and `--recompress always`, since they exercise different
+   code.
+7. **Verify, do not assume, the two legacy branches.** borg's transfer prefers
+   `item.chunks_healthy` over `item.chunks` when present, and drops borg 1.x `part` items.
+   Both are described in borg's source as legacy. Whether either can occur in a borg 2
+   archive is a question to answer by testing a repaired borg 2 repository, not by reading
+   the comment — the plan should record the answer, and if they cannot occur, say so rather
+   than porting dead branches.
+
+**Gate:** `borge transfer` moves a repository borg wrote into a related borge repository
+that borg can then read and `check --verify-data`; the reverse direction likewise; a
+re-run is a no-op; and an unrelated destination is refused with borg's message.
 
 > **`key`, `repo-delete` and `help` done 2026-08-17**, closing the three gaps the coverage
 > gate found.
@@ -2147,7 +2293,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, per-command options, bsdflags restore and `R` roots remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), per-command options, bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
@@ -2160,16 +2306,18 @@ anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 **What "in progress" means for stage 8.** The command list is gated by
 `tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
 reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
-the other two are `serve` and an undecided `transfer`. Of the path and argument defects,
+the other two are `serve` and `transfer`. `transfer` was the one open *question* rather than
+open work, and it is now answered: borg 2 to borg 2 is in scope, borg 1.x is not, and §11.1
+holds the design. Of the path and argument defects,
 options after positionals (#20), relative source paths (#21), relative repository paths
-(#22) and the rsync slashdot hack (#24) were all closed on 2026-08-18. `R` roots in a
-patterns file (#25) is the one still open, and is listed in §11. Sorted directory order (#23) is deliberate and was written down
+(#22), the rsync slashdot hack (#24), `R` roots in a patterns file (#25) and pattern-option
+ordering (#26) were all closed on 2026-08-18. Sorted directory order (#23) is deliberate and was written down
 only when a differential test tripped over it.
 
-**All five came out of one activity**: running the examples in borge's own help text. #20
+**All six came out of one activity**: running the examples in borge's own help text. #20
 was the example that lost data; #21 and #22 were found building the fixture for it; #24 was
 found reading borg's source closely enough to fix #21; #25 was found checking how far #24
-reached. Seven stages of differential testing had not surfaced any of them, because each
+reached; #26 was found measuring what #25's option actually did. Seven stages of differential testing had not surfaced any of them, because each
 lives in the gap between what the tests exercise and what a user types.
 
 **What "investigated" means for stage 9.** §12.1 and §12.2 measured; nothing has been
