@@ -53,14 +53,6 @@ type logRecord struct {
 	Name      string  `json:"name"`
 }
 
-// fileStatusRecord is borg's file_status object, emitted by create and recreate under
-// --list in place of the plain "A path" line.
-type fileStatusRecord struct {
-	Type   string `json:"type"`
-	Status string `json:"status"`
-	Path   string `json:"path"`
-}
-
 // unixTime is borg's timestamp: seconds since the epoch as a float, not an ISO string.
 // The JSON API uses both forms, in different places, and this is the one the log stream
 // uses.
@@ -156,11 +148,13 @@ func (e *Env) enableJSONLog(command string) {
 // logFileStatus reports one item the way --list does, in whichever form is in force.
 func (e *Env) logFileStatus(status byte, path string) {
 	if e.logger != nil {
-		e.logger.write(fileStatusRecord{
-			Type:   "file_status",
-			Status: string(status),
-			Path:   path,
-		})
+		// The path goes through borg's text_to_json here as everywhere else: a name that
+		// is not valid unicode gets an approximation plus path_b64. borg does this for
+		// file_status too (archiver/__init__.py), and it is the one place the frontend
+		// learns which file is being worked on.
+		rec := map[string]any{"type": "file_status", "status": string(status)}
+		putText(rec, "path", path)
+		e.logger.write(rec)
 		return
 	}
 	fmt.Fprintf(e.Stderr, "%c %s\n", status, path)

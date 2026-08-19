@@ -32,7 +32,9 @@ func diffPaths(t *testing.T, r *borgRepo, a, b string, extra ...string) map[stri
 		var d struct {
 			Path    string `json:"path"`
 			Changes []struct {
-				Kind string `json:"kind"`
+				// borg's key is "type", and its values are borg's phrases; borge
+				// matched neither until 2026-08-19 (DIVERGENCES.md #43).
+				Kind string `json:"type"`
 			} `json:"changes"`
 		}
 		if err := json.Unmarshal([]byte(line), &d); err != nil {
@@ -125,13 +127,14 @@ func TestDiffMatchesBorg(t *testing.T) {
 		t.Error("an unchanged file was reported as changed")
 	}
 
-	// And the kinds are right, not just the paths.
+	// And the kinds are right, not just the paths. These are borg's names for them: a
+	// content change is the bare word, everything else is the phrase.
 	for name, wantKind := range map[string]string{
 		"edited.txt":      "modified",
 		"removed.txt":     "removed",
 		"added.txt":       "added",
-		"mode-change.txt": "mode",
-		"link":            "link",
+		"mode-change.txt": "changed mode",
+		"link":            "changed link",
 	} {
 		kinds, ok := got[name]
 		if !ok {

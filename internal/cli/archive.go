@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/renesugar/borge/internal/archive"
 	"github.com/renesugar/borge/internal/cache"
@@ -219,60 +218,6 @@ func openArchive(m *manifest.Manifest, selector string) (*archive.Archive, error
 	return archive.OpenByName(m, selector)
 }
 
-// itemJSON is one line of --json-lines, with borg's field names.
-type itemJSON struct {
-	Type   string `json:"type"`
-	Mode   string `json:"mode"`
-	User   string `json:"user"`
-	Group  string `json:"group"`
-	UID    int64  `json:"uid"`
-	GID    int64  `json:"gid"`
-	Path   string `json:"path"`
-	Target string `json:"target"`
-	Size   int64  `json:"size"`
-	MTime  string `json:"mtime"`
-	HLID   string `json:"hlid"`
-
-	// Flags and Inode are pointers because borg emits null when the value is unknown,
-	// and null is not the same answer as 0: bsdflags 0 means "no flags set", null means
-	// "this archive does not record them". A restore that reads 0 would clear flags the
-	// source had. borge omitted both keys entirely until 2026-08-18.
-	Flags *int64  `json:"flags"`
-	Inode *uint64 `json:"inode"`
-}
-
-func toItemJSON(it *item.Item) itemJSON {
-	mode := it.ModeOr(0)
-	out := itemJSON{
-		Type:  item.TypeChar(mode),
-		Mode:  item.FormatMode(mode),
-		Path:  it.Path,
-		Size:  itemSize(it),
-		HLID:  hex.EncodeToString(it.HLID),
-		Flags: it.BSDFlags,
-		Inode: it.Inode,
-	}
-	if it.User != nil {
-		out.User = *it.User
-	}
-	if it.Group != nil {
-		out.Group = *it.Group
-	}
-	if it.UID != nil {
-		out.UID = *it.UID
-	}
-	if it.GID != nil {
-		out.GID = *it.GID
-	}
-	if it.Target != nil {
-		out.Target = *it.Target
-	}
-	if it.MTime != nil {
-		out.MTime = time.Unix(0, *it.MTime).Local().Format("2006-01-02T15:04:05.000000-07:00")
-	}
-	return out
-}
-
 // itemSize is what a listing reports: a file's content size, a symlink's target length,
 // zero for everything else. It is computed from the chunk list rather than read from a
 // stored field, because borg 2 does not write one.
@@ -341,7 +286,11 @@ func cmdList(e *Env, args []string) int {
 			return nil
 		}
 		if *jsonLines {
-			return enc.Encode(toItemJSON(it))
+			data, err := itemJSONData(it, template, a.Info.Name, hex.EncodeToString(a.ID))
+			if err != nil {
+				return err
+			}
+			return enc.Encode(data)
 		}
 		line, err := formatter.Format(template, itemValues(it, a.Info.Name, hex.EncodeToString(a.ID)))
 		if err != nil {

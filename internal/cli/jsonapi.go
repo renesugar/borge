@@ -10,9 +10,11 @@
 package cli
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/renesugar/borge/internal/archive"
 	"github.com/renesugar/borge/internal/crypto/key"
@@ -268,4 +270,133 @@ func infoArchiveJSON(a *archive.Archive) map[string]any {
 		}
 	}
 	return out
+}
+
+// # Text that is not valid unicode
+//
+// A path on Linux is bytes, not text, and JSON is text. borg's rule (frontends.rst,
+// "Dealing with non-unicode byte sequences") is that a value which does not decode cleanly
+// gets *two* keys: the named one holding an approximation with each bad byte shown as "?",
+// and "<key>_b64" holding base64 of the original bytes. A frontend that needs precision
+// decodes the second; one that only displays uses the first.
+//
+// borge emitted neither. Go's encoder replaces invalid bytes with U+FFFD, so the path came
+// out mangled and with no way to recover it - lossy output that looks fine.
+//
+// Note this is *not* the representation borge already implements in pydump.go. borg uses
+// two different ones and so does borge: "debug dump-*" and "diff --json-lines" write
+// Python's surrogate escapes (\udcff), while the item and archive objects use ? plus _b64.
+// The plan called for unifying them, which would have been wrong - measuring borg shows
+// they genuinely differ. What they share is the question, not the answer.
+func putText(m map[string]any, key, value string) {
+	if utf8.ValidString(value) {
+		m[key] = value
+		return
+	}
+	m[key] = approximateText(value)
+	m[key+"_b64"] = base64.StdEncoding.EncodeToString([]byte(value))
+}
+
+// approximateText replaces every byte that is not part of a valid UTF-8 sequence with "?".
+//
+// One "?" per bad byte, which is what Python's str.encode(errors="replace") produces for
+// the surrogate escapes borg is carrying at that point: two bad bytes give "??". A U+FFFD
+// that was genuinely in the name is left alone - it is valid text, and turning it into a
+// question mark would report damage that is not there.
+func approximateText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b.WriteByte('?')
+		} else {
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
+}
+
+// itemJSONData is borg's per-item JSON object, for "list" and "find".
+//
+// Eleven keys are always present and the rest appear only when the effective --format names
+// them, exactly as for the archive-level object: "the form of --format is ignored, but keys
+// used in it are added". borge sent thirteen every time, which matches borg for list's
+// default format and nothing else - "list --json-lines --format '{path}'" gave borg eleven
+// keys and borge thirteen.
+func itemJSONData(it *item.Item, template, archiveName, archiveID string) (map[string]any, error) {
+	mode := it.ModeOr(0)
+	out := map[string]any{
+		"type":  item.TypeChar(mode),
+		"mode":  item.FormatMode(mode),
+		"uid":   nullableInt(it.UID),
+		"gid":   nullableInt(it.GID),
+		"hlid":  hex.EncodeToString(it.HLID),
+		"flags": nullableInt(it.BSDFlags),
+		"inode": nullableUint(it.Inode),
+	}
+	putText(out, "path", it.Path)
+	target := ""
+	if it.Target != nil {
+		target = *it.Target
+	}
+	putText(out, "target", target)
+	// borg falls back to the numeric id when the name was not stored, and renders it as
+	// text either way.
+	putText(out, "user", nameOrID(it.User, it.UID))
+	putText(out, "group", nameOrID(it.Group, it.GID))
+
+	keys, err := formatter.Keys(template)
+	if err != nil {
+		return nil, err
+	}
+	iso := func(ts *int64) string {
+		// borg's format_time falls back to mtime for a missing or zero timestamp; see the
+		// note in itemValues.
+		if ts == nil || *ts == 0 {
+			ts = it.MTime
+		}
+		if ts == nil {
+			return ""
+		}
+		return isoTime(time.Unix(0, *ts))
+	}
+	optional := map[string]func() any{
+		"size":       func() any { return itemSize(it) },
+		"num_chunks": func() any { return int64(len(it.Chunks)) },
+		"mtime":      func() any { return iso(it.MTime) },
+		"ctime":      func() any { return iso(it.CTime) },
+		"atime":      func() any { return iso(it.ATime) },
+		"isomtime":   func() any { return iso(it.MTime) },
+		"isoctime":   func() any { return iso(it.CTime) },
+		"isoatime":   func() any { return iso(it.ATime) },
+		"archivename": func() any {
+			return archiveName
+		},
+		"archiveid": func() any { return archiveID },
+	}
+	for _, k := range keys {
+		if f, ok := optional[k]; ok {
+			out[k] = f()
+		}
+	}
+	return out, nil
+}
+
+// nullableInt is borg's JSON for a number an item may not carry: null, not the four
+// letters "None" the *text* form prints (DIVERGENCES.md #33). JSON has a null and Python's
+// encoder uses it.
+func nullableInt(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func nullableUint(v *uint64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }

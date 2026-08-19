@@ -1422,3 +1422,56 @@ agreed with borg's exactly, so only the nesting changed.
 `borge version -r REPO --json` is an error where borg reports the server's version. It is
 one of the thirteen common options borge still lacks, and it means something only once the
 remote backends exist — until then borge's server *is* its client. Table row 9.
+
+## 43. The `--json-lines` streams — **fixed 2026-08-19**
+
+`TestJSONSchemaMatchesBorg` covers the eight commands with `--json`. `list`, `find` and
+`diff` produce a *stream* rather than a document and had no comparison at all, so three
+differences had survived every stage. Looking for the non-unicode handling of table row 7
+is what found them.
+
+**The item object is driven by `--format`, and borge's was fixed.** Eleven keys are always
+there and the rest appear only when the format names them — the same rule as the archive
+object (#42). `borg list --json-lines --format '{path}'` sends eleven keys; borge sent
+thirteen. borge's coincided with borg's for the default format, which is why the earlier
+"13 keys, zero value differences" check passed and proved less than it looked.
+
+**`find` sent an envelope of its own.** borg emits the item flat, naming the archive with
+the `archivename` and `archiveid` keys *inside* it and only when the format asks. borge
+sent `{archive_id, archive_name, archive_time, item: {…}}` — four keys, none of them
+borg's, and `archive_time` is a key borg has nowhere.
+
+**`diff` renamed every key in a change.** borg sends `{"type": …}` with `item1`/`item2`;
+borge sent `{"kind": …}` with `from`/`to` and a `description` borg does not have. The
+values differed too: timestamps in borg's human layout rather than ISO-8601, and an owner
+change as one `"user:group"` string where borg sends a two-element array. borg's `type`
+names are not uniform, so borge spells them out rather than deriving them — a content
+change is the bare word (`added`, `modified`), a timestamp is the bare attribute (`mtime`),
+and the rest are phrases (`changed mode`). borg also records *that* a link changed without
+saying to what, where borge's text form names both; the JSON now matches borg and the text
+form keeps the more useful answer.
+
+## The non-unicode rule, and the framing that was wrong
+
+A path on Linux is bytes and JSON is text. borg's rule (frontends.rst) gives a value that
+does not decode cleanly *two* keys: the named one holding an approximation with each bad
+byte as `?`, and `<key>_b64` holding base64 of the original bytes.
+
+borge emitted neither. Go's encoder replaces invalid bytes with U+FFFD, so a path came out
+mangled with no way to recover it — lossy output that looks fine:
+
+```
+borg  {"path": "…/bad??name.txt", "path_b64": "…YmFk//5uYW1lLnR4dA=="}
+borge {"path": "…/bad��name.txt"}
+```
+
+**The plan said `debug dump-*` and the JSON commands "should be one implementation rather
+than agreeing by luck". That was wrong, and measuring settled it.** borg deliberately uses
+*two* representations: `debug dump-*` **and `diff --json-lines`** write Python's surrogate
+escapes (`\udcff`), while the item, archive and `file_status` objects use `?` plus `_b64`.
+borge already matched the first — `pydump.go` — and unifying them would have broken it.
+What the two share is the question, not the answer.
+
+So `diff` now writes through `pydump.go`'s encoder, and everything else through `putText`.
+`TestNonUnicodePathsMatchBorg` checks both forms, decodes the base64 back to the original
+bytes, and fails first if borg's own output stops exercising the case.

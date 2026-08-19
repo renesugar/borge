@@ -124,12 +124,16 @@ func cmdFind(e *Env, args []string) int {
 			matches++
 			switch {
 			case *jsonLines:
-				return enc.Encode(foundJSON{
-					ArchiveID:   id,
-					ArchiveName: info.Name,
-					Time:        formatTime(info.Time.Local()),
-					Item:        toItemJSON(it),
-				})
+				// One flat item object, as borg emits: the archive it came from is named
+				// by the archivename and archiveid keys *inside* it, and only when the
+				// format asks for them. borge wrapped the item in an envelope of its own
+				// ({archive_id, archive_name, archive_time, item}), which is a different
+				// document from borg's under the same option. See docs/DIVERGENCES.md #43.
+				data, err := itemJSONData(it, template, info.Name, id)
+				if err != nil {
+					return err
+				}
+				return enc.Encode(data)
 			case *short:
 				_, err := fmt.Fprintf(e.Stdout, "%s %s\n", id[:8], it.Path)
 				return err
@@ -152,13 +156,4 @@ func cmdFind(e *Env, args []string) int {
 		fmt.Fprintf(e.Stdout, "%d match(es) in %d archive(s)\n", matches, len(infos))
 	}
 	return status
-}
-
-// foundJSON is one match. The archive fields are what distinguish it from list's output:
-// the archives of a series share a name, so only the id says which one this is.
-type foundJSON struct {
-	ArchiveID   string   `json:"archive_id"`
-	ArchiveName string   `json:"archive_name"`
-	Time        string   `json:"archive_time"`
-	Item        itemJSON `json:"item"`
 }

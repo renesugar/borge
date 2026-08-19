@@ -54,6 +54,12 @@ type Change struct {
 	Added, Removed int64
 	// From and To are the old and new values, for the metadata changes.
 	From, To string
+	// FromJSON and ToJSON are those same values in the form borg's --json-lines carries,
+	// where it differs from the text one: a timestamp is ISO-8601 rather than borg's
+	// human layout, and an owner change is a two-element array rather than "user:group".
+	// Nil means the text form is also the JSON form. Kept beside From and To rather than
+	// derived later because only the comparison still has the unformatted values.
+	FromJSON, ToJSON any
 }
 
 // Diff is the set of changes to one path.
@@ -186,7 +192,10 @@ func diffItems(path string, a, b *item.Item, opts DiffOptions) Diff {
 	}
 
 	if from, to, changed := ownerChange(a, b, opts.NumericIDs); changed {
-		add(Change{Kind: ChangeOwner, Description: "changed owner", From: from, To: to})
+		add(Change{
+			Kind: ChangeOwner, Description: "changed owner", From: from, To: to,
+			FromJSON: ownerPair(a, opts.NumericIDs), ToJSON: ownerPair(b, opts.NumericIDs),
+		})
 	}
 
 	for _, tc := range []struct {
@@ -202,6 +211,8 @@ func diffItems(path string, a, b *item.Item, opts DiffOptions) Diff {
 				Description: "changed " + string(tc.kind),
 				From:        formatDiffTime(*tc.a),
 				To:          formatDiffTime(*tc.b),
+				FromJSON:    isoDiffTime(*tc.a),
+				ToJSON:      isoDiffTime(*tc.b),
 			})
 		}
 	}
@@ -320,4 +331,20 @@ func describeKind(it *item.Item) string {
 
 func formatDiffTime(ns int64) string {
 	return time.Unix(0, ns).Local().Format("Mon, 2006-01-02 15:04:05 -0700")
+}
+
+// isoDiffTime is a timestamp as the JSON forms carry it: ISO-8601 with microseconds, the
+// same spelling every other JSON timestamp uses. The text form (formatDiffTime) is borg's
+// human layout, and the two are not interchangeable.
+func isoDiffTime(ns int64) string {
+	return time.Unix(0, ns).Local().Format("2006-01-02T15:04:05.000000-07:00")
+}
+
+// ownerPair is an item's owner as borg's JSON reports it: a two-element array of user and
+// group, where the text form is one "user:group" string.
+func ownerPair(it *item.Item, numeric bool) []any {
+	if numeric {
+		return []any{derefInt(it.UID), derefInt(it.GID)}
+	}
+	return []any{derefStr(it.User), derefStr(it.Group)}
 }

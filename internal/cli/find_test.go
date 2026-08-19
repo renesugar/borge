@@ -73,8 +73,10 @@ func TestFindNewestFirst(t *testing.T) {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
+			// borg's key, inside the flat item object rather than an envelope of
+			// borge's own; see DIVERGENCES.md #43.
 			var f struct {
-				ArchiveName string `json:"archive_name"`
+				ArchiveName string `json:"archivename"`
 			}
 			if err := json.Unmarshal([]byte(line), &f); err != nil {
 				t.Fatalf("find JSON does not parse: %v\n%s", err, line)
