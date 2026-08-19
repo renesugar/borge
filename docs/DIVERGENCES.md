@@ -914,3 +914,29 @@ nothing" as well, which is the worse case, and `--list` is the only cure.
 
 The `--dry-run` help on both commands names `--list`, so the pointer reaches a reader who
 never runs the command with the wrong options in the first place.
+
+## 32. Options that would do nothing are reported
+
+**Stage 8 · `internal/cli/create.go` · deliberate**
+
+borg accepts two combinations silently and ignores them:
+
+```
+borg create --paths-delimiter '\0' ARCHIVE PATH        the delimiter is not used
+borg create --paths-from-stdin --exclude 'sh:x' NAME   the pattern is not applied
+```
+
+The second is the dangerous one. `--paths-from-stdin` means "back up all files given — no
+more, no less", so the exclusion has no effect, and a user who wrote one is entitled to
+believe a filter is in place. borge warns on stderr and carries on:
+
+```
+borge: warning: the include/exclude options do not apply to paths read from a list:
+       the list is taken as given
+borge: warning: --paths-delimiter does nothing without --paths-from-stdin, …
+```
+
+Both are warnings rather than errors: the command is still doing something coherent, and
+refusing it would break a script that passes a fixed set of options to several invocations.
+Both go to stderr, so a piped listing is unaffected. See `PORTING_PLAN.md` §2.3 — an option
+that silently does nothing is the same failure as a filter that silently matches everything.

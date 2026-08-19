@@ -197,6 +197,8 @@ func cmdCreate(e *Env, args []string) int {
 		"archive the excluded directory and the tag files that excluded it")
 	var timestamp timestampFlag
 	timestamp.register(fs)
+	var pathsFrom pathsFromFlags
+	pathsFrom.register(fs)
 	storeATime := fs.Bool("atime", false, "store each item's access time")
 	noCTime := fs.Bool("noctime", false, "do not store the inode change time")
 	noBirthTime := fs.Bool("nobirthtime", false, "do not store the creation time")
@@ -219,10 +221,23 @@ func cmdCreate(e *Env, args []string) int {
 		e.errorf("create needs an archive name")
 		return ExitError
 	}
-	if fs.NArg() < 2 && len(roots) == 0 {
+	if err := pathsFrom.check(fs.Args()[1:]); err != nil {
+		return e.fail(err)
+	}
+	if !pathsFrom.any() && fs.NArg() < 2 && len(roots) == 0 {
 		e.errorf("create needs at least one path, on the command line or as an " +
 			"\"R PATH\" line in a --patterns-from file")
 		return ExitError
+	}
+	// borg accepts both of these silently and ignores them, which leaves a user believing
+	// a filter applied. Saying so costs a line on stderr; see PORTING_PLAN.md §2.3.
+	if pathsFrom.any() && pf.any() {
+		e.warnf("the include/exclude options do not apply to paths read from a list: " +
+			"the list is taken as given")
+	}
+	if pathsFrom.delimiterSet && !pathsFrom.any() {
+		e.warnf("--paths-delimiter does nothing without --paths-from-stdin, " +
+			"--paths-from-command or --paths-from-shell-command")
 	}
 	name, err := e.expand(fs.Arg(0))
 	if err != nil {
@@ -230,6 +245,13 @@ func cmdCreate(e *Env, args []string) int {
 	}
 	// Roots first, then the command line, as borg orders them.
 	paths := append(append([]string{}, roots...), fs.Args()[1:]...)
+	if pathsFrom.any() {
+		// The positionals were the command, not paths; the list replaces them entirely.
+		paths, err = pathsFrom.read(e, fs.Args()[1:])
+		if err != nil {
+			return e.fail(err)
+		}
+	}
 
 	comm, err := e.expand(*comment)
 	if err != nil {
@@ -322,6 +344,7 @@ func cmdCreate(e *Env, args []string) int {
 		NoFlags:       *noFlags,
 		ReadSpecial:   *readSpecial,
 		DryRun:        *dryRun,
+		PathsOnly:     pathsFrom.any(),
 		StoreATime:    *storeATime,
 		NoCTime:       *noCTime,
 		NoBirthTime:   *noBirthTime,

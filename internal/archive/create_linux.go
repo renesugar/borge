@@ -62,6 +62,15 @@ type CreateOptions struct {
 	// from a tagged directory is stored - not even its entry.
 	KeepExcludeTags bool
 
+	// PathsOnly archives exactly the paths given and descends into nothing.
+	//
+	// It is what borg's --paths-from-stdin and friends do, and the documented promise is
+	// "all control is external: it will back up all files given - no more, no less". So a
+	// directory in the list contributes its own entry and none of its contents, the
+	// include/exclude patterns are not consulted at all, and neither are the
+	// CACHEDIR.TAG rules: the caller has already decided.
+	PathsOnly bool
+
 	// DryRun walks and decides but stores nothing: no file is read, no chunk is written,
 	// no item is added. It is how a user checks an exclude pattern before trusting it,
 	// so what it reports through OnItem has to be exactly what a real run would store.
@@ -320,7 +329,7 @@ func (w *walker) walk(abs string, depth int) error {
 	// slashdot hack those are the same string; with it they are not, and borg matches the
 	// walked one - an --exclude is written against the filesystem the user is looking at.
 	included := true
-	if w.opts.Matcher != nil {
+	if w.opts.Matcher != nil && !w.opts.PathsOnly {
 		included = w.opts.Matcher.Match(archivedPath(abs))
 	}
 	stored, storable := w.storedPath(abs)
@@ -330,7 +339,7 @@ func (w *walker) walk(abs string, depth int) error {
 	// after would archive the entry and then decline to recurse, which is a different
 	// archive.
 	isDir := st.Mode&unix.S_IFMT == unix.S_IFDIR
-	if isDir {
+	if isDir && !w.opts.PathsOnly {
 		tags, err := w.tagsExcluding(abs)
 		if err != nil {
 			return err
@@ -381,7 +390,7 @@ func (w *walker) walk(abs string, depth int) error {
 	// Descend into a directory unless the matcher said not to. An excluded directory is
 	// still descended into by default, so an include pattern *inside* it can be found;
 	// only the no-recurse exclude form stops the walk.
-	if !isDir {
+	if !isDir || w.opts.PathsOnly {
 		return nil
 	}
 	if !included && w.opts.Matcher != nil && !w.opts.Matcher.RecurseDir() {
