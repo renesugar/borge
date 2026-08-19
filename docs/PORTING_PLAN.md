@@ -1722,7 +1722,7 @@ a table at all.
 | 7 | ~~Non-unicode paths in JSON~~, and the `--json-lines` schemas | §11.4b | **done 2026-08-19.** Two representations, not one - the framing "should be one implementation" was wrong, see DIVERGENCES #43. Fixing it uncovered three further differences in `find`, `diff` and the item object |
 | 8 | ~~`bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing~~ | DIVERGENCES #8 | **done 2026-08-19.** `flags_linux.go`; both keys now record "examined"; a flag borge stores survives a restore by borg |
 | 8b | ~~Attribute-based exclusion: nodump, and the two backup-exclusion xattrs~~ | DIVERGENCES #39 | **done 2026-08-19**, the same day it was found. Checked before content is read, and an excluded directory ends the walk into its subtree |
-| 9 | Option gate: the reverse direction, and subcommands | §11.4 work 1–2 | until both land, "complete" for a command means "has everything borg has", not "has exactly what borg has" |
+| 9 | ~~Option gate: the reverse direction, and subcommands~~ | §11.4 work 1–2 | **done 2026-08-19.** Both directions, group subcommands included, and the common-option comparison fixed — it had been reporting `-r` and `-h` as absent when borge has both |
 | 10 | Every borge-only option documented as borge-only in its help text | §11.4 work 3 | known: `prune --keep-within/--keep-last/--keep-oldest`, `extract -C`, `version --long`, `--reverse`, `delete --force` |
 | 11 | `--reverse` and `--deleted` decided per command | §11.4c | they reach every command using `listSelectors`; borg enables `--deleted` per command |
 | 12 | `--format` on `check` and `diff` | §11.3 | `diff` needs a third key set, its records being changes rather than paths; `check` needs its output reworked first |
@@ -2108,12 +2108,14 @@ than inheriting.
 
 #### The work
 
-1. **Extend `option-coverage.sh` to the reverse direction**, so this is measured rather
-   than audited by hand once. A borge-only option is not a failure — a port may add
-   things — but an *unrecorded* one is, so the gate should require each to be listed with a
-   reason, exactly as the command gate does for absences.
-2. **Extend it to subcommands** (`debug`, `key`, `benchmark`), which neither tool lists at
-   the top level. The hand audit found the same `--json` no-op on all nineteen of them.
+1. ~~**Extend `option-coverage.sh` to the reverse direction**~~ — **done 2026-08-19.**
+   Every option borge adds must appear in the gate's `borge_only` table with a reason;
+   one that does not fails the gate, and one listed that borge no longer has fails it as
+   stale. Thirteen commands add something, and all of it is now written down.
+2. ~~**Extend it to subcommands**~~ — **done 2026-08-19.** Enumerated from borge, because
+   borg's group help names no subcommand at all. It immediately found `key remove
+   --passphrase`, missing and invisible through eight stages, which took the count *up*
+   from 35 to 36.
 3. **Document every borge-only option as borge-only**, in its help text.
 4. ~~**Treat `--json` as the API it is**~~ — **done 2026-08-18 apart from `--log-json`**:
    out of `commonFlags`, registered only on the eight commands borg has it on, and
@@ -2121,8 +2123,19 @@ than inheriting.
    `--log-json` remain; see (b) above and table rows 5–7.
 5. **Decide `--reverse` and `--deleted` per command** rather than by inheritance.
 
-Until 1 and 2 land, the option gate's "complete" for a command means "has everything borg
-has", not "has exactly what borg has".
+With 1 and 2 landed, "complete" for a command now means "has exactly what borg has, plus
+only what is written down". What the gate still cannot see is *semantics*: it compares
+spellings, and two tools can agree on every option name while disagreeing on what the
+options do.
+
+**A third fix, not on the original list.** The common-option comparison was not a
+comparison at all. It matched borg's option *groups* (`r|repo`, `info|v|verbose`) against
+borge's per-spelling names, so any multi-spelling option read as absent whatever borge did:
+the report said "14 common options, 14 absent" while borge had three of them, and named
+`-r` among the missing. The own-options loop had always compared group-wise; this one never
+did. It now reports 10 absent, 1 missing a spelling (`--info`, borg's third name for
+`-v`), and 3 implemented — and it probes for `-h`/`--help`, which Go's flag package honours
+without printing, so scraping the help text could not have seen them.
 
 ### 11.3 Templating: is it worth matching borg's, and how far is it done?
 

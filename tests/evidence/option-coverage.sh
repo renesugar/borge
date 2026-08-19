@@ -26,18 +26,28 @@
 # down. A command absent from the budget table fails outright, so a newly added command
 # cannot arrive with a silent gap.
 #
-# Exit status: 0 if every command is within its budget and none is unlisted, 1 otherwise.
+# Exit status: 0 if every command is within its budget, none is unlisted, and every option
+# borge adds is recorded; 1 otherwise.
+#
+# # Both directions, since 2026-08-19
+#
+# The gate used to look one way only - options borg has and borge lacks - so half of any
+# difference between the two tools was invisible to it. It now also reports the options
+# borge adds and fails on one that is not listed in borge_only with a reason, which is what
+# the command gate has always done for an absent command. It also compares the subcommands
+# of "debug", "key" and "benchmark", which neither tool lists at the top level: both sides
+# used to report none, so the comparison was empty rather than wrong. That found "key
+# remove --passphrase", missing and unseen through eight stages.
 #
 # # What this gate deliberately does not see
 #
 #   - Semantics. Both tools having an option called "v" says nothing about it meaning the
 #     same thing: borg's -v is an alias of --info (a log level), borge's is --verbose.
-#   - Subcommand options. "debug", "key" and "benchmark" carry their options on their
-#     subcommands, and neither tool lists those at the top level, so both sides report
-#     none and the comparison is empty rather than wrong. Extending it is recorded in
-#     PORTING_PLAN section 11.
-#   - Options borge has that borg does not. Those are printed, but they are not failures:
-#     a port is allowed to add something, as long as it says so.
+#     This is the big one: every count below is of spellings, and two tools can agree on
+#     every option name while disagreeing on what the options do.
+#   - Anything about the *output* an option produces. That is what the differential tests
+#     in internal/cli are for; the JSON schemas in particular matched by name and not by
+#     shape until they were compared as data.
 
 set -uo pipefail
 
@@ -63,6 +73,9 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # command-specific options, 111 of them missing. Lowered the same day: 79 when the shared
 # archive date filters landed on eight commands at once, 64 when info and tag started
 # taking the filter group at all, 63 when repo-list gained --format, 61 when list and find did, 58 when create gained the tag-based exclusions, 55 when --timestamp landed on three commands, 54 with create --dry-run, 51 with the timestamp-storage options, 48 when --list reached delete, undelete and export-tar, 44 with the --paths-from-* group, 39 with the stdin-content group, 35 when prune gained borg's listing.
+# It went UP to 36 on 2026-08-19, without borge losing anything: the gate started comparing
+# the group subcommands and found "key remove --passphrase". A number that only ever falls
+# is a number that has stopped measuring.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -95,6 +108,78 @@ declare -A budget=(
     [undelete]=0
     [version]=0
     [with-lock]=0
+    # The three command groups carry no options of their own; their subcommands do, and
+    # neither tool's group help lists them. Compared since 2026-08-19; every one was
+    # already complete but "key remove", which is missing borg's --passphrase.
+    [debug]=0
+    [key]=0
+    [benchmark]=0
+    [debug info]=0
+    [debug dump-archive]=0
+    [debug dump-archive-items]=0
+    [debug dump-manifest]=0
+    [debug dump-repo-objs]=0
+    [debug search-repo-objs]=0
+    [debug get-obj]=0
+    [debug put-obj]=0
+    [debug delete-obj]=0
+    [debug format-obj]=0
+    [debug parse-obj]=0
+    [debug id-hash]=0
+    [key export]=0
+    [key import]=0
+    [key change-passphrase]=0
+    [key change-location]=0
+    [key add]=0
+    [key list]=0
+    [key remove]=1
+    [benchmark crud]=0
+    [benchmark cpu]=0
+)
+
+# borge_only lists, per command, the options borge has that borg does not. A port may add
+# things; an *unrecorded* addition is what this refuses, exactly as the command gate
+# requires a reason for every absent command. An extra not listed here fails the gate.
+#
+# The reasons, by group rather than by line:
+#
+#   deleted, reverse, first, last, sort-by
+#       Shared-group leakage. borge registers its archive-filter group whole, where borg's
+#       define_archive_filters_group takes a "deleted" parameter and enables it per
+#       command. Deciding these per command is PORTING_PLAN section 11.4c; until then they
+#       reach commands borg does not put them on.
+#   prune keep-within, keep-last, keep-oldest
+#       borge's own retention rules. keep-within is borg 1.x's spelling, kept because a
+#       policy written for borg 1 is a policy people still have; keep-oldest is borge's
+#       and is recorded in DIVERGENCES.md #34.
+#   analyze hotspots
+#       How many busy directories to report. borg's analyze computes the same thing and
+#       fixes the count.
+#   check dry-run, repo-compress dry-run
+#       borge lets both say what they would do. borg has neither.
+#   delete force
+#       borge's own, for deleting an archive whose metadata cannot be read.
+#   extract C
+#       The destination directory. borg extracts into the working directory only.
+#   find short
+#       The paths alone, as "list --short" gives them.
+#   version long
+#       The build and interoperability details. It is where the four keys that used to be
+#       in "version --json" live now; see DIVERGENCES.md #42.
+declare -A borge_only=(
+    [analyze]="deleted hotspots reverse"
+    [check]="deleted dry-run reverse"
+    [delete]="deleted force reverse"
+    [extract]="C"
+    [find]="deleted reverse short"
+    [info]="deleted reverse"
+    [prune]="deleted first keep-last keep-oldest keep-within last reverse sort-by"
+    [recreate]="deleted reverse"
+    [repo-compress]="dry-run"
+    [repo-list]="reverse"
+    [tag]="deleted reverse"
+    [undelete]="deleted reverse"
+    [version]="long"
 )
 
 # borg_options prints one *option* per line for a command - not one name per line. An
@@ -157,7 +242,7 @@ longest_name() {
 # package prints every registered flag on its own line at a two-space indent, with the
 # help text on the following line at a deeper one.
 borge_options() {
-    "$BORGE" "$1" -help 2>&1 |
+    "$BORGE" "$@" -help 2>&1 |
         grep -E '^  -[A-Za-z]' |
         sed -E 's/^  -([A-Za-z0-9][A-Za-z0-9-]*).*/\1/' |
         sort -u
@@ -171,6 +256,26 @@ if [ "${#BORGE_CMDS[@]}" -lt 20 ]; then
          "has probably changed and this script needs updating" >&2
     exit 64
 fi
+
+# The three command groups carry their options on their subcommands, and neither tool lists
+# those at the top level: both sides reported none and the comparison was empty rather than
+# wrong. Enumerated from borge, because borg's group help shows only "<command> ..." and
+# names no subcommand at all - so the list has to come from the side that prints one, and a
+# subcommand borg does not have drops out below when its --help fails, exactly as a
+# borge-only *command* does.
+GROUP_SUBS=()
+for grp in debug key benchmark; do
+    while IFS= read -r sub; do
+        [ -n "$sub" ] && GROUP_SUBS+=("$grp $sub")
+    done < <("$BORGE" "$grp" --help 2>&1 |
+        sed -n '/^commands:/,$p' | grep -E '^  [a-z][a-z0-9-]* ' | awk '{print $1}' | sort -u)
+done
+if [ "${#GROUP_SUBS[@]}" -lt 10 ]; then
+    echo "option-coverage: found only ${#GROUP_SUBS[@]} subcommands under debug, key and" \
+         "benchmark; the group help format has changed" >&2
+    exit 64
+fi
+BORGE_CMDS+=("${GROUP_SUBS[@]}")
 
 # borg's common options are the same on every command, so they are read once and reported
 # once rather than counted against each of thirty commands.
@@ -192,8 +297,8 @@ echo "borge option coverage against $("$BORG" --version 2>&1)"
 echo "generated $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo
 
-printf '%-16s %6s %8s %7s  %s\n' "COMMAND" "BORG" "MISSING" "BUDGET" "STATUS"
-printf '%-16s %6s %8s %7s  %s\n' "-------" "----" "-------" "------" "------"
+printf '%-24s %6s %8s %7s  %s\n' "COMMAND" "BORG" "MISSING" "BUDGET" "STATUS"
+printf '%-24s %6s %8s %7s  %s\n' "-------" "----" "-------" "------" "------"
 
 status=0
 total_missing=0
@@ -202,16 +307,20 @@ total_alias=0
 unlisted=0
 declare -A missing_detail=()
 declare -A alias_detail=()
+declare -A extra_detail=()
 
 for c in "${BORGE_CMDS[@]}"; do
     # Commands borge has and borg does not are the command gate's business. The help text
     # is fetched once and reused: a failure here means borg has no such command.
-    if ! borg_help=$("$BORG" "$c" --help 2>&1); then
+    # Unquoted: a group subcommand is two words ("debug dump-archive").
+    # shellcheck disable=SC2086
+    if ! borg_help=$("$BORG" $c --help 2>&1); then
         continue
     fi
 
     mapfile -t own < <(printf '%s\n' "$borg_help" | borg_options | sed -n 's/^own //p')
-    mapfile -t have < <(borge_options "$c")
+    # shellcheck disable=SC2086
+    mapfile -t have < <(borge_options $c)
 
     declare -A haveset=()
     for o in "${have[@]}"; do haveset[$o]=1; done
@@ -242,6 +351,23 @@ for c in "${BORGE_CMDS[@]}"; do
         done
     done
 
+    # The reverse direction: options borge has and borg does not. A port may add things -
+    # that is not a failure - but an *unrecorded* addition is, exactly as the command gate
+    # requires a reason for every absence. Without this the gate could only ever see half
+    # the difference between the two tools.
+    declare -A borg_names=()
+    for g in "${own[@]}" "${COMMON[@]}"; do
+        IFS='|' read -ra names <<<"$g"
+        for n in "${names[@]}"; do borg_names[$n]=1; done
+    done
+    extra=()
+    for o in "${have[@]}"; do
+        [ -n "${borg_names[$o]:-}" ] && continue
+        extra+=("$o")
+    done
+    unset borg_names
+    extra_detail[$c]="${extra[*]:-}"
+
     n_miss=${#miss[@]}
     n_alias=${#aliases[@]}
     total_own=$((total_own + n_own))
@@ -251,19 +377,19 @@ for c in "${BORGE_CMDS[@]}"; do
     alias_detail[$c]="${aliases[*]:-}"
 
     if [ -z "${budget[$c]+set}" ]; then
-        printf '%-16s %6d %8d %7s  %s\n' "$c" "$n_own" "$n_miss" "-" "NOT IN THE BUDGET TABLE"
+        printf '%-24s %6d %8d %7s  %s\n' "$c" "$n_own" "$n_miss" "-" "NOT IN THE BUDGET TABLE"
         unlisted=$((unlisted + 1))
         status=1
     elif [ "$n_miss" -gt "${budget[$c]}" ]; then
-        printf '%-16s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" "OVER BUDGET"
+        printf '%-24s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" "OVER BUDGET"
         status=1
     elif [ "$n_miss" -lt "${budget[$c]}" ]; then
-        printf '%-16s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" \
+        printf '%-24s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" \
             "improved - lower the budget to $n_miss"
     elif [ "$n_miss" -eq 0 ]; then
-        printf '%-16s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" "complete"
+        printf '%-24s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" "complete"
     else
-        printf '%-16s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" "at budget"
+        printf '%-24s %6d %8d %7d  %s\n' "$c" "$n_own" "$n_miss" "${budget[$c]}" "at budget"
     fi
     unset haveset
 done
@@ -278,23 +404,95 @@ if [ "$total_own" -lt 40 ]; then
 fi
 
 echo
+echo "options borge has and borg does not (each must be listed in borge_only above):"
+unrecorded=0
+for c in "${BORGE_CMDS[@]}"; do
+    [ -z "${extra_detail[$c]:-}" ] && continue
+    declare -A allowed=()
+    for o in ${borge_only[$c]:-}; do allowed[$o]=1; done
+    bad=()
+    for o in ${extra_detail[$c]}; do
+        [ -n "${allowed[$o]:-}" ] || bad+=("$o")
+    done
+    unset allowed
+    if [ "${#bad[@]}" -gt 0 ]; then
+        printf '  %-24s %s   <- NOT RECORDED: %s\n' "$c" "${extra_detail[$c]}" "${bad[*]}"
+        unrecorded=$((unrecorded + ${#bad[@]}))
+        status=1
+    else
+        printf '  %-24s %s\n' "$c" "${extra_detail[$c]}"
+    fi
+done
+# A listed option borge no longer has is stale: the reason above outlived the option, which
+# is the same rot the budget table's "improved" line catches in the other direction.
+for c in "${!borge_only[@]}"; do
+    for o in ${borge_only[$c]}; do
+        case " ${extra_detail[$c]:-} " in
+            *" $o "*) ;;
+            *) printf '  %-24s %s   <- STALE: borge no longer has it\n' "$c" "$o"
+               status=1 ;;
+        esac
+    done
+done
+if [ "$unrecorded" -gt 0 ]; then
+    echo "  $unrecorded option(s) borge adds without a recorded reason"
+fi
+echo
+
 echo "common options (borg puts these on every command; counted once, not per command):"
 # Read once into a set rather than piping into "grep -q" per option: grep -q exits at the
 # first match, which sends SIGPIPE up the pipeline, and under "set -o pipefail" that makes
 # the whole test report failure. Every option came out "absent", including the -r that
 # borge plainly has.
+#
+# That was only half the bug, and the visible half. COMMON holds option *groups* as borg
+# spells them ("r|repo", "info|v|verbose") while borge_options yields one *name* per line,
+# so the lookup below could only ever match a group with a single spelling. Every
+# multi-spelling common option read as absent whatever borge did, and the report said
+# "14 common options, 14 absent" while borge had three of them. The own-options loop above
+# had always compared group-wise; this one had not, which is why the two disagreed.
 declare -A common_have=()
 while IFS= read -r o; do common_have[$o]=1; done < <(borge_options repo-info)
+
+# Two options Go's flag package honours without printing: it handles -h and --help itself
+# and lists neither, so scraping the help text cannot see them. Probed instead, because
+# "absent" would be false - a user typing "borge repo-info -h" gets the usage.
+# Captured into a variable rather than piped into "grep -q", for the reason above: grep -q
+# exits at the first match and the SIGPIPE that follows fails the pipeline under pipefail.
+# Writing it the obvious way here made the probe always say no, which is the same mistake
+# twice in one file.
+for probe in h help; do
+    probe_out=$("$BORGE" repo-info "-$probe" 2>&1 || true)
+    case "$probe_out" in
+        "Usage of borge"*) common_have[$probe]=1 ;;
+    esac
+done
+
 common_absent=0
-for o in "${COMMON[@]}"; do
-    if [ -n "${common_have[$o]:-}" ]; then
-        printf '  %-16s implemented\n' "$o"
-    else
-        printf '  %-16s absent\n' "$o"
+common_alias=0
+for g in "${COMMON[@]}"; do
+    IFS='|' read -ra names <<<"$g"
+    present=
+    absent_names=()
+    for n in "${names[@]}"; do
+        if [ -n "${common_have[$n]:-}" ]; then present=1; else absent_names+=("$n"); fi
+    done
+    label=$(longest_name "$g")
+    if [ -z "$present" ]; then
+        printf '  %-16s absent\n' "$label"
         common_absent=$((common_absent + 1))
+    elif [ "${#absent_names[@]}" -gt 0 ]; then
+        # Present under one spelling and not another, which is the alias gap the
+        # command-specific loop reports separately. borge has -v and --verbose but not
+        # borg's --info, which is the same option in borg's help.
+        printf '  %-16s implemented, without %s\n' "$label" "${absent_names[*]}"
+        common_alias=$((common_alias + 1))
+    else
+        printf '  %-16s implemented\n' "$label"
     fi
 done
-echo "  ${#COMMON[@]} common options, $common_absent absent in borge"
+echo "  ${#COMMON[@]} common options, $common_absent absent in borge," \
+     "$common_alias missing a spelling"
 
 echo
 echo "borg command-specific options: $total_own"
@@ -306,7 +504,7 @@ echo "what is missing, per command:"
 for c in "${BORGE_CMDS[@]}"; do
     d="${missing_detail[$c]:-}"
     [ -z "$d" ] && continue
-    printf '  %-16s %s\n' "$c" "$d"
+    printf '  %-24s %s\n' "$c" "$d"
 done
 
 echo
@@ -314,7 +512,7 @@ echo "spellings borg offers and borge does not (short=long):"
 for c in "${BORGE_CMDS[@]}"; do
     d="${alias_detail[$c]:-}"
     [ -z "$d" ] && continue
-    printf '  %-16s %s\n' "$c" "$d"
+    printf '  %-24s %s\n' "$c" "$d"
 done
 
 if [ "$unlisted" -gt 0 ]; then
