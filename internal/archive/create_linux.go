@@ -106,6 +106,14 @@ type CreateStats struct {
 	Skipped int
 	// Unchanged counts files the files cache spared from being read.
 	Unchanged int
+	// FileStatus counts items by the status character a listing would show them with:
+	// "A" added, "M" modified, "U" unchanged, "d" directory, "s" symlink, "-" excluded,
+	// and so on. It is borg's files_stats, reported by "create --json".
+	//
+	// Counted here rather than by the caller because the walker is the only place that
+	// knows the status of an item it decided not to report: with no --list nothing is
+	// printed, and a count taken from the printed lines would be zero.
+	FileStatus map[string]int64
 }
 
 // Create walks the given paths and writes every matching object into the archive.
@@ -137,7 +145,7 @@ func (b *Builder) Create(opts CreateOptions) (*CreateStats, error) {
 	w := &walker{
 		builder:   b,
 		opts:      opts,
-		stats:     &CreateStats{},
+		stats:     &CreateStats{FileStatus: map[string]int64{}},
 		hardlinks: map[hardlinkKey][]item.ChunkListEntry{},
 		users:     map[uint32]string{},
 		groups:    map[uint32]string{},
@@ -493,6 +501,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 // "d" directory, "s" symlink, "i" special file, "h" a further hard link, "U" unchanged,
 // "-" excluded, and "+" for anything a dry run would have stored.
 func (w *walker) report(status byte, stored string) {
+	w.stats.FileStatus[string(status)]++
 	if w.opts.OnItem != nil {
 		w.opts.OnItem(status, stored)
 	}

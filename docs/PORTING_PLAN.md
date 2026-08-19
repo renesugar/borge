@@ -1940,19 +1940,31 @@ interface borg offers to other programs, with a documented schema, message IDs, 
 for what happens to a path that is not valid unicode. A port that gets them wrong is a port
 no frontend can drive.
 
-Measured on 2026-08-18, by running every one:
+Measured on 2026-08-18 by running every one, then corrected twice the same day — the
+first count was wrong in a way worth keeping on the page.
 
-| | borg | borge |
-| --- | --- | --- |
-| `--json` offered on | 11 commands: `repo-list`, `repo-info`, `list`, `info`, `create`, `diff`, `import-tar`, `prune`, `find`, `analyze`, `version` | **19** — `commonFlags` registers it for every command |
-| `--json` actually produces JSON | all 11 | **5**: `repo-list`, `repo-info`, `info`, `analyze`, `version` |
-| `--json-lines` | 3: `list`, `diff`, `find` | the same 3, working |
-| `--log-json` | every command | **absent** |
+**First reading (wrong):** grepping borg's argparse for `"--json"` and checking which
+commands accepted it gave *eleven* commands, including `list`, `find` and `diff`, whose
+`--json` output was byte-identical to their `--json-lines`. Recorded as "an alias, nearly
+free to implement".
 
-Two separate failures, then. **Six of borg's JSON commands produce no JSON in borge** —
-`list`, `create`, `diff`, `import-tar`, `prune`, `find` — which is a missing API. And
-**about eight commands offer `--json` that borg does not have it on at all**, where it
-parses and is ignored:
+**What it actually was:** argparse expands unambiguous option prefixes. `borg list --json`
+is `--json-lines` with three characters missing. `borg list --help` does not offer it, and
+`borg list --jsonzzz` is rejected where `--json` is not. The output was identical because
+it was the same option. Implementing `--json` on those three would have copied an argparse
+artifact into a port that has no prefix expansion at all.
+
+**The measured surface**, from `--help` on both sides rather than from the source:
+
+| | borg | borge (before) | borge (now) |
+| --- | --- | --- | --- |
+| `--json` | 8: `create`, `import-tar`, `prune`, `info`, `repo-info`, `repo-list`, `version`, `analyze` (+ `benchmark cpu`) | **19** — `commonFlags` gave it to every command | the same 8 (+ `benchmark cpu`) |
+| `--json-lines` | 3: `list`, `find`, `diff` (+ `benchmark crud`) | the same 3, working | unchanged |
+| `--log-json` | every command | **absent** | absent |
+
+Of borge's nineteen, six produced JSON and **twelve accepted the option and printed prose**
+— `check`, `compact`, `delete`, `extract`, `recreate`, `repo-delete`, `break-lock`,
+`repo-space` and the rest:
 
 ```
 borge break-lock --json      no locks are held on this repository
@@ -1962,16 +1974,44 @@ borge compact --json         (no output)
 
 A missing option produces an error a frontend can act on. An ignored one produces a wrong
 belief, and for an *API* that means a frontend written against borge gets plain text where
-it parsed JSON.
+it parsed JSON. See `DIVERGENCES.md` #35.
 
-**The work, in order:**
+**And the schemas were wrong too.** Counting commands hid it: every one of the commands
+that did emit JSON emitted a document of borge's own shape.
 
-1. **Stop registering `--json` in `commonFlags`.** Register it per command, so the list of
-   commands that mean it is explicit and cannot drift again.
-2. **Implement `--json` for the six that are missing it**, to borg's documented shape — not
-   to a shape that merely parses. The schema is in `frontends.rst`; the differential tests
-   should compare borg's JSON with borge's as *data*, key by key, as
-   `TestRepoListMatchesBorg` already does.
+| command | how borge's JSON differed from borg's | state |
+| --- | --- | --- |
+| `repo-list` | no `encryption` or `repository` envelope; all thirteen archive keys always, where borg sends four plus whatever `--format` names | **fixed 2026-08-18** |
+| `prune` | no `--json` at all | **fixed 2026-08-18** |
+| `create` | no `--json` at all | **fixed 2026-08-18**, minus three stats keys (below) |
+| `import-tar` | no `--json` at all | **fixed 2026-08-18**, minus the same three |
+| item JSON (`list`, `find`, `diff --json-lines`) | missing `flags` and `inode` — 11 keys where borg sends 13 | **fixed 2026-08-18** |
+| `repo-info` | a different structure entirely: `manifest.*` and `repository.archive_count` where borg has `cache.path`, `encryption.*`, `repository.last_modified` | open |
+| `info` | missing `command_line`, `cwd`, `duration`, `chunker_params` and the whole `stats.*` block | open |
+| `version` | four keys borg does not have (`borg_commit`, `borg_series`, `repository_version`, `revision`) | open |
+| `analyze` | unrelated shapes on both sides | open |
+
+**Three keys borge does not send, deliberately.** borg's `create`/`import-tar` stats block
+has six keys; borge sends three. `chunking_time` and `hashing_time` are instrumentation
+borge does not collect, and `store_stats` is a per-backend call/volume/latency report from
+borg's Store layer. Sending them as zeros would be worse than omitting them: a frontend
+charting `hashing_time` would draw a flat line and believe it, where a missing key is a
+question it can answer. Same reasoning keeps `command_line` out of the archive-level JSON
+until borge reads it back from the metadata.
+
+**The rule that made `repo-list` and `prune` agree**, and that the remaining four need: the
+archive-level key set is *not* fixed. borg builds it from the effective `--format` — "the
+form of `--format` is ignored, but keys used in it are added" — with four always present
+(`name`, `archive`, `id`, `time`) and nine optional. borge sent all thirteen every time,
+which happens to match borg for `repo-list`'s default format and matches nothing else.
+
+**The work that remains, in order:**
+
+1. **`repo-info` and `info` onto borg's schema.** Both are structural rewrites rather than
+   added keys, and `info` needs `command_line`, `cwd` and `chunker_params` read back from
+   the archive metadata — which borge stores and does not currently read.
+2. **`version` and `analyze`.** `version` is the smallest: drop four keys or move them
+   somewhere that is not the API surface.
 3. **`--log-json`**, which is a whole feature rather than an option: structured log lines
    with the message IDs `frontends.rst` documents. It is one of the 15 absent common
    options and the only one that is part of the API.
@@ -1979,6 +2019,13 @@ it parsed JSON.
    represents a path that is not valid unicode; `internal/cli/pydump.go` reproduces exactly
    that for `debug dump-*`. Whatever it does there is what the JSON commands must do, and
    the two should share one implementation rather than agreeing by luck.
+5. **`original_size` and the stored `{size}`**, which `create --json` now publishes through
+   the API and which disagree with borg's by a few hundred bytes in one direction and a few
+   hundred in the other. Measured in `DIVERGENCES.md` #36.
+
+`TestJSONOptionSurfaceMatchesBorg` locks the *surface* — which commands take which JSON
+option — by asking both tools and failing in both directions. It does not compare schemas;
+that is what the per-command differential tests are for.
 
 #### c. Shared-group leakage
 

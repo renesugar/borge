@@ -50,14 +50,19 @@ func TestCreateDryRun(t *testing.T) {
 	}
 
 	// A dry run with an exclusion says what it would keep and what it would drop.
+	// The listing is read from stderr because that is where borg puts it, and where
+	// borge put it from 2026-08-18: "borg create --list" writes nothing to stdout.
 	stdout, stderr, code := r.borge(t, "create", "-n", "--list", "--exclude", "sh:**/sub", "a", src)
 	if code != ExitOK {
 		t.Fatalf("borge create -n exited %d\n%s", code, stderr)
 	}
-	kept, dropped := statuses(stdout)
+	if stdout != "" {
+		t.Errorf("create wrote to stdout, which --json needs clean:\n%s", stdout)
+	}
+	kept, dropped := statuses(stderr)
 	if len(kept) == 0 || len(dropped) == 0 {
 		t.Fatalf("a dry run that reported %d kept and %d dropped proves nothing about "+
-			"either\n%s", len(kept), len(dropped), stdout)
+			"either\n%s", len(kept), len(dropped), stderr)
 	}
 	if strings.Join(dropped, ",") != strings.TrimPrefix(filepath.ToSlash(src), "/")+"/sub" &&
 		!strings.HasSuffix(dropped[0], "sub") {
@@ -105,12 +110,12 @@ func TestDryRunDoesNotPoisonTheFilesCache(t *testing.T) {
 	}
 	// The archive name is what the files cache is keyed by, so the real run below is the
 	// one that would be affected.
-	stdout, stderr, code := r.borge(t, "create", "--list", "same-name", src)
+	_, stderr, code := r.borge(t, "create", "--list", "same-name", src)
 	if code != ExitOK {
 		t.Fatalf("real run exited %d\n%s", code, stderr)
 	}
-	if strings.Contains(stdout, "U ") {
-		t.Errorf("the real run treated a file as unchanged after a dry run:\n%s", stdout)
+	if strings.Contains(stderr, "U ") {
+		t.Errorf("the real run treated a file as unchanged after a dry run:\n%s", stderr)
 	}
 	// And the file really is in the archive.
 	paths := sortedItemPaths(t, r.mustRun("list", "-r", r.path, "same-name", "--json-lines"))
@@ -144,14 +149,14 @@ func TestCreateListReportsExclusions(t *testing.T) {
 		}
 	}
 
-	stdout, stderr, code := r.borge(t, "create", "--list", "--exclude", "sh:**/skip", "a", src)
+	_, stderr, code := r.borge(t, "create", "--list", "--exclude", "sh:**/skip", "a", src)
 	if code != ExitOK {
 		t.Fatalf("borge create exited %d\n%s", code, stderr)
 	}
-	if !strings.Contains(stdout, "- ") {
-		t.Errorf("a real create with an exclusion reported nothing excluded:\n%s", stdout)
+	if !strings.Contains(stderr, "- ") {
+		t.Errorf("a real create with an exclusion reported nothing excluded:\n%s", stderr)
 	}
-	if !strings.Contains(stdout, "skip") {
-		t.Errorf("the excluded path is not named:\n%s", stdout)
+	if !strings.Contains(stderr, "skip") {
+		t.Errorf("the excluded path is not named:\n%s", stderr)
 	}
 }

@@ -34,32 +34,6 @@ func formatTime(t time.Time) string {
 	return t.Local().Format(timeLayout)
 }
 
-// archiveJSON is one row of the machine-readable listing. The field names are borg's, so
-// a script written against borg's --json keeps working.
-type archiveJSON struct {
-	Archive  string `json:"archive"`
-	Name     string `json:"name"`
-	ID       string `json:"id"`
-	Time     string `json:"time"`
-	Hostname string `json:"hostname"`
-	Username string `json:"username"`
-	Comment  string `json:"comment"`
-	Tags     string `json:"tags"`
-}
-
-func toArchiveJSON(info manifest.Info) archiveJSON {
-	return archiveJSON{
-		Archive:  info.Name,
-		Name:     info.Name,
-		ID:       hex.EncodeToString(info.ID),
-		Time:     info.Time.Local().Format("2006-01-02T15:04:05.000000-07:00"),
-		Hostname: info.Host,
-		Username: info.User,
-		Comment:  info.Comment,
-		Tags:     strings.Join(info.Tags, ","),
-	}
-}
-
 // listSelectors registers the archive-selection options shared by the commands that take
 // them.
 type listSelectors struct {
@@ -235,6 +209,7 @@ func cmdRepoList(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
+	common.registerJSON(fs, "")
 	sel.register(fs)
 	// borg's --short prints the archive *ids*, not the names: an id is what uniquely
 	// selects an archive, and names are not unique. Printing names here would look
@@ -264,27 +239,37 @@ func cmdRepoList(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
-	if common.json {
-		out := struct {
-			Archives []archiveJSON `json:"archives"`
-		}{Archives: []archiveJSON{}}
-		for _, info := range infos {
-			out.Archives = append(out.Archives, toArchiveJSON(info))
-		}
-		enc := json.NewEncoder(e.Stdout)
-		enc.SetIndent("", "    ")
-		if err := enc.Encode(out); err != nil {
-			return e.fail(err)
-		}
-		return ExitOK
-	}
-
 	// The layout is a format string now rather than a Printf, which is what makes
 	// --format possible at all: the default *is* what borg's default expands to, so the
 	// column widths cannot drift from the documented template.
+	//
+	// Computed before the JSON branch because JSON needs it too: --format selects which
+	// optional keys the JSON carries even though its layout is ignored.
 	template := e.repoListFormat(*format, *short)
 	if _, err := formatter.Keys(template); err != nil {
 		return e.fail(err)
+	}
+
+	if common.json {
+		archives := []map[string]any{}
+		for _, info := range infos {
+			data, err := archiveJSONData(info, template)
+			if err != nil {
+				return e.fail(err)
+			}
+			archives = append(archives, data)
+		}
+		repoBlock, encBlock := o.envelope(path)
+		enc := json.NewEncoder(e.Stdout)
+		enc.SetIndent("", "    ")
+		if err := enc.Encode(map[string]any{
+			"archives":   archives,
+			"repository": repoBlock,
+			"encryption": encBlock,
+		}); err != nil {
+			return e.fail(err)
+		}
+		return ExitOK
 	}
 
 	status := ExitOK
@@ -309,6 +294,7 @@ func cmdRepoInfo(e *Env, args []string) int {
 	fs := newFlagSet(e, "repo-info")
 	var common commonFlags
 	common.register(fs)
+	common.registerJSON(fs, "")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

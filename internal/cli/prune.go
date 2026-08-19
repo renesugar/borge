@@ -9,6 +9,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -26,6 +27,7 @@ func cmdPrune(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
+	common.registerJSON(fs, "print the decisions as JSON; unlike the text form it lists every archive without --list")
 	sel.register(fs)
 
 	counts := map[manifest.RuleKind]*int{}
@@ -90,6 +92,22 @@ func cmdPrune(e *Env, args []string) int {
 		return e.fail(err)
 	}
 	if len(infos) == 0 {
+		// In JSON mode this still has to be a document: a frontend that gets nothing on
+		// stdout cannot tell "no archives" from "the command died", and an empty
+		// "archives" list says exactly which it was. borg emits the envelope here too.
+		if common.json {
+			repoBlock, encBlock := o.envelope(path)
+			enc := json.NewEncoder(e.Stdout)
+			enc.SetIndent("", "    ")
+			if err := enc.Encode(map[string]any{
+				"archives":   []map[string]any{},
+				"repository": repoBlock,
+				"encryption": encBlock,
+			}); err != nil {
+				return e.fail(err)
+			}
+			return ExitOK
+		}
 		fmt.Fprintln(e.Stderr, "no archives to prune")
 		return ExitOK
 	}
@@ -121,8 +139,15 @@ func cmdPrune(e *Env, args []string) int {
 	}
 
 	var pruned, kept int
+	rows := []map[string]any{}
 	for _, d := range decisions {
-		line, err := formatter.Format(template, archiveValues(d.Info))
+		var line string
+		var data map[string]any
+		if common.json {
+			data, err = archiveJSONData(d.Info, template)
+		} else {
+			line, err = formatter.Format(template, archiveValues(d.Info))
+		}
 		if err != nil {
 			return e.fail(err)
 		}
@@ -130,6 +155,12 @@ func cmdPrune(e *Env, args []string) int {
 		if d.Keep {
 			kept++
 			label = fmt.Sprintf("Keeping archive (rule: %s):", keepRuleLabel(d))
+			if common.json {
+				data["kept"] = true
+				data["keep_rule"] = string(d.Rule)
+				data["kept_oldest"] = d.Oldest
+				data["kept_archive_number"] = d.Index + 1
+			}
 		} else {
 			pruned++
 			if *dryRun {
@@ -137,10 +168,26 @@ func cmdPrune(e *Env, args []string) int {
 			} else {
 				label = fmt.Sprintf("Pruning archive (%d/%d):", pruned, total)
 			}
+			if common.json {
+				data["kept"] = false
+				data["deleted_archive_number"] = pruned
+			}
 		}
 		// borg's own layout: the label padded to 44 columns, a space, then the archive.
 		// On stderr, because it is progress rather than the command's data.
-		if *list || (*listKept && d.Keep) || (*listPruned && !d.Keep) {
+		//
+		// The JSON form has a different default, and it is borg's: without --list-kept or
+		// --list-pruned every archive is included, where the text form shows none. That
+		// is not an inconsistency to iron out - a document with an empty "archives" list
+		// is a document a frontend can read and act on, whereas an empty stream is the
+		// silence PORTING_PLAN.md section 2.3 is about.
+		switch {
+		case common.json:
+			if *list || !(*listPruned || *listKept) ||
+				(*listPruned && !d.Keep) || (*listKept && d.Keep) {
+				rows = append(rows, data)
+			}
+		case *list || (*listKept && d.Keep) || (*listPruned && !d.Keep):
 			fmt.Fprintf(e.Stderr, "%-44s %s\n", label, line)
 		}
 		if d.Keep || *dryRun {
@@ -155,6 +202,24 @@ func cmdPrune(e *Env, args []string) int {
 		if err := o.manifest.Write(); err != nil {
 			return e.fail(err)
 		}
+	}
+
+	if common.json {
+		repoBlock, encBlock := o.envelope(path)
+		enc := json.NewEncoder(e.Stdout)
+		enc.SetIndent("", "    ")
+		if err := enc.Encode(map[string]any{
+			"archives":   rows,
+			"repository": repoBlock,
+			"encryption": encBlock,
+		}); err != nil {
+			return e.fail(err)
+		}
+		// The compact hint still goes to stderr, where it cannot corrupt the document.
+		if !*dryRun && pruned > 0 {
+			fmt.Fprintln(e.Stderr, `Done. Run "borge compact" to free space.`)
+		}
+		return ExitOK
 	}
 
 	// borg prints no summary at all, and without a --list option prints nothing whatever.

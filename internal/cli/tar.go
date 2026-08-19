@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/chunker"
 	"github.com/renesugar/borge/internal/compress"
 	"github.com/renesugar/borge/internal/crypto/key"
@@ -40,6 +42,7 @@ func cmdImportTar(e *Env, args []string) int {
 	fs := newFlagSet(e, "import-tar")
 	var common commonFlags
 	common.register(fs)
+	common.registerJSON(fs, "output stats as JSON (implies --stats)")
 	comment := fs.String("comment", "", "a comment to store with the archive")
 	compression := fs.String("C", "lz4", "compression spec, e.g. zstd,3")
 	fs.StringVar(compression, "compression", "lz4", "compression spec")
@@ -52,6 +55,10 @@ func cmdImportTar(e *Env, args []string) int {
 	timestamp.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return ExitError
+	}
+	// borg: "output stats as JSON (implies --stats)".
+	if common.json {
+		*stats = true
 	}
 	if fs.NArg() < 2 {
 		e.errorf("import-tar needs an archive name and an input file (or - for stdin)")
@@ -133,6 +140,7 @@ func cmdImportTar(e *Env, args []string) int {
 		chunkSeed = uint32(key.ChunkSeed(unlocked.Material))
 	}
 
+	cwd, _ := os.Getwd()
 	status := ExitOK
 	st, id, err := archive.ImportTar(m, in, archive.ImportTarOptions{
 		Name:          name,
@@ -142,6 +150,8 @@ func cmdImportTar(e *Env, args []string) int {
 		Compressor:    compressor,
 		IgnoreZeros:   *ignoreZeros,
 		Timestamp:     timestamp.value(),
+		CommandLine:   "borge import-tar " + strings.Join(args, " "),
+		CWD:           cwd,
 		OnItem: func(s byte, p string) {
 			if *list {
 				fmt.Fprintf(e.Stdout, "%c %s\n", s, p)
@@ -157,6 +167,21 @@ func cmdImportTar(e *Env, args []string) int {
 	}
 	if err := m.Write(); err != nil {
 		return e.fail(err)
+	}
+
+	if common.json {
+		cacheDir, err := cache.Dir(repo.ID())
+		if err != nil {
+			return e.fail(err)
+		}
+		doc := archiveCreatedJSON(repo, k, m, path, cacheDir, st.Meta, id,
+			createStatsJSON(int64(st.Files), st.Bytes, st.FileStatus))
+		enc := json.NewEncoder(e.Stdout)
+		enc.SetIndent("", "    ")
+		if err := enc.Encode(doc); err != nil {
+			return e.fail(err)
+		}
+		return status
 	}
 
 	if *stats || common.verbose {

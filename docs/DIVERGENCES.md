@@ -999,3 +999,71 @@ recording twice over: once because the label above has to cope with it, and once
 the option gate cannot see it. That gate reports borg options borge lacks and not the
 reverse, so borge may carry others nobody has written down. Recorded in `PORTING_PLAN.md`
 §11.2 as work on the gate.
+
+## 35. `--json` where borg has none — **fixed 2026-08-18**
+
+borge registered `--json` on every repository command, because it lived in `commonFlags`
+alongside `-r` and `-v`. borg has it on eight. So twelve borge commands accepted the
+option and printed prose anyway:
+
+```
+$ borge check -r repo --json
+...checking...            # not JSON, and no complaint about asking for it
+$ borg check -r repo --json
+error: unrecognized arguments: --json
+```
+
+That is worse than not having the option. borg's JSON output *is* borg's API — "Borg does
+not have a public API on the Python level […] Borg provides an API on a command-line
+level" (`docs/internals/frontends.rst`) — so `--json` is a frontend asking "can I drive
+this command programmatically?". borge answered yes twelve times and then didn't.
+
+`--json` now lives in `commonFlags.registerJSON`, called only by the commands borg puts it
+on: `create`, `import-tar`, `prune`, `info`, `repo-info`, `repo-list`, `version`,
+`analyze`, and `benchmark cpu`. `TestJSONOptionSurfaceMatchesBorg` compares the two
+surfaces command by command and fails in *both* directions.
+
+**`borg list --json` works and is not an option.** It is argparse expanding an unambiguous
+prefix of `--json-lines`; `borg list --help` does not offer it, and `borg list --jsonzzz`
+is rejected where `--json` is not. Measuring `borg list --json` against `--json-lines` and
+finding the bytes identical is therefore not evidence of an alias — it is the same option
+twice, and an early reading of this recorded it as "borg offers --json on 11 commands"
+when the real count is eight. borge implements no prefix expansion (Go's `flag` has none),
+so `borge list --json` is an error, and the difference is argparse's, not the JSON API's.
+
+## 36. `create` and `import-tar` count `original_size` differently from borg
+
+Same tree, same files, one run each:
+
+| | borg | borge |
+|---|---|---|
+| `create --json` → `archive.stats.original_size`, 1 MB file | 1000643 | 1000000 |
+| `create --json` → `archive.stats.original_size`, 8 B in 5 items | 646 | 8 |
+| stored `{size}`, 1 MB file | 1000035 | 1000483 |
+| stored `{size}`, 8 B in 5 items | 43 | 1131 |
+
+borge's create-time figure is the plaintext content and nothing else. borg's includes the
+archive's own item-metadata stream, which is why its number grows with the *number* of
+items and not only their size. The stored `{size}` field disagrees the other way round.
+
+Nothing here is a data-format difference — both archives restore identically, and each
+tool is self-consistent — but four numbers a person reads directly disagree, and
+`create --json` now publishes one of them through the API. Recorded rather than fixed
+because matching borg means matching *when* it samples the counter (`archive.py:757`
+writes `stats.osize` into the metadata mid-save, and `create` prints the same counter
+again after the item stream is flushed), which is worth doing deliberately.
+
+## 37. borge records a command line for `import-tar` — **fixed 2026-08-18**
+
+borg's `import-tar` stores `command_line` and `cwd` in the archive metadata, as `create`
+does. borge stored neither, so an imported archive had no answer to "what made this?" —
+`info` showed an empty field and the JSON API published it as absent. The import path
+simply never passed them to `Save`. Fixed; `borge import-tar` now records the same two
+fields `borge create` does, in borge's spelling (`borge import-tar …` rather than the
+absolute path of the binary — see #12).
+
+**borge fills in `files_stats` where borg leaves it empty.** borg's `import-tar --json`
+always reports `"files_stats": {}`; its importer does not route through the accounting
+that `create` uses. borge counts the same status characters it counts for `create`, so the
+key has the same meaning and is merely populated. Same shape, more information — recorded
+because it is a difference a frontend can see.

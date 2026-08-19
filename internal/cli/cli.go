@@ -184,7 +184,29 @@ func (c *commonFlags) register(fs *flagSet) {
 	fs.StringVar(&c.repo, "repo", "", "repository path (or BORGE_REPO / BORG_REPO)")
 	fs.BoolVar(&c.verbose, "v", false, "more output")
 	fs.BoolVar(&c.verbose, "verbose", false, "more output")
-	fs.BoolVar(&c.json, "json", false, "print JSON instead of text")
+}
+
+// registerJSON adds --json, and is separate from register because borg does not put
+// --json on every repository command.
+//
+// borge registered it in register() until 2026-08-18, so nineteen commands accepted
+// --json and six acted on it: "borge check --json" ran a check and printed text, having
+// silently accepted an option that promised otherwise. borg has --json on eight commands
+// (create, import-tar, prune, info, repo-info, repo-list, version, analyze) and rejects
+// it everywhere else, which is the more useful answer: a frontend learns straight away
+// that the command has no JSON form.
+//
+// Not to be confused with --json-lines, which borg has on list, find, diff and
+// "benchmark crud". "borg list --json" is accepted, but only because argparse expands
+// unambiguous prefixes; borg's own help does not offer it. See docs/DIVERGENCES.md #35.
+//
+// The help text is per command because borg's is: on create and import-tar it says
+// "implies --stats", which is behaviour a caller needs to know about and not a rewording.
+func (c *commonFlags) registerJSON(fs *flagSet, help string) {
+	if help == "" {
+		help = "print JSON instead of text"
+	}
+	fs.BoolVar(&c.json, "json", false, help)
 }
 
 // newFlagSet builds a flag set that reports usage the way borg does and does not exit the

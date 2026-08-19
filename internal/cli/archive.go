@@ -231,16 +231,25 @@ type itemJSON struct {
 	Size   int64  `json:"size"`
 	MTime  string `json:"mtime"`
 	HLID   string `json:"hlid"`
+
+	// Flags and Inode are pointers because borg emits null when the value is unknown,
+	// and null is not the same answer as 0: bsdflags 0 means "no flags set", null means
+	// "this archive does not record them". A restore that reads 0 would clear flags the
+	// source had. borge omitted both keys entirely until 2026-08-18.
+	Flags *int64  `json:"flags"`
+	Inode *uint64 `json:"inode"`
 }
 
 func toItemJSON(it *item.Item) itemJSON {
 	mode := it.ModeOr(0)
 	out := itemJSON{
-		Type: item.TypeChar(mode),
-		Mode: item.FormatMode(mode),
-		Path: it.Path,
-		Size: itemSize(it),
-		HLID: hex.EncodeToString(it.HLID),
+		Type:  item.TypeChar(mode),
+		Mode:  item.FormatMode(mode),
+		Path:  it.Path,
+		Size:  itemSize(it),
+		HLID:  hex.EncodeToString(it.HLID),
+		Flags: it.BSDFlags,
+		Inode: it.Inode,
 	}
 	if it.User != nil {
 		out.User = *it.User
@@ -360,6 +369,7 @@ func cmdInfo(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
+	common.registerJSON(fs, "")
 	sel.register(fs)
 	if err := fs.Parse(args); err != nil {
 		return ExitError

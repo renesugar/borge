@@ -152,15 +152,25 @@ A silent no-op looks exactly like success, which is why none of the four was cau
 seven stages of differential testing.
 
 **An option that does nothing is worse than a missing one.** `borge break-lock --json`
-parses, prints plain text and exits 0; borg has no such option at all. `--json` is
-registered on 19 commands and read by three. A missing option produces an error the user
-can act on; an ignored one produces a wrong belief. `PORTING_PLAN.md` §11.4.
+parsed, printed plain text and exited 0; borg has no such option at all. `--json` was
+registered on 19 commands and read by six. A missing option produces an error the user
+can act on; an ignored one produces a wrong belief. Fixed 2026-08-18 and now held by
+`TestJSONOptionSurfaceMatchesBorg`, which compares the two surfaces in both directions.
+`PORTING_PLAN.md` §11.4, `DIVERGENCES.md` #35.
 
 **`--json` is borg's API, not a formatting option.** borg has no Python-level API and says
 so; the command line plus JSON output *is* the interface frontends are written against
-(`docs/internals/frontends.rst` in the borg checkout). Six of borg's eleven JSON commands
-produce no JSON in borge. Treat a change to JSON output the way you would treat a change to
-a published API, and compare it against borg's as data rather than as text.
+(`docs/internals/frontends.rst` in the borg checkout). Treat a change to JSON output the
+way you would treat a change to a published API, and compare it against borg's as data
+rather than as text — key by key, not "it parsed". Counting commands is not comparing
+schemas: borge offered JSON on six commands and matched borg's shape on none of them.
+
+**`--help` is the authority on what options exist; acceptance is not.** argparse expands
+unambiguous prefixes, so `borg list --json` runs and is `--json-lines` — it appears in no
+help text and is not an option. An hour went into "borg's `--json` is byte-identical to its
+`--json-lines`, so it is a free alias" before the mechanism was understood; it was the same
+option twice. When measuring borg's surface, read `borg CMD --help`, and when a measurement
+comes out surprisingly convenient, find out why before building on it.
 
 **Silence is an answer nobody can act on.** `borge delete --dry-run` without `--list`
 prints nothing, so "two archives would go" and "your selector matched nothing" look

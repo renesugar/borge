@@ -59,6 +59,7 @@ func cmdAnalyze(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
+	common.registerJSON(fs, "")
 	sel.register(fs)
 	byName := fs.Bool("by-name", false, "decompose the whole repository by archive name")
 	hotspots := fs.Int("hotspots", 20, "show this many busiest directories (0 for none)")

@@ -83,6 +83,13 @@ type ImportTarOptions struct {
 	OnItem func(status byte, path string)
 	// OnWarning reports an entry that could not be imported.
 	OnWarning func(path, reason string)
+
+	// CommandLine and CWD go into the archive metadata, as they do for create. borg's
+	// import-tar records both; borge recorded neither until 2026-08-18, so an archive it
+	// imported had no answer to "what made this?" - and "info" and the JSON API both
+	// report that field.
+	CommandLine string
+	CWD         string
 }
 
 // ImportTarStats counts what an import wrote.
@@ -92,11 +99,17 @@ type ImportTarStats struct {
 	Hardlinks int
 	Skipped   int
 	Bytes     int64
+
+	// FileStatus counts entries by their status character, borg's files_stats.
+	FileStatus map[string]int64
+	// Meta is the archive metadata as saved, so a caller can report the times and the
+	// command line without reopening the archive it just wrote.
+	Meta *item.ArchiveItem
 }
 
 // ImportTar reads a tar stream and writes it as a new archive.
 func ImportTar(m *manifest.Manifest, r io.Reader, opts ImportTarOptions) (*ImportTarStats, []byte, error) {
-	stats := &ImportTarStats{}
+	stats := &ImportTarStats{FileStatus: map[string]int64{}}
 	if opts.Name == "" {
 		return stats, nil, fmt.Errorf("archive: an archive needs a name")
 	}
@@ -110,9 +123,15 @@ func ImportTar(m *manifest.Manifest, r io.Reader, opts ImportTarOptions) (*Impor
 		return stats, nil, err
 	}
 
-	report := opts.OnItem
-	if report == nil {
-		report = func(byte, string) {}
+	caller := opts.OnItem
+	if caller == nil {
+		caller = func(byte, string) {}
+	}
+	// Counted here rather than in the caller's callback: with no --list there is no
+	// callback doing anything, and a count taken from printed lines would be zero.
+	report := func(status byte, path string) {
+		stats.FileStatus[string(status)]++
+		caller(status, path)
 	}
 	warn := opts.OnWarning
 	if warn == nil {
@@ -132,15 +151,18 @@ func ImportTar(m *manifest.Manifest, r io.Reader, opts ImportTarOptions) (*Impor
 	if ts.IsZero() {
 		ts = b.Start()
 	}
-	_, id, err := b.Save(SaveOptions{
-		Name:      opts.Name,
-		Comment:   opts.Comment,
-		Tags:      opts.Tags,
-		Timestamp: ts,
+	meta, id, err := b.Save(SaveOptions{
+		Name:        opts.Name,
+		Comment:     opts.Comment,
+		Tags:        opts.Tags,
+		Timestamp:   ts,
+		CommandLine: opts.CommandLine,
+		CWD:         opts.CWD,
 	})
 	if err != nil {
 		return stats, nil, err
 	}
+	stats.Meta = meta
 	return stats, id, nil
 }
 

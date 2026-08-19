@@ -10,6 +10,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -178,6 +179,7 @@ func cmdCreate(e *Env, args []string) int {
 	var common commonFlags
 	var pf patternFlags
 	common.register(fs)
+	common.registerJSON(fs, "output stats as JSON (implies --stats)")
 	pf.register(fs)
 	comment := fs.String("comment", "", "a comment to store with the archive")
 	compression := fs.String("C", "lz4", "compression spec, e.g. zstd,3")
@@ -211,6 +213,12 @@ func cmdCreate(e *Env, args []string) int {
 	stats := fs.Bool("stats", false, "print statistics when finished")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
+	}
+	// borg's help says so outright: "output stats as JSON. Implies --stats." The
+	// implication matters because the text summary is what --stats gates, and a caller
+	// asking for the numbers in JSON is asking for the numbers.
+	if common.json {
+		*stats = true
 	}
 	// "R PATH" lines in a patterns file are paths to back up, so they count towards
 	// having something to do: borg accepts a create whose only root came from a patterns
@@ -390,14 +398,19 @@ func cmdCreate(e *Env, args []string) int {
 		},
 	}
 	if *list {
-		opts.OnItem = func(st byte, p string) { fmt.Fprintf(e.Stdout, "%c %s\n", st, p) }
+		// On stderr, where borg puts it. Measured rather than assumed: "borg create
+		// --list --stats" writes nothing whatever to stdout - the listing and the summary
+		// are both log output. borge wrote both to stdout until 2026-08-18, which was
+		// merely different until --json arrived and made it corrupting: a listing line
+		// ahead of the document is a parse error for the frontend reading it.
+		opts.OnItem = func(st byte, p string) { fmt.Fprintf(e.Stderr, "%c %s\n", st, p) }
 	}
 
 	for _, stream := range streams {
 		if *dryRun {
 			// Nothing is read: a dry run must not drain a pipe it is not going to store,
 			// because the data would be gone for the real run.
-			fmt.Fprintf(e.Stdout, "+ %s\n", streamOpts.Name)
+			fmt.Fprintf(e.Stderr, "+ %s\n", streamOpts.Name)
 			continue
 		}
 		r, cleanup, err := stream(e)
@@ -430,10 +443,31 @@ func cmdCreate(e *Env, args []string) int {
 	// recording a backup that did not happen would make the *next* real run skip the
 	// files it claims are already there.
 	if *dryRun {
+		if common.json {
+			// borg's dry-run document is a different shape from its real one: no
+			// "archive" and no "cache" - neither exists - and a "dry_run": true that
+			// says why. A frontend seeing "archive" absent has an explicit reason for
+			// it rather than a missing key to guess about.
+			repoBlock, encBlock := envelopeFor(repo, k, m, path)
+			enc := json.NewEncoder(e.Stdout)
+			enc.SetIndent("", "    ")
+			if err := enc.Encode(map[string]any{
+				"dry_run": true,
+				"stats": map[string]any{
+					"nfiles":        created.Stats.NFiles,
+					"original_size": created.Stats.OriginalSize,
+				},
+				"repository": repoBlock,
+				"encryption": encBlock,
+			}); err != nil {
+				return e.fail(err)
+			}
+			return status
+		}
 		if *stats || common.verbose {
 			s := created.Stats
-			fmt.Fprintf(e.Stdout, "Number of files: %d\n", s.NFiles)
-			fmt.Fprintf(e.Stdout, "Original size: %d\n", s.OriginalSize)
+			fmt.Fprintf(e.Stderr, "Number of files: %d\n", s.NFiles)
+			fmt.Fprintf(e.Stderr, "Original size: %d\n", s.OriginalSize)
 		}
 		return status
 	}
@@ -458,24 +492,39 @@ func cmdCreate(e *Env, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	_ = meta
+	if common.json {
+		// The cache block names the directory, not the per-archive file: borg reports
+		// Cache.path, which is the repository's cache directory.
+		cacheDir, err := cache.Dir(repo.ID())
+		if err != nil {
+			return e.fail(err)
+		}
+		doc := archiveCreatedJSON(repo, k, m, path, cacheDir, meta, id,
+			createStatsJSON(created.Stats.NFiles, created.Stats.OriginalSize, created.FileStatus))
+		enc := json.NewEncoder(e.Stdout)
+		enc.SetIndent("", "    ")
+		if err := enc.Encode(doc); err != nil {
+			return e.fail(err)
+		}
+		return status
+	}
 
 	if *stats || common.verbose {
 		s := created.Stats
-		fmt.Fprintf(e.Stdout, "Archive name: %s\n", name)
-		fmt.Fprintf(e.Stdout, "Archive fingerprint: %x\n", id)
-		fmt.Fprintf(e.Stdout, "Number of files: %d\n", s.NFiles)
-		fmt.Fprintf(e.Stdout, "Original size: %d\n", s.OriginalSize)
-		fmt.Fprintf(e.Stdout, "Deduplicated size: %d\n", s.DedupedSize)
-		fmt.Fprintf(e.Stdout, "Chunks: %d (%d new)\n", s.Chunks, s.NewChunks)
+		fmt.Fprintf(e.Stderr, "Archive name: %s\n", name)
+		fmt.Fprintf(e.Stderr, "Archive fingerprint: %x\n", id)
+		fmt.Fprintf(e.Stderr, "Number of files: %d\n", s.NFiles)
+		fmt.Fprintf(e.Stderr, "Original size: %d\n", s.OriginalSize)
+		fmt.Fprintf(e.Stderr, "Deduplicated size: %d\n", s.DedupedSize)
+		fmt.Fprintf(e.Stderr, "Chunks: %d (%d new)\n", s.Chunks, s.NewChunks)
 		hits, misses := files.Stats()
-		fmt.Fprintf(e.Stdout, "Files cache: %s, %d unchanged, %d read (%d hits, %d misses)\n",
+		fmt.Fprintf(e.Stderr, "Files cache: %s, %d unchanged, %d read (%d hits, %d misses)\n",
 			cacheMode, created.Unchanged, s.NFiles-int64(created.Unchanged), hits, misses)
 		if created.Errors > 0 {
-			fmt.Fprintf(e.Stdout, "Errors: %d\n", created.Errors)
+			fmt.Fprintf(e.Stderr, "Errors: %d\n", created.Errors)
 		}
 		if created.Skipped > 0 {
-			fmt.Fprintf(e.Stdout, "Skipped: %d\n", created.Skipped)
+			fmt.Fprintf(e.Stderr, "Skipped: %d\n", created.Skipped)
 		}
 	}
 	return status

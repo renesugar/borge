@@ -1,0 +1,222 @@
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+//
+// The shapes here are borg's, from src/borg/helpers/parseformat.py (BaseFormatter and
+// friends) and the commands that emit them.
+// Original work Copyright (C) 2015-2026 The Borg Collective; Copyright (C) 2010-2014 Jonas Borgström.
+// Licensed under the BSD 3-Clause License, see licenses/borg/LICENSE.
+// Modifications and Go translation Copyright (C) 2026 The borge authors,
+// licensed under the Apache License 2.0, see LICENSE.
+
+package cli
+
+import (
+	"encoding/hex"
+	"strings"
+	"time"
+
+	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/formatter"
+	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/manifest"
+	"github.com/renesugar/borge/internal/repository"
+)
+
+// borg's JSON output is its API. Its documentation is explicit that there is no other:
+// "Borg does not have a public API on the Python level [...] Borg provides an API on a
+// command-line level" (docs/internals/frontends.rst). So the JSON shape is the interface
+// a frontend is written against, and a key borge spells differently is a frontend that
+// does not work - the same class of breakage as a wire format that does not match.
+//
+// Every JSON-producing command wraps its own payload in the same two blocks, so they live
+// here rather than being spelled out per command: borge got them wrong five separate ways
+// before this file existed, which is what having five copies does.
+
+// isoTime is the timestamp spelling in every borg JSON document: local time, microsecond
+// precision, explicit offset. Python's datetime.isoformat() with a timezone-aware value.
+func isoTime(t time.Time) string {
+	return t.Local().Format("2006-01-02T15:04:05.000000-07:00")
+}
+
+// repositoryJSON is borg's "repository" block.
+//
+// Note it is not what borge's repo-info used to print under the same name: that had
+// "version" and "archive_count" and no "last_modified", so a frontend reading
+// repository.last_modified found nothing and one reading repository.version found
+// something borg never puts there.
+type repositoryJSON struct {
+	ID           string `json:"id"`
+	LastModified string `json:"last_modified"`
+	Location     string `json:"location"`
+}
+
+// encryptionJSON is borg's "encryption" block.
+//
+// The two fields are not independent, and neither is simply borge's mode name. borg names
+// the cipher in "encryption" and the chunk-id hash in "id_hash", so its aes256-ocb repos
+// come in two kinds that share a name and differ in id_hash. borge names the pair in one
+// string ("blake3-aes256-ocb"), which is the clearer spelling but not the one on the wire,
+// so it is split here.
+type encryptionJSON struct {
+	Encryption string `json:"encryption"`
+	IDHash     string `json:"id_hash"`
+}
+
+// splitEncryptionMode turns borge's mode name into borg's (encryption, id_hash) pair.
+func splitEncryptionMode(mode string) encryptionJSON {
+	hash := "sha256"
+	name := mode
+	switch {
+	case strings.HasPrefix(mode, "blake3-"):
+		// blake3-aes256-ocb is borg's Blake3AESOCBKey, whose ENC_NAME is plain
+		// "aes256-ocb"; only id_hash tells the two apart.
+		hash = "blake3"
+		name = strings.TrimPrefix(mode, "blake3-")
+	case strings.HasSuffix(mode, "-blake3"):
+		// authenticated-blake3 and none-blake3 keep their full name as ENC_NAME.
+		hash = "blake3"
+	}
+	return encryptionJSON{Encryption: name, IDHash: hash}
+}
+
+// envelope is what every JSON-producing repository command has around its payload.
+func (o *opened) envelope(location string) (repositoryJSON, encryptionJSON) {
+	return envelopeFor(o.repo, o.key, o.manifest, location)
+}
+
+// envelopeFor is envelope for the commands that hold the three pieces separately rather
+// than as an "opened" - create and import-tar open the repository themselves.
+func envelopeFor(
+	repo *repository.Repository, k key.Key, m *manifest.Manifest, location string,
+) (repositoryJSON, encryptionJSON) {
+	out := repositoryJSON{ID: repo.IDString(), Location: location}
+	// A repository whose timestamp cannot be read still has an id and a location worth
+	// reporting, so a bad timestamp leaves the field empty rather than failing the
+	// command. borg has no such case: it always has a manifest timestamp by here.
+	if ts, err := m.LastTimestamp(); err == nil {
+		out.LastModified = isoTime(ts)
+	}
+	return out, splitEncryptionMode(k.Name())
+}
+
+// archiveJSONData is borg's archive-level JSON object.
+//
+// The key set is not fixed. borg builds it from the effective --format: "The form of
+// --format is ignored, but keys used in it are added to the JSON output. Some keys are
+// always present." Four are always there - name, archive, id, time - and the other nine
+// appear only when the format names them.
+//
+// borge emitted all thirteen unconditionally, which happens to match borg for repo-list's
+// default format and matches nothing else: "prune --json" gained four keys borg does not
+// send, and "repo-list --format '{archive}' --json" gained eight. A frontend that reads
+// what it asked for is fine either way; one that iterates the object is not.
+//
+// command_line is absent here because borge does not read it from the archive metadata
+// yet; see docs/PORTING_PLAN.md section 11.4. It is the one key of borg's thirteen that
+// borge cannot supply, and leaving it out is the honest form: a frontend asking for it via
+// --format gets an unknown-key error rather than an empty string that looks like an
+// archive created by an empty command line.
+func archiveJSONData(info manifest.Info, template string) (map[string]any, error) {
+	out := map[string]any{
+		"name":    info.Name,
+		"archive": info.Name,
+		"id":      hex.EncodeToString(info.ID),
+		"time":    isoTime(info.Time),
+	}
+	keys, err := formatter.Keys(template)
+	if err != nil {
+		return nil, err
+	}
+	optional := map[string]any{
+		"hostname": info.Host,
+		"username": info.User,
+		"comment":  info.Comment,
+		"size":     info.Size,
+		"nfiles":   info.NFiles,
+		"start":    isoTime(info.Start),
+		"end":      isoTime(info.End),
+		"tags":     strings.Join(info.Tags, ","),
+	}
+	for _, k := range keys {
+		if v, ok := optional[k]; ok {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// createStatsJSON is the "stats" block of the document create and import-tar print.
+//
+// borg sends six keys here. borge sends three, and the omissions are deliberate:
+//
+//   - chunking_time and hashing_time are instrumentation borge does not collect.
+//   - store_stats is a per-backend call/volume/latency report from borg's Store layer.
+//
+// Sending them as zeros would be the worse choice by some distance: a frontend charting
+// hashing_time would draw a flat line and believe it, where a missing key is a question
+// it can answer by asking the version. See docs/PORTING_PLAN.md section 11.4.
+func createStatsJSON(nfiles, originalSize int64, fileStatus map[string]int64) map[string]any {
+	// files_stats is always an object, never null: a backup that stored nothing has an
+	// empty count, and null would read as "not measured".
+	counts := map[string]int64{}
+	for k, v := range fileStatus {
+		counts[k] = v
+	}
+	return map[string]any{
+		"nfiles":        nfiles,
+		"original_size": originalSize,
+		"files_stats":   counts,
+	}
+}
+
+// archiveCreatedJSON is the document "create --json" and "import-tar --json" print.
+//
+// The four blocks are borg's. "cache" carries the path of the files cache, which borge
+// keeps per repository exactly as borg does.
+func archiveCreatedJSON(
+	repo *repository.Repository, k key.Key, m *manifest.Manifest,
+	location, cachePath string, meta *item.ArchiveItem, id []byte, stats map[string]any,
+) map[string]any {
+	archiveBlock := map[string]any{
+		"name":  meta.Name,
+		"id":    hex.EncodeToString(id),
+		"stats": stats,
+	}
+	start, startOK := metaTime(meta.Start)
+	end, endOK := metaTime(meta.End)
+	if nominal, ok := metaTime(meta.Time); ok {
+		archiveBlock["time"] = isoTime(nominal)
+	}
+	if startOK {
+		archiveBlock["start"] = isoTime(start)
+	}
+	if endOK {
+		archiveBlock["end"] = isoTime(end)
+	}
+	if startOK && endOK {
+		// Seconds with a fraction, as borg reports it.
+		archiveBlock["duration"] = end.Sub(start).Seconds()
+	}
+	if meta.CommandLine != nil {
+		archiveBlock["command_line"] = *meta.CommandLine
+	}
+
+	repoBlock, encBlock := envelopeFor(repo, k, m, location)
+	return map[string]any{
+		"archive":    archiveBlock,
+		"cache":      map[string]any{"path": cachePath},
+		"repository": repoBlock,
+		"encryption": encBlock,
+	}
+}
+
+// metaTime parses one of the archive metadata's stored timestamps.
+func metaTime(s *string) (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	t, err := manifest.ParseTimestamp(*s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
