@@ -248,3 +248,48 @@ func (r *borgRepo) stderrOf(args ...string) string {
 	_ = cmd.Run()
 	return stderr.String()
 }
+
+// TestLogJSONOnCommandGroups: --log-json works when given to "debug", "key" or "benchmark"
+// before the subcommand, as it does in borg.
+//
+// Those three build no FlagSet of their own - they dispatch straight to a subcommand - so
+// the registration that reaches every other command missed them, and borge answered
+// "unknown debug command \"--log-json\"" where borg produced a JSON stream. Measured on
+// borg before fixing it:
+//
+//	$ borg debug --log-json dump-manifest -r /tmp/nope
+//	{"type": "log_message", ..., "levelname": "ERROR", ...}
+func TestLogJSONOnCommandGroups(t *testing.T) {
+	r := newBorgRepo(t, "aes256-ocb")
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"debug", []string{"debug", "--log-json", "dump-manifest"}},
+		// -r at a path that does not exist, because the test environment supplies a
+		// working repository and "key export" would otherwise succeed and print nothing
+		// to stderr to check the form of.
+		{"key", []string{"key", "--log-json", "export", "-r", filepath.Join(t.TempDir(), "nope")}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Each of these fails for want of an argument or a readable repository, which
+			// is what makes them cheap: the point is the *form* of what comes back.
+			_, stderr, code := r.borge(t, c.args...)
+			if code == ExitOK {
+				t.Fatalf("%v succeeded; there is no message to check the form of", c.args)
+			}
+			logLines(t, "borge "+c.name, stderr)
+
+			// And the same command without the option still speaks plain text, so this
+			// cannot pass by making everything JSON all the time.
+			plain := append([]string{}, c.args[:1]...)
+			plain = append(plain, c.args[2:]...) // the same command without --log-json
+			_, stderr, _ = r.borge(t, plain...)
+			if strings.HasPrefix(strings.TrimSpace(stderr), "{") {
+				t.Errorf("%v produced JSON without --log-json:\n%s", plain, stderr)
+			}
+		})
+	}
+}

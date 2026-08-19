@@ -165,3 +165,32 @@ func (e *Env) logFileStatus(status byte, path string) {
 	}
 	fmt.Fprintf(e.Stderr, "%c %s\n", status, path)
 }
+
+// takeParentLogJSON handles --log-json given to a command *group* - "debug", "key",
+// "benchmark" - before the subcommand name.
+//
+// Those three dispatch straight to a subcommand and build no FlagSet of their own, so they
+// never reach newFlagSet and never saw the option. borg accepts it there and honours it:
+//
+//	$ borg debug --log-json dump-manifest -r /tmp/nope
+//	{"type": "log_message", ..., "message": "Repository ... does not exist.",
+//	 "levelname": "ERROR", ...}
+//
+// while borge answered "unknown debug command \"--log-json\"" until 2026-08-19. A frontend
+// putting the option where borg's own help shows it got an error instead of a stream.
+//
+// Only this one option is taken here, not a parent-level parse of everything: borg's group
+// parsers accept the whole common set, and borge implements one of those fourteen. A
+// general parse would also have to know which of the remaining arguments belong to the
+// subcommand, which is the subcommand's business.
+func (e *Env) takeParentLogJSON(group string, args []string) []string {
+	out := args[:0:0]
+	for _, arg := range args {
+		if arg == "--log-json" || arg == "-log-json" {
+			e.enableJSONLog(group)
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}

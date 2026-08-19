@@ -70,6 +70,9 @@ func debugCommands() []command {
 }
 
 func cmdDebug(e *Env, args []string) int {
+	// --log-json may be given to the group as well as to the subcommand; borg
+	// accepts it in both places. See takeParentLogJSON.
+	args = e.takeParentLogJSON("debug", args)
 	if len(args) == 0 {
 		printDebugUsage(e.Stdout)
 		return ExitOK

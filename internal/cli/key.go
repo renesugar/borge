@@ -55,6 +55,9 @@ func keyCommands() []command {
 }
 
 func cmdKey(e *Env, args []string) int {
+	// --log-json may be given to the group as well as to the subcommand; borg
+	// accepts it in both places. See takeParentLogJSON.
+	args = e.takeParentLogJSON("key", args)
 	if len(args) == 0 {
 		printKeyUsage(e.Stdout)
 		return ExitOK

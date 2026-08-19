@@ -1307,11 +1307,36 @@ anything written to it that did not come from a level-aware helper becomes an IN
 — a listing, a summary, a `Done.` hint, a warning, an error — and fails on the first
 unparseable line.
 
-Registered in `newFlagSet` rather than in `commonFlags`, because borg has it on every
-command including the six borge builds without a repository (`version`, `help`,
-`completion`, and the `key`, `debug` and `benchmark` parents). Every borge command builds
-its options through that one function, which makes it borge's equivalent of borg's common
-parser.
+Registered in `newFlagSet` rather than in `commonFlags`, because borg has it on commands
+borge builds without a repository — `version`, `help`, `completion`. Every borge command
+that builds a FlagSet does so through that one function, which makes it borge's equivalent
+of borg's common parser.
+
+**Except the three that build no FlagSet at all**, which the first version of this entry
+claimed were covered and were not. `debug`, `key` and `benchmark` dispatch straight to a
+subcommand, so they never reach `newFlagSet`: their subcommands had the option and the
+groups did not. borg accepts it in both places and honours it —
+
+```
+$ borg  debug --log-json dump-manifest -r /tmp/nope
+{"type": "log_message", ..., "message": "Repository ... does not exist.", "levelname": "ERROR", ...}
+$ borge debug --log-json dump-manifest -r /tmp/nope      # before 2026-08-19
+borge: unknown debug command "--log-json"
+```
+
+— so a frontend putting the option where borg's own help shows it got an error instead of a
+stream. `takeParentLogJSON` now takes it at the group, and
+`TestLogJSONOnCommandGroups` holds it, checking as well that the same command without the
+option still speaks plain text so the test cannot pass by making everything JSON.
+
+The claim was wrong in the commit message too, and was caught by comparing the two tools'
+whole JSON option surfaces side by side rather than by any test — the surface test compares
+`--json` and `--json-lines`, not `--log-json`, because `--log-json` is on every command and
+so says nothing per command. Extending it is worth doing.
+
+Only that one option is taken at the group, not a parent-level parse of borg's whole common
+set: borge implements one of those fourteen, and a general parse would have to know which
+of the remaining arguments belong to the subcommand.
 
 **Installed only after a successful parse**, which reproduces borg's documented caveat
 rather than merely tolerating it: "JSON logging requires successful argument parsing. Even
@@ -1330,6 +1355,12 @@ There is nothing to report and nowhere to report it from, so the types are absen
 than empty. The prompt types are likewise absent, borge's only prompt being for a
 passphrase and written to the terminal. Both are silence, not wrong output: a frontend that
 sees no progress objects learns nothing false.
+
+**`msgid` is never emitted.** borg attaches one to the messages that have it
+(`"msgid": "Repository.DoesNotExist"`), and the specification says it "may be *null* or
+absent", so omitting it is within the contract — but a frontend that switches on `msgid`
+gets less from borge than from borg. It needs borge's errors to carry stable identities,
+which they do not yet; that is its own piece of work rather than a formatting change.
 
 **One difference in granularity.** borg emits one object per *log call*, so a multi-line
 warning is a single object with newlines inside its message. borge's wrapper sees bytes, so
