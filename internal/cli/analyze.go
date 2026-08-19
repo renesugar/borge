@@ -268,9 +268,28 @@ func analyzeSet(e *Env, o *opened, chunks *hashindex.ChunkIndex, opts manifest.L
 	}
 
 	if common.json {
+		// borg's shape: the numbers under "dedup_size", the hot spots beside them rather
+		// than inside, and the envelope every JSON command carries. borge emitted the
+		// numbers bare, which is the same information under a different document.
+		//
+		// hotspots is null rather than absent when it was not computed - borg's own
+		// comment for that value is "not computed, as opposed to computed and empty", and
+		// the distinction is one a frontend can act on: fewer than two archives matched.
+		spots := data.Hotspots
+		data.Hotspots = nil
+		repoBlock, encBlock := o.envelope(o.repo.Path())
+		doc := map[string]any{
+			"dedup_size": data,
+			"hotspots":   nil,
+			"encryption": encBlock,
+			"repository": repoBlock,
+		}
+		if spots != nil {
+			doc["hotspots"] = spots
+		}
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(data); err != nil {
+		if err := enc.Encode(doc); err != nil {
 			return e.fail(err)
 		}
 		return ExitOK
@@ -391,15 +410,20 @@ func analyzeByName(e *Env, o *opened, chunks *hashindex.ChunkIndex, common commo
 		Names:         rows,
 		Shared:        shared,
 		Unreferenced:  unrefPair{unrefStored, unrefCount},
-		Total:         sizePair{totalSource, totalStored},
+		Total:         totalRow{len(rows), totalSource, totalStored},
 		TotalChunks:   totalCount,
 		MissingChunks: missing,
 	}
 
 	if common.json {
+		repoBlock, encBlock := o.envelope(o.repo.Path())
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(data); err != nil {
+		if err := enc.Encode(map[string]any{
+			"by_name":    data,
+			"encryption": encBlock,
+			"repository": repoBlock,
+		}); err != nil {
 			return e.fail(err)
 		}
 		return ExitOK
@@ -544,12 +568,21 @@ type analyzeSetJSON struct {
 	Hotspots           []hotspot `json:"hotspots,omitempty"`
 }
 
+// totalRow is borg's "total" object in the by-name report: a sizePair with the archive
+// count beside it. borge sent the pair alone, so a frontend reading total.archives found
+// nothing where borg puts the number the row is a total *of*.
+type totalRow struct {
+	Archives   int   `json:"archives"`
+	SourceSize int64 `json:"source_size"`
+	StoredSize int64 `json:"stored_size"`
+}
+
 type analyzeByNameJSON struct {
 	Archives      int       `json:"archives"`
 	Names         []nameRow `json:"names"`
 	Shared        sizePair  `json:"shared"`
 	Unreferenced  unrefPair `json:"unreferenced"`
-	Total         sizePair  `json:"total"`
+	Total         totalRow  `json:"total"`
 	TotalChunks   int       `json:"total_chunks"`
 	MissingChunks int       `json:"missing_chunks"`
 }

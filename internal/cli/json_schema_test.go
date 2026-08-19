@@ -69,11 +69,24 @@ func TestJSONSchemaMatchesBorg(t *testing.T) {
 		borg []string
 		// borge's arguments, minus the repository, which borgeEnv supplies.
 		borge []string
+		// borgOnly are top-level keys borg sends and borge deliberately does not. Each is
+		// asserted to be present in borg's document before it is removed, so a stale
+		// exemption fails rather than quietly weakening the comparison.
+		borgOnly []string
 	}{
 		{
 			name:  "repo-list",
 			borg:  []string{"repo-list", "-r", r.path, "--json"},
 			borge: []string{"repo-list", "--json"},
+		},
+		{
+			name:  "repo-info",
+			borg:  []string{"repo-info", "-r", r.path, "--json"},
+			borge: []string{"repo-info", "--json"},
+			// borg keeps a per-repository security directory holding the manifest and
+			// nonce it last saw; borge has no such thing, so the key is omitted rather
+			// than pointed at a path that does not exist.
+			borgOnly: []string{"security_dir"},
 		},
 		{
 			name:  "repo-list with a format",
@@ -85,11 +98,43 @@ func TestJSONSchemaMatchesBorg(t *testing.T) {
 			borg:  []string{"prune", "-r", r.path, "--keep-daily", "1", "--dry-run", "--json"},
 			borge: []string{"prune", "--keep-daily", "1", "--dry-run", "--json"},
 		},
+		{
+			name:  "info",
+			borg:  []string{"info", "-r", r.path, "-a", "first", "--json"},
+			borge: []string{"info", "-a", "first", "--json"},
+		},
+		{
+			name:  "analyze",
+			borg:  []string{"analyze", "-r", r.path, "--json"},
+			borge: []string{"analyze", "--json"},
+		},
+		{
+			name:  "analyze by name",
+			borg:  []string{"analyze", "-r", r.path, "--by-name", "--json"},
+			borge: []string{"analyze", "--by-name", "--json"},
+		},
+		{
+			name:  "version",
+			borg:  []string{"version", "--json"},
+			borge: []string{"version", "--json"},
+		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			want := shape(mustJSON(t, "borg "+c.name, r.mustRun(c.borg...)))
+			borgDoc := mustJSON(t, "borg "+c.name, r.mustRun(c.borg...))
+			for _, key := range c.borgOnly {
+				m, ok := borgDoc.(map[string]any)
+				if !ok {
+					t.Fatalf("borg's %s document is not an object", c.name)
+				}
+				if _, present := m[key]; !present {
+					t.Fatalf("borg's %s document has no %q; the exemption is stale",
+						c.name, key)
+				}
+				delete(m, key)
+			}
+			want := shape(borgDoc)
 			stdout, stderr, code := r.borge(t, c.borge...)
 			if code != ExitOK {
 				t.Fatalf("borge %s exited %d\n%s", c.name, code, stderr)

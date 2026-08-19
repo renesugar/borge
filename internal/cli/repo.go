@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/manifest"
 )
@@ -319,20 +320,28 @@ func cmdRepoInfo(e *Env, args []string) int {
 	}
 
 	if common.json {
-		out := map[string]any{
-			"repository": map[string]any{
-				"id":            o.repo.IDString(),
-				"location":      path,
-				"version":       o.repo.Version(),
-				"archive_count": count,
-			},
-			"encryption": map[string]any{"mode": o.key.Name()},
-			"manifest": map[string]any{
-				"id":        hex.EncodeToString(o.manifest.ID),
-				"timestamp": o.manifest.Timestamp,
-				"version":   o.manifest.Version(),
-			},
+		// borg's document, which is not the one borge used to print: "repository" carried
+		// version and archive_count and no last_modified, "encryption" said "mode" where
+		// borg says "encryption" and "id_hash", and "manifest" is borg's key for nothing
+		// at all. A frontend reading repository.last_modified found nothing; one reading
+		// encryption.mode found something borg never sends. See docs/DIVERGENCES.md #42.
+		//
+		// The numbers borge dropped from here are still in the text output, which is
+		// borge's own and where extra facts belong.
+		cacheDir, err := cache.Dir(o.repo.ID())
+		if err != nil {
+			return e.fail(err)
 		}
+		repoBlock, encBlock := o.envelope(path)
+		out := map[string]any{
+			"cache":      map[string]any{"path": cacheDir},
+			"encryption": encBlock,
+			"repository": repoBlock,
+		}
+		// borg also sends "security_dir", the per-repository directory where it keeps the
+		// manifest and nonce it last saw. borge has no such directory - the check it
+		// supports is the repository's own - so the key is omitted rather than pointed at
+		// a path that does not exist.
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "    ")
 		if err := enc.Encode(out); err != nil {

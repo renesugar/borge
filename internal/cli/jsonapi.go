@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/renesugar/borge/internal/archive"
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
@@ -219,4 +220,52 @@ func metaTime(s *string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
+}
+
+// infoArchiveJSON is one archive as "borg info --json" describes it.
+//
+// Unlike the archive objects in repo-list and prune, this set is fixed rather than driven
+// by --format: info takes no --format at all, and borg sends the same fourteen keys every
+// time. borge sent nine of them, and four of the five missing ones - command_line, cwd,
+// chunker_params and duration - it was storing in the archive metadata all along and
+// simply not reading back. See docs/DIVERGENCES.md #42.
+func infoArchiveJSON(a *archive.Archive) map[string]any {
+	out := map[string]any{
+		"name":     a.Info.Name,
+		"id":       hex.EncodeToString(a.ID),
+		"hostname": a.Info.Host,
+		"username": a.Info.User,
+		"comment":  a.Info.Comment,
+		"start":    isoTime(a.Info.Start),
+		"end":      isoTime(a.Info.End),
+		"time":     isoTime(a.Info.Time),
+		// An archive with no tags is an empty list, not null: borg sends [], and null
+		// reads as "unknown" to anything that iterates it.
+		"tags":     append([]string{}, a.Info.Tags...),
+		"duration": a.Info.End.Sub(a.Info.Start).Seconds(),
+		"stats": map[string]any{
+			"nfiles":        a.Info.NFiles,
+			"original_size": a.Info.Size,
+			// borg sends these three here as well, and in info they are always empty:
+			// nothing in the archive records them, so its Statistics object is fresh. They
+			// are emitted for that reason and no other - unlike create and import-tar,
+			// where borg's are real measurements and borge's would be invented (#36).
+			"files_stats":   map[string]any{},
+			"chunking_time": 0.0,
+			"hashing_time":  0.0,
+			"store_stats":   map[string]any{},
+		},
+	}
+	if a.Meta != nil {
+		if a.Meta.CommandLine != nil {
+			out["command_line"] = *a.Meta.CommandLine
+		}
+		if a.Meta.CWD != nil {
+			out["cwd"] = *a.Meta.CWD
+		}
+		if a.Meta.ChunkerParams != nil {
+			out["chunker_params"] = a.Meta.ChunkerParams
+		}
+	}
+	return out
 }

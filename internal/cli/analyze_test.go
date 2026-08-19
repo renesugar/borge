@@ -10,13 +10,40 @@ import (
 	"testing"
 )
 
-// analyzeJSON runs borge analyze and parses its JSON.
+// analyzeJSON runs borge analyze and parses the numbers out of its JSON.
+//
+// The numbers are nested: borg puts them under "dedup_size", or under "by_name" for
+// --by-name, beside the encryption and repository blocks every JSON command carries, and
+// borge has matched that since 2026-08-19 (DIVERGENCES.md #42). Unwrapping here rather
+// than in each caller means the borge side is read exactly as the borg side already was -
+// the borg side has always had to unwrap, which is what made the difference visible.
 func analyzeJSON(t *testing.T, r *borgRepo, out any, args ...string) {
 	t.Helper()
 	stdout, stderr, code := r.borge(t, append([]string{"analyze", "-json"}, args...)...)
 	if code != ExitOK {
 		t.Fatalf("borge analyze exited %d\n%s", code, stderr)
 	}
+	key := "dedup_size"
+	for _, a := range args {
+		if a == "--by-name" || a == "-by-name" {
+			key = "by_name"
+		}
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("analyze JSON does not parse: %v\n%s", err, stdout)
+	}
+	inner, ok := doc[key]
+	if !ok {
+		t.Fatalf("analyze JSON has no %q block: %s", key, stdout)
+	}
+	if err := json.Unmarshal(inner, out); err != nil {
+		t.Fatalf("analyze %s does not parse: %v\n%s", key, err, inner)
+	}
+	// Then the document itself, for the keys that sit beside the block rather than inside
+	// it: "hotspots" is one, because borg reports it next to dedup_size and not within.
+	// Unmarshalling twice fills each field from the level it actually lives at, and leaves
+	// alone the fields absent from this one.
 	if err := json.Unmarshal([]byte(stdout), out); err != nil {
 		t.Fatalf("analyze JSON does not parse: %v\n%s", err, stdout)
 	}

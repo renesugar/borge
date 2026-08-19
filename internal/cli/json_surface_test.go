@@ -27,7 +27,7 @@ import (
 // wrong as one it lacks, because a frontend probing for a JSON form gets a wrong answer
 // either way.
 
-var optionLine = regexp.MustCompile(`(^|\s)--?(json(-lines)?)\b`)
+var optionLine = regexp.MustCompile(`(^|\s)--?(log-json|json(-lines)?)\b`)
 
 // jsonOptions is the set of json-ish options a help text offers, e.g. {"json-lines"}.
 func jsonOptions(help string) map[string]bool {
@@ -57,13 +57,21 @@ func sortedKeys(m map[string]bool) []string {
 }
 
 // jsonSurfaceCommands are the commands compared. Subcommands are given as "benchmark cpu"
-// because both tools carry the option there, not on the parent.
+// because both tools carry --json there, not on the parent.
+//
+// The three command groups are here for --log-json alone. borg accepts it ahead of a
+// subcommand and borge did not until 2026-08-19 - a gap this test could not see, because
+// until then it only compared --json and --json-lines. --log-json is on every command, so
+// it contributes nothing that distinguishes one command from another, and that is exactly
+// why it went unchecked: the interesting cases are the ones where borge's structure differs
+// from borg's, and those are the groups. See DIVERGENCES.md #41.
 var jsonSurfaceCommands = []string{
 	"analyze", "break-lock", "check", "compact", "create", "delete", "diff",
 	"export-tar", "extract", "find", "import-tar", "info", "list", "prune",
 	"recreate", "rename", "repo-compress", "repo-create", "repo-delete",
 	"repo-info", "repo-list", "repo-space", "tag", "undelete", "version",
 	"with-lock", "benchmark cpu", "benchmark crud",
+	"debug", "key", "benchmark",
 }
 
 // "benchmark compression" is borge's own and has no borg counterpart, so it is not here:
@@ -110,13 +118,14 @@ func TestJSONOptionSurfaceMatchesBorg(t *testing.T) {
 	}
 
 	// A regex that matched nothing, or a help text that failed to render, would make
-	// every subtest pass by comparing two empty sets. borg has --json or --json-lines on
-	// twelve of the commands above; if the scan finds far fewer, it is the scan that
-	// broke.
+	// every subtest pass by comparing two empty sets. borg has --log-json on every command
+	// and --json or --json-lines on twelve of them; if the scan finds far fewer, it is the
+	// scan that broke.
 	if checked != len(jsonSurfaceCommands) {
 		t.Fatalf("checked %d of %d commands", checked, len(jsonSurfaceCommands))
 	}
-	if withJSON < 10 {
-		t.Fatalf("found a JSON option on only %d commands; the help scan is broken", withJSON)
+	if withJSON < len(jsonSurfaceCommands) {
+		t.Fatalf("found a JSON option on only %d of %d commands; borg has --log-json on "+
+			"every one, so the help scan is broken", withJSON, len(jsonSurfaceCommands))
 	}
 }

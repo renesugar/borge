@@ -41,13 +41,12 @@ func cmdVersion(e *Env, args []string) int {
 
 	switch {
 	case *asJSON:
-		out := versionJSON{
-			Client: client, Server: server,
-			Revision:          version.Revision(),
-			BorgSeries:        version.BorgSeries,
-			BorgCommit:        version.BorgUpstreamCommit,
-			RepositoryVersion: version.RepositoryVersion,
-		}
+		// Two keys, because that is what borg sends. borge used to add revision,
+		// borg_series, borg_commit and repository_version here - useful facts, and not
+		// borg's document: --json is an API, and a frontend iterating the object would
+		// see four fields borg never produces. They are all in "version --long", which is
+		// borge's own output and the right home for them. See docs/DIVERGENCES.md #42.
+		out := versionJSON{Client: client, Server: server}
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(out); err != nil {
@@ -64,10 +63,6 @@ func cmdVersion(e *Env, args []string) int {
 // versionJSON is the machine-readable form. The borg fields are what make an answer to
 // "can this build read that repository?" possible without running it.
 type versionJSON struct {
-	Client            string `json:"client"`
-	Server            string `json:"server"`
-	Revision          string `json:"revision,omitempty"`
-	BorgSeries        string `json:"borg_series"`
-	BorgCommit        string `json:"borg_commit"`
-	RepositoryVersion int    `json:"repository_version"`
+	Client string `json:"client"`
+	Server string `json:"server"`
 }

@@ -194,3 +194,10 @@ func (e *Env) takeParentLogJSON(group string, args []string) []string {
 	}
 	return out
 }
+
+// groupUsageOptions is the options section a command group prints. The group itself takes
+// no options of its own, only the one every command takes, and it has to say so: borge
+// accepts "--log-json" ahead of the subcommand (see takeParentLogJSON) and an option that
+// works but appears in no help is one nobody finds.
+const groupUsageOptions = "\noptions:\n" +
+	"  --log-json           write stderr as one JSON object per line instead of text\n"

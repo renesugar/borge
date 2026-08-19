@@ -78,7 +78,8 @@ func printBenchmarkUsage(w io.Writer) {
 	for _, c := range benchmarkCommands() {
 		fmt.Fprintf(&b, "  %-6s %s\n", c.name, c.summary)
 	}
-	fmt.Fprintf(w, "usage: borge benchmark <command> [options]\n\ncommands:\n%s", b.String())
+	fmt.Fprintf(w, "usage: borge benchmark <command> [options]\n\ncommands:\n%s%s",
+		b.String(), groupUsageOptions)
 }
 
 // benchTestMode reports whether the tiny-data mode is on.

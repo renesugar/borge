@@ -95,7 +95,8 @@ func printDebugUsage(w io.Writer) {
 	}
 	fmt.Fprintf(w, "usage: borge debug <command> [options]\n\n"+
 		"These commands read and write raw repository objects. put-obj and delete-obj\n"+
-		"make no consistency checks at all and can destroy a repository.\n\ncommands:\n%s", b.String())
+		"make no consistency checks at all and can destroy a repository.\n\ncommands:\n%s%s",
+		b.String(), groupUsageOptions)
 }
 
 // ---------------------------------------------------------------- opening

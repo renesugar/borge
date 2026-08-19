@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
@@ -409,22 +410,21 @@ func cmdInfo(e *Env, args []string) int {
 	if common.json {
 		list := make([]map[string]any, 0, len(archives))
 		for _, a := range archives {
-			list = append(list, map[string]any{
-				"name":     a.Info.Name,
-				"id":       hex.EncodeToString(a.ID),
-				"hostname": a.Info.Host,
-				"username": a.Info.User,
-				"comment":  a.Info.Comment,
-				"start":    a.Info.Start.Local().Format("2006-01-02T15:04:05.000000-07:00"),
-				"end":      a.Info.End.Local().Format("2006-01-02T15:04:05.000000-07:00"),
-				"time":     a.Info.Time.Local().Format("2006-01-02T15:04:05.000000-07:00"),
-				"nfiles":   a.Info.NFiles,
-				"tags":     a.Info.Tags,
-			})
+			list = append(list, infoArchiveJSON(a))
 		}
+		cacheDir, err := cache.Dir(o.repo.ID())
+		if err != nil {
+			return e.fail(err)
+		}
+		repoBlock, encBlock := o.envelope(path)
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "    ")
-		if err := enc.Encode(map[string]any{"archives": list}); err != nil {
+		if err := enc.Encode(map[string]any{
+			"archives":   list,
+			"cache":      map[string]any{"path": cacheDir},
+			"encryption": encBlock,
+			"repository": repoBlock,
+		}); err != nil {
 			return e.fail(err)
 		}
 		return ExitOK

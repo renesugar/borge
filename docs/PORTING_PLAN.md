@@ -1717,7 +1717,7 @@ a table at all.
 | 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
 | 3 | 35 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. Largest: `create` 6, `prune` 4, `recreate` 4, `check` 3, `diff` 3, `extract` 3, `repo-create` 3 |
 | 4 | `recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter` | §11.2 | part of row 3, listed apart because it is one feature over four options and needs the item-stream walk rather than the filesystem one |
-| 5 | JSON API: `repo-info`, `info`, `version`, `analyze` schemas | §11.4b | four of borg's eight `--json` commands still emit a document of borge's own shape; the other four match as of 2026-08-18 |
+| 5 | ~~JSON API: `repo-info`, `info`, `version`, `analyze` schemas~~ | §11.4b | **done 2026-08-19.** All eight of borg's `--json` commands now match, held by `TestJSONSchemaMatchesBorg` |
 | 6 | ~~`--log-json`~~ | §11.4b | **done 2026-08-19.** Registered on every command through `newFlagSet`, borge's equivalent of borg's common parser. All of stderr becomes JSON, not only the messages borge thought to convert |
 | 7 | Non-unicode paths in JSON, shared with `pydump.go` | §11.4b | `debug dump-*` does it correctly and the JSON commands do not; the two should be one implementation rather than agreeing by luck |
 | 8 | ~~`bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing~~ | DIVERGENCES #8 | **done 2026-08-19.** `flags_linux.go`; both keys now record "examined"; a flag borge stores survives a restore by borg |

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/renesugar/borge/internal/version"
 )
 
 // sleepBriefly is the poll interval for waiting on another process to take a lock.
@@ -180,24 +182,33 @@ func TestVersionPrintsClientAndServer(t *testing.T) {
 	if code := Run(e, []string{"version", "-json"}); code != ExitOK {
 		t.Fatalf("version -json exited %d\n%s", code, stderr.String())
 	}
-	var v struct {
-		Client            string `json:"client"`
-		Server            string `json:"server"`
-		BorgCommit        string `json:"borg_commit"`
-		RepositoryVersion int    `json:"repository_version"`
-	}
+	var v map[string]any
 	if err := json.Unmarshal([]byte(stdout.String()), &v); err != nil {
 		t.Fatalf("version -json does not parse: %v\n%s", err, stdout.String())
 	}
-	if v.Client == "" || v.Server == "" {
+	if v["client"] == "" || v["server"] == "" {
 		t.Errorf("version -json has an empty version: %+v", v)
 	}
-	// The borg pin is the point of the extra fields: it is what says which repositories
-	// this build was actually tested against.
-	if len(v.BorgCommit) != 40 {
-		t.Errorf("borg_commit is not a full commit hash: %q", v.BorgCommit)
+	// Two keys and no more: --json is borg's API and borg sends exactly these, so an
+	// extra field here is one a frontend iterating the object would not expect
+	// (DIVERGENCES.md #42).
+	if len(v) != 2 {
+		t.Errorf("version -json sent %d keys, want client and server only: %+v", len(v), v)
 	}
-	if v.RepositoryVersion != 4 {
-		t.Errorf("repository_version is %d, want 4", v.RepositoryVersion)
+
+	// The borg pin still has to be reported somewhere: it is what says which repositories
+	// this build was actually tested against. It moved to "version --long", which is
+	// borge's own output rather than borg's document.
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run(e, []string{"version", "-long"}); code != ExitOK {
+		t.Fatalf("version -long exited %d\n%s", code, stderr.String())
+	}
+	long := stdout.String()
+	if !strings.Contains(long, version.BorgUpstreamCommit[:12]) {
+		t.Errorf("version -long does not name the borg commit it was built against:\n%s", long)
+	}
+	if !strings.Contains(long, "version 4") {
+		t.Errorf("version -long does not name the repository format version:\n%s", long)
 	}
 }

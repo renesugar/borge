@@ -1371,3 +1371,54 @@ line is a valid object of the right type; the contract holds and the granularity
 command, as borg does. Making borge's match borg's exposed #40. It also moved `recreate`'s
 listing from stdout to stderr, where borg puts it — measured: `borg recreate --list` writes
 309 bytes to stderr and none of the listing to stdout.
+
+## 42. The last four JSON schemas — **fixed 2026-08-19**
+
+borg puts `--json` on eight commands. As of 2026-08-18 borge matched four; these are the
+other four, and each was wrong in its own way.
+
+**`version`** sent six keys where borg sends two. The four extra — `revision`,
+`borg_series`, `borg_commit`, `repository_version` — are useful facts and not borg's
+document, and `--json` is an API: a frontend iterating the object saw four fields borg never
+produces. All four are already in `version --long`, which is borge's own output and the
+right home for them, so nothing was lost by removing them.
+
+**`repo-info`** was a different document under the same name: `repository` carried `version`
+and `archive_count` and no `last_modified`, `encryption` said `mode` where borg says
+`encryption` and `id_hash`, and `manifest` is borg's key for nothing at all. A frontend
+reading `repository.last_modified` found nothing; one reading `encryption.mode` found
+something borg never sends. It now carries borg's `cache`, `encryption` and `repository`
+blocks, and the numbers it dropped are still in the text output.
+
+borg also sends `security_dir`, the per-repository directory where it records the manifest
+and nonce it last saw. borge has no such directory, so the key is omitted rather than
+pointed at a path that does not exist. The schema test asserts the key is present in borg's
+document *before* removing it, so the exemption fails if it ever stops being true.
+
+**`info`** sent nine of borg's fourteen archive keys. Four of the five missing —
+`command_line`, `cwd`, `chunker_params` and `duration` — borge was storing in the archive
+metadata all along and simply not reading back; the fifth is the `stats` block, into which
+`nfiles` moved and `original_size` was added. `tags` was `null` for an archive with none
+where borg sends `[]`, which reads as "unknown" to anything that iterates it.
+
+`info`'s `stats` also carries `chunking_time`, `hashing_time` and `store_stats`, and borge
+emits them here though it refuses to in `create` (#36). The difference is that in `info`
+they are always empty on borg's side too — nothing in an archive records them, so borg's
+Statistics object is fresh — so emitting the same constants says exactly what borg says.
+In `create` borg's are real measurements and borge's would be invented.
+
+**`analyze`** had the right numbers in the wrong document: every value matched borg's
+already, but borg nests them under `dedup_size` (or `by_name`) with `hotspots` beside them
+and the usual envelope, where borge emitted the numbers bare. One value was genuinely
+missing: borg's `by_name.total` carries `archives` as well as the two sizes, so a frontend
+reading `total.archives` found nothing where borg puts the number the row is a total of.
+
+`hotspots` is `null` rather than absent when it was not computed. That is borg's own value
+for the case — its comment reads "not computed, as opposed to computed and empty" — and it
+happens when fewer than two archives match. borge computes hot spots and its output already
+agreed with borg's exactly, so only the nesting changed.
+
+**Not fixed, and not a schema question:** `borg version` takes `-r` and borge's does not, so
+`borge version -r REPO --json` is an error where borg reports the server's version. It is
+one of the thirteen common options borge still lacks, and it means something only once the
+remote backends exist — until then borge's server *is* its client. Table row 9.

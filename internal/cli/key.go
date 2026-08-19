@@ -78,7 +78,8 @@ func printKeyUsage(w io.Writer) {
 	for _, c := range keyCommands() {
 		fmt.Fprintf(&b, "  %-18s %s\n", c.name, c.summary)
 	}
-	fmt.Fprintf(w, "usage: borge key <command> [options]\n\ncommands:\n%s", b.String())
+	fmt.Fprintf(w, "usage: borge key <command> [options]\n\ncommands:\n%s%s",
+		b.String(), groupUsageOptions)
 }
 
 // openKeys opens a repository far enough to manage its keys: no manifest, no lock.
