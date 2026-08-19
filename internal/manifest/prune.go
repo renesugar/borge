@@ -125,11 +125,24 @@ func (p PrunePolicy) Empty() bool {
 }
 
 // PruneDecision is what happens to one archive and why.
+// keptBy is which rule saved an archive, and whether --keep-oldest also did.
+type keptBy struct {
+	rule   RuleKind
+	index  int
+	oldest bool
+}
+
 type PruneDecision struct {
 	Info Info
 	Keep bool
 	// Reason names the rule that saved it, or why it is going.
 	Reason string
+	// Rule, Index and Oldest are the same decision in parts, for a caller that has to
+	// render it borg's way: "daily #1", or "daily[oldest] #1". Index is zero-based here
+	// and one-based in borg's message.
+	Rule   RuleKind
+	Index  int
+	Oldest bool
 }
 
 // ruleOrder is finest to coarsest. The order is load-bearing: a rule only keeps archives
@@ -154,6 +167,8 @@ func Prune(archives []Info, policy PrunePolicy) []PruneDecision {
 	}
 
 	keep := map[string]string{} // archive id -> the reason it is kept
+	// keepRule is the same decision in parts, for a caller that renders it borg's way.
+	keepRule := map[string]keptBy{}
 	idOf := func(info Info) string { return string(info.ID) }
 
 	// Protected archives first, so they never consume a rule's quota.
@@ -207,21 +222,33 @@ func Prune(archives []Info, policy PrunePolicy) []PruneDecision {
 				continue
 			}
 			keep[idOf(info)] = fmt.Sprintf("%s[%d]", kind, kept)
+			keepRule[idOf(info)] = keptBy{rule: kind, index: kept}
 			kept++
 		}
 	}
 
 	if policy.KeepOldest && len(sorted) > 0 {
 		oldest := sorted[len(sorted)-1]
-		if _, ok := keep[idOf(oldest)]; !ok {
-			keep[idOf(oldest)] = "oldest"
+		id := idOf(oldest)
+		if _, ok := keep[id]; !ok {
+			keep[id] = "oldest"
+			keepRule[id] = keptBy{oldest: true}
+		} else {
+			by := keepRule[id]
+			by.oldest = true
+			keepRule[id] = by
 		}
 	}
 
 	out := make([]PruneDecision, 0, len(sorted))
 	for _, info := range sorted {
-		if reason, ok := keep[idOf(info)]; ok {
-			out = append(out, PruneDecision{Info: info, Keep: true, Reason: reason})
+		id := idOf(info)
+		if reason, ok := keep[id]; ok {
+			by := keepRule[id]
+			out = append(out, PruneDecision{
+				Info: info, Keep: true, Reason: reason,
+				Rule: by.rule, Index: by.index, Oldest: by.oldest,
+			})
 		} else {
 			out = append(out, PruneDecision{Info: info, Keep: false, Reason: "no rule keeps it"})
 		}

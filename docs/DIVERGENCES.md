@@ -964,3 +964,38 @@ parse: printing an empty column instead would break a script that greps for `Non
 
 The alternative — an empty column — is the tidier answer and is what borge did first. It
 was changed after a differential over a streamed item showed the difference.
+
+## 34. `prune` says what it did
+
+**Stage 8 · `internal/cli/prune.go` · deliberate**
+
+The per-archive listing is borg's, exactly — the label padded to 44 columns, then the
+archive rendered through `--format`:
+
+```
+Keeping archive (rule: daily #1):            a-1    Mon, 2026-08-17 … [id]
+Would prune:                                 a-10   Sat, 2026-08-08 … [id]
+Pruning archive (1/3):                       b-10   Sat, 2026-08-08 … [id]
+```
+
+What borge adds is one summary line, on stderr, whether or not a `--list` option was given:
+
+```
+would prune 1 archive(s), kept 1, policy: daily=1
+```
+
+borg prints **nothing at all** without `--list`, `--list-kept` or `--list-pruned`. This is
+the same silence as #31, in the command that removes history: "one archive would go" and
+"your selector matched nothing" are not distinguishable from an empty screen, and a
+retention policy that quietly stops matching is a backup that quietly stops being kept.
+`PORTING_PLAN.md` §2.3.
+
+**Where borg has no label, borge keeps its own reason.** `--keep-within`, the `@PROT` tag
+and `--keep-oldest` on its own are not one of borg's counted rules, so there is no
+`daily #1` to print and the reason borge already had is used instead.
+
+**`--keep-oldest` is borge's own option** — borg 2 has no such thing, which is worth
+recording twice over: once because the label above has to cope with it, and once because
+the option gate cannot see it. That gate reports borg options borge lacks and not the
+reverse, so borge may carry others nobody has written down. Recorded in `PORTING_PLAN.md`
+§11.2 as work on the gate.

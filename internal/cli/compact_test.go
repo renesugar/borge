@@ -353,22 +353,7 @@ func TestPruneMatchesBorg(t *testing.T) {
 			// borg's dry run names what it would keep and what it would prune.
 			args := append([]string{"prune", "-r", r.path, "--dry-run", "--list"}, p.borgArgs...)
 			borgOut := r.mustRun(args...)
-			// borg's line is "Keeping archive (rule: daily #1):    NAME    <date> [id]",
-			// so the name is the first field after the colon.
-			borgKeep := map[string]bool{}
-			for _, line := range strings.Split(borgOut, "\n") {
-				if !strings.HasPrefix(line, "Keeping archive") {
-					continue
-				}
-				_, rest, found := strings.Cut(line, "):")
-				if !found {
-					continue
-				}
-				fields := strings.Fields(rest)
-				if len(fields) > 0 {
-					borgKeep[fields[0]] = true
-				}
-			}
+			borgKeep := keptArchiveNames(borgOut)
 			if len(borgKeep) == 0 {
 				t.Skipf("could not read borg's decisions from:\n%s", borgOut)
 			}
@@ -378,13 +363,17 @@ func TestPruneMatchesBorg(t *testing.T) {
 			if code != ExitOK {
 				t.Fatalf("borge prune exited %d\n%s", code, stderr)
 			}
-			borgeKeep := map[string]bool{}
-			for _, line := range strings.Split(stdout, "\n") {
-				fields := strings.Fields(line)
-				if len(fields) < 3 || fields[0] != "keep" {
-					continue
-				}
-				borgeKeep[fields[2]] = true
+			if strings.TrimSpace(stdout) != "" {
+				t.Errorf("prune wrote to stdout, which is for a command's data:\n%s", stdout)
+			}
+			// The same parser as borg's above, because the two listings are now the same
+			// format. It used to be a second parser for borge's own layout, and when that
+			// layout changed the parser quietly matched nothing and every archive borg
+			// kept was reported as pruned by borge - six failures describing a decision
+			// bug that did not exist.
+			borgeKeep := keptArchiveNames(stderr)
+			if len(borgeKeep) == 0 {
+				t.Fatalf("could not read borge's decisions from:\n%s", stderr)
 			}
 
 			for name := range borgKeep {
@@ -461,4 +450,26 @@ func TestPruneIsSoftAndRecoverable(t *testing.T) {
 	if out, err := r.runErr("check", "-r", r.path); err != nil {
 		t.Errorf("borg check after prune and undelete: %v\n%s", err, out)
 	}
+}
+
+// keptArchiveNames reads the archive names out of a prune listing.
+//
+// One parser for both tools, because borge's listing is borg's now: "Keeping archive
+// (rule: daily #1):    NAME    <date> [id]", so the name is the first field after the
+// colon. Two parsers is how the borge side came to match nothing when its layout changed.
+func keptArchiveNames(out string) map[string]bool {
+	kept := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "Keeping archive") {
+			continue
+		}
+		_, rest, found := strings.Cut(line, "):")
+		if !found {
+			continue
+		}
+		if fields := strings.Fields(rest); len(fields) > 0 {
+			kept[fields[0]] = true
+		}
+	}
+	return kept
 }

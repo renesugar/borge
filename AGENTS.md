@@ -151,6 +151,17 @@ parsed value actually ends up. `PORTING_PLAN.md` §2.3 has the pattern and the t
 A silent no-op looks exactly like success, which is why none of the four was caught by
 seven stages of differential testing.
 
+**An option that does nothing is worse than a missing one.** `borge break-lock --json`
+parses, prints plain text and exits 0; borg has no such option at all. `--json` is
+registered on 19 commands and read by three. A missing option produces an error the user
+can act on; an ignored one produces a wrong belief. `PORTING_PLAN.md` §11.4.
+
+**`--json` is borg's API, not a formatting option.** borg has no Python-level API and says
+so; the command line plus JSON output *is* the interface frontends are written against
+(`docs/internals/frontends.rst` in the borg checkout). Six of borg's eleven JSON commands
+produce no JSON in borge. Treat a change to JSON output the way you would treat a change to
+a published API, and compare it against borg's as data rather than as text.
+
 **Silence is an answer nobody can act on.** `borge delete --dry-run` without `--list`
 prints nothing, so "two archives would go" and "your selector matched nothing" look
 identical — and that is inherited from borg, which does the same. Where borge must match

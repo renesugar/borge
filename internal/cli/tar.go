@@ -251,7 +251,11 @@ func cmdExportTar(e *Env, args []string) int {
 		Filter:          func(it *item.Item) bool { return matcher.Match(it.Path) },
 		OnItem: func(path string) {
 			if *list {
-				fmt.Fprintln(e.Stdout, path)
+				// stderr, not stdout: "export-tar --list ARCHIVE -" writes the tar to
+				// stdout, and a listing mixed into it produces a corrupt archive. borg
+				// puts every listing on stderr for this reason. Measured: borge wrote the
+				// paths into the tar and "tar -t" rejected the result.
+				fmt.Fprintln(e.Stderr, path)
 			}
 		},
 		OnWarning: func(p, reason string) {

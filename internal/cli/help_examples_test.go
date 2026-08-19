@@ -529,8 +529,10 @@ var matchArchivesExamples = map[string]exampleCheck{
 	`borge prune --keep-daily 7 -a 'host:laptop'`: {
 		wantExit: ExitOK,
 		check: func(t *testing.T, f *helpFixture, stdout, stderr string) {
-			if !strings.Contains(stdout, "pruned") {
-				t.Errorf("prune said nothing about what it pruned:\n%s", stdout)
+			// stderr: prune's listing and summary are progress, and borg puts progress
+			// there so that a command's data has stdout to itself.
+			if !strings.Contains(stderr, "pruned") {
+				t.Errorf("prune said nothing about what it pruned:\n%s", stderr)
 			}
 			// Every archive in the fixture was made on this host, in the same second,
 			// so one daily period holds all of them and --keep-daily 7 keeps one.

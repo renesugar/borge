@@ -101,7 +101,7 @@ func cmdDelete(e *Env, args []string) int {
 	}
 	// borg says this on every real delete, and it is the sentence that stops a user
 	// wondering why the disk did not shrink: the delete is soft until a compaction runs.
-	fmt.Fprintln(e.Stdout, `Done. Run "borge compact" to free space.`)
+	fmt.Fprintln(e.Stderr, `Done. Run "borge compact" to free space.`)
 	return ExitOK
 }
 
@@ -119,7 +119,7 @@ func (e *Env) reportDryRun(verb string, listed bool, n int) {
 	if listed {
 		hint = ""
 	}
-	fmt.Fprintf(e.Stdout, "would %s %d archive(s); nothing was changed%s\n", verb, n, hint)
+	fmt.Fprintf(e.Stderr, "would %s %d archive(s); nothing was changed%s\n", verb, n, hint)
 }
 
 // listArchive prints borg's per-archive line for delete and undelete.
@@ -142,7 +142,8 @@ func (e *Env) listArchive(list, dryRun bool, verb, doneLabel string, info manife
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(e.Stdout, "%s%s (%d/%d)\n", label, line, i+1, total)
+	// stderr, as borg's is: these are progress, not the command's data.
+	fmt.Fprintf(e.Stderr, "%s%s (%d/%d)\n", label, line, i+1, total)
 	return nil
 }
 
@@ -204,7 +205,7 @@ func cmdUndelete(e *Env, args []string) int {
 	if err := o.manifest.Write(); err != nil {
 		return e.fail(err)
 	}
-	fmt.Fprintln(e.Stdout, "Done.")
+	fmt.Fprintln(e.Stderr, "Done.")
 	return ExitOK
 }
 

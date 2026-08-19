@@ -1882,8 +1882,12 @@ silent gap. Verified by mutation: 22 for `create` fails with OVER BUDGET, 24 rep
 **What it cannot see, stated in the script rather than left to be discovered.** Semantics
 (both tools have a `-v`; borg's is a log level and borge's is `--verbose`), and the options
 of `debug`, `key` and `benchmark` subcommands, which neither tool lists at the top level so
-both sides report none. Extending it to subcommands is the next piece of work on the gate
-itself.
+both sides report none.
+
+**And one it could see and does not: options borge has that borg has not.** The gate walks
+borg's list and asks whether borge has each one; it never walks borge's. That direction was
+run by hand on 2026-08-18 and §11.4 records what it found — including a class of option
+that exists, parses, and does nothing.
 - ~~**`R` roots in a patterns file**~~ (DIVERGENCES #25). **Done 2026-08-18.**
   `patternFlags.roots()` collects them from a patterns file or a `--pattern 'R PATH'`, and
   `create` puts them ahead of the command-line paths as borg does. Fixing it turned up
@@ -1896,6 +1900,110 @@ itself.
   placeholders; the store keeps its absolute-only rule, because a backend rooted at
   something that depends on the process working directory is one nothing else can reason
   about. No `~` expansion — borg does none, and inventing it would surprise a borg script.
+
+### 11.4 Options borge has and borg has not — audited 2026-08-18
+
+The option gate asks, for each of borg's options, whether borge has it. Nobody had asked
+the other way. Running it by hand over every command and every `debug`, `key` and
+`benchmark` subcommand turns up three kinds of difference, and only the first is harmless.
+
+#### a. Real borge features that are not written down as borge's
+
+Confirmed by running them, not by reading help text:
+
+| option | what it does | borg |
+| --- | --- | --- |
+| `extract -C DIR` | extract into DIR | no equivalent; borg extracts into the working directory |
+| `version --long` | the Go version and platform as well | not present |
+| `prune --keep-within`, `--keep-last`, `--keep-oldest` | retention rules | borg 2 has `--keep KEEP` instead, plus `--keep-13weekly` and `--keep-3monthly` |
+| `--reverse` | flip the listing order | **borg has no `--reverse` anywhere** |
+| `delete --force` | act on a selector matching several archives | borg needs no such thing; it never refuses |
+
+None of these is wrong. All of them are undocumented *as extensions*, which is the problem:
+a user reading `borge prune -help` cannot tell that `--keep-within` will not work under
+borg, and a script written against borge will fail on a machine that has the other tool.
+**Every borge-only option needs to say so in its help text**, in the same breath as what it
+does.
+
+#### b. `--json` is borg's API, and borge's is part missing and part fake
+
+This is the one to take seriously, and the framing matters. borg's own
+`docs/internals/frontends.rst` opens:
+
+> Borg does not have a public API on the Python level. […] Borg does on the other hand
+> provide an API on a command-line level. In other words, a frontend should (for example)
+> create a backup archive by invoking `borg create`, provide command-line parameters/options
+> as needed, and parse JSON output from Borg.
+
+So `--json`, `--json-lines` and `--log-json` are not conveniences: they are **the**
+interface borg offers to other programs, with a documented schema, message IDs, and rules
+for what happens to a path that is not valid unicode. A port that gets them wrong is a port
+no frontend can drive.
+
+Measured on 2026-08-18, by running every one:
+
+| | borg | borge |
+| --- | --- | --- |
+| `--json` offered on | 11 commands: `repo-list`, `repo-info`, `list`, `info`, `create`, `diff`, `import-tar`, `prune`, `find`, `analyze`, `version` | **19** — `commonFlags` registers it for every command |
+| `--json` actually produces JSON | all 11 | **5**: `repo-list`, `repo-info`, `info`, `analyze`, `version` |
+| `--json-lines` | 3: `list`, `diff`, `find` | the same 3, working |
+| `--log-json` | every command | **absent** |
+
+Two separate failures, then. **Six of borg's JSON commands produce no JSON in borge** —
+`list`, `create`, `diff`, `import-tar`, `prune`, `find` — which is a missing API. And
+**about eight commands offer `--json` that borg does not have it on at all**, where it
+parses and is ignored:
+
+```
+borge break-lock --json      no locks are held on this repository
+borge repo-space --json      there is 0 B of reserved space in this repository
+borge compact --json         (no output)
+```
+
+A missing option produces an error a frontend can act on. An ignored one produces a wrong
+belief, and for an *API* that means a frontend written against borge gets plain text where
+it parsed JSON.
+
+**The work, in order:**
+
+1. **Stop registering `--json` in `commonFlags`.** Register it per command, so the list of
+   commands that mean it is explicit and cannot drift again.
+2. **Implement `--json` for the six that are missing it**, to borg's documented shape — not
+   to a shape that merely parses. The schema is in `frontends.rst`; the differential tests
+   should compare borg's JSON with borge's as *data*, key by key, as
+   `TestRepoListMatchesBorg` already does.
+3. **`--log-json`**, which is a whole feature rather than an option: structured log lines
+   with the message IDs `frontends.rst` documents. It is one of the 15 absent common
+   options and the only one that is part of the API.
+4. **The non-unicode rule is already half-ported.** `frontends.rst` describes how borg 2
+   represents a path that is not valid unicode; `internal/cli/pydump.go` reproduces exactly
+   that for `debug dump-*`. Whatever it does there is what the JSON commands must do, and
+   the two should share one implementation rather than agreeing by luck.
+
+#### c. Shared-group leakage
+
+`--reverse` and `--deleted` reach every command that uses `listSelectors`, because borge
+registers the group whole. borg's `define_archive_filters_group` takes a `deleted=False`
+parameter and enables it per command, so borg offers `--deleted` on a few and borge on all
+of them. Some of those are meaningful in borge and some are not; each needs deciding rather
+than inheriting.
+
+#### The work
+
+1. **Extend `option-coverage.sh` to the reverse direction**, so this is measured rather
+   than audited by hand once. A borge-only option is not a failure — a port may add
+   things — but an *unrecorded* one is, so the gate should require each to be listed with a
+   reason, exactly as the command gate does for absences.
+2. **Extend it to subcommands** (`debug`, `key`, `benchmark`), which neither tool lists at
+   the top level. The hand audit found the same `--json` no-op on all nineteen of them.
+3. **Document every borge-only option as borge-only**, in its help text.
+4. **Treat `--json` as the API it is**: out of `commonFlags`, implemented for the six
+   commands that are missing it, removed from the ones borg does not offer it on, and
+   `--log-json` added. See (b) above.
+5. **Decide `--reverse` and `--deleted` per command** rather than by inheritance.
+
+Until 1 and 2 land, the option gate's "complete" for a command means "has everything borg
+has", not "has exactly what borg has".
 
 ### 11.3 Templating: is it worth matching borg's, and how far is it done?
 
@@ -2556,7 +2664,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 39 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 35 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

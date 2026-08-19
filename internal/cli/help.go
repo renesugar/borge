@@ -351,6 +351,7 @@ BEHAVIOUR
 
   BORGE_FIND_FORMAT          the default --format for "find", when it is not given
   BORGE_LIST_FORMAT          the default --format for "list", when it is not given
+  BORGE_PRUNE_FORMAT         the default --format for "prune", when it is not given
   BORGE_REPO_LIST_FORMAT     the default --format for "repo-list", when it is not given
   BORGE_UNITS                si (default), iec or raw, for how sizes are printed
   BORGE_HOST_ID              this machine's lock identity, when the derived one is wrong

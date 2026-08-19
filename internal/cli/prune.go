@@ -9,10 +9,10 @@
 package cli
 
 import (
-	"encoding/hex"
 	"fmt"
 	"time"
 
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/manifest"
 )
 
@@ -40,6 +40,10 @@ func cmdPrune(e *Env, args []string) int {
 	keepOldest := fs.Bool("keep-oldest", false, "always keep the oldest archive")
 	dryRun := fs.Bool("dry-run", false, "say what would be pruned, prune nothing")
 	list := fs.Bool("list", false, "print every archive and the rule that kept it")
+	listKept := fs.Bool("list-kept", false, "print only the archives that are kept")
+	listPruned := fs.Bool("list-pruned", false, "print only the archives that are pruned")
+	short := fs.Bool("short", false, "print only the archive names")
+	format := fs.String("format", "", "output format for each archive, e.g. '{archive} {time}'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -86,28 +90,60 @@ func cmdPrune(e *Env, args []string) int {
 		return e.fail(err)
 	}
 	if len(infos) == 0 {
-		fmt.Fprintln(e.Stdout, "no archives to prune")
+		fmt.Fprintln(e.Stderr, "no archives to prune")
 		return ExitOK
+	}
+
+	// borg's default, and the same precedence as everywhere else: --format, then --short,
+	// then the environment, then the built-in. Note it carries no {NL}: the command adds
+	// the newline, because the line is a label plus this.
+	template := *format
+	if template == "" {
+		if *short {
+			template = "{archive}"
+		} else if v, ok := e.lookupBorg("PRUNE_FORMAT"); ok && v != "" {
+			template = v
+		} else {
+			template = "{archive:<36} {time} [{id}]"
+		}
+	}
+	if _, err := formatter.Keys(template); err != nil {
+		return e.fail(err)
 	}
 
 	decisions := manifest.Prune(infos, policy)
 
+	total := 0
+	for _, d := range decisions {
+		if !d.Keep {
+			total++
+		}
+	}
+
 	var pruned, kept int
 	for _, d := range decisions {
-		short := hex.EncodeToString(d.Info.ID)[:8]
+		line, err := formatter.Format(template, archiveValues(d.Info))
+		if err != nil {
+			return e.fail(err)
+		}
+		var label string
 		if d.Keep {
 			kept++
-			if *list || *dryRun || common.verbose {
-				fmt.Fprintf(e.Stdout, "keep   %s %-20s %s  (%s)\n",
-					short, d.Info.Name, formatTime(d.Info.Time), d.Reason)
+			label = fmt.Sprintf("Keeping archive (rule: %s):", keepRuleLabel(d))
+		} else {
+			pruned++
+			if *dryRun {
+				label = "Would prune:"
+			} else {
+				label = fmt.Sprintf("Pruning archive (%d/%d):", pruned, total)
 			}
-			continue
 		}
-		pruned++
-		if *list || *dryRun || common.verbose {
-			fmt.Fprintf(e.Stdout, "prune  %s %-20s %s\n", short, d.Info.Name, formatTime(d.Info.Time))
+		// borg's own layout: the label padded to 44 columns, a space, then the archive.
+		// On stderr, because it is progress rather than the command's data.
+		if *list || (*listKept && d.Keep) || (*listPruned && !d.Keep) {
+			fmt.Fprintf(e.Stderr, "%-44s %s\n", label, line)
 		}
-		if *dryRun {
+		if d.Keep || *dryRun {
 			continue
 		}
 		if err := o.manifest.Archives.Delete(d.Info.ID); err != nil {
@@ -121,14 +157,18 @@ func cmdPrune(e *Env, args []string) int {
 		}
 	}
 
+	// borg prints no summary at all, and without a --list option prints nothing whatever.
+	// borge says what happened, for the reason in PORTING_PLAN.md §2.3: a prune that
+	// reports nothing cannot be told from one that matched nothing, and this is the
+	// command that removes history. See DIVERGENCES.md #34.
 	verb := "pruned"
 	if *dryRun {
 		verb = "would prune"
 	}
-	fmt.Fprintf(e.Stdout, "%s %d archive(s), kept %d, policy: %s\n",
+	fmt.Fprintf(e.Stderr, "%s %d archive(s), kept %d, policy: %s\n",
 		verb, pruned, kept, manifest.DescribePolicy(policy))
 	if !*dryRun && pruned > 0 {
-		fmt.Fprintln(e.Stdout, "the pruned archives are soft-deleted; run 'borge compact' to reclaim the space")
+		fmt.Fprintln(e.Stderr, `Done. Run "borge compact" to free space.`)
 	}
 	return ExitOK
 }
@@ -167,4 +207,23 @@ func parseKeepWithin(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("--keep-within %q: %q is not a count", s, s[:len(s)-1])
 	}
 	return time.Duration(n) * mult, nil
+}
+
+// keepRuleLabel is borg's description of why an archive survived: the rule's name, a
+// "[oldest]" mark when --keep-oldest also applied, and the rule's one-based index.
+//
+// borge's own reason strings ("daily[0]", "within 48h", "protected by @PROT") say more in
+// some cases, but the listing is compared against borg's, so the shape is borg's.
+func keepRuleLabel(d manifest.PruneDecision) string {
+	if d.Rule == "" {
+		// Kept by something that is not one of the counted rules: --keep-within, the
+		// protected tag, or --keep-oldest on its own. borg has no equivalent label for
+		// these, so borge's reason is used rather than inventing a rule name.
+		return d.Reason
+	}
+	oldest := ""
+	if d.Oldest {
+		oldest = "[oldest]"
+	}
+	return fmt.Sprintf("%s%s #%d", d.Rule, oldest, d.Index+1)
 }
