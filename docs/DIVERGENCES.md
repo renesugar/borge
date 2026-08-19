@@ -1203,7 +1203,7 @@ and there is no single "borg number" to match in any case, since borg's `create`
 as well, so that the day upstream fixes this the test fails and the decision gets revisited
 rather than silently persisting.
 
-## 39. borg excludes items by attribute and borge does not
+## 39. Items excluded by attribute — **fixed 2026-08-19**
 
 borg does not back up a file carrying the **nodump** flag. `archive.py`'s
 `maybe_exclude_by_attr` raises `BackupItemExcluded` for three cases, and `create` reports
@@ -1230,6 +1230,50 @@ than anything in #8 — those were fields on items that were stored either way.
 
 Found on 2026-08-19 while testing the flag capture in #8, and it could not have been found
 before it: borge had no flags to test against, so the rule had nothing to read. Fixing #8
-is what makes this implementable, which is why the two are adjacent and why this is filed
+is what makes this implementable, which is why the two are adjacent and why this was filed
 rather than folded in — it changes what a backup contains, and that deserves its own change
 and its own gate.
+
+**Done the same day.** `excludedByAttr` in `internal/archive/create_linux.go`, checked
+where borg checks it: after the extended attributes are known and before any content is
+read, so an excluded file is never chunked first. An excluded directory ends the walk into
+its subtree, as borg's `recurse = False` does.
+
+Two things measured rather than assumed, each of which would have made a plausible-looking
+implementation wrong:
+
+**borg's dry run does not apply the rule.** `borg create --dry-run --list` reports `+` for
+a nodump file that a real run reports `-`, because the dry run never collects the extended
+attributes and so cannot know. borge matches, and `TestDryRunDoesNotApplyAttributeExclusion`
+asserts the `+` for *both* tools so that the inconsistency is recorded as borg's rather
+than mistaken for borge's. It is worth knowing as a user: a dry run over-reports what will
+be stored wherever these markers are in play.
+
+**The Apple marker cannot be set on Linux at all.** Linux permits only the `user`,
+`security`, `system` and `trusted` xattr namespaces, and
+`com.apple.metadata:com_apple_backup_excludeItem` is in none of them — `Setxattr` returns
+EOPNOTSUPP. So that rule is unreachable through `create` on this platform, though it still
+matters for archives made on macOS and for anything imported from a tar carrying it. It is
+covered by a unit test on the rule itself (`internal/archive/exclude_attr_test.go`) rather
+than by the differential, and the differential says why in a comment instead of silently
+omitting it.
+
+**A consequence for testing, recorded because it looked like a regression.** Implementing
+this invalidated a test written the same morning. `TestFileFlagsRoundTripAgainstBorg`
+archived a nodump file and checked the stored flag — and once the exclusion existed, no
+unprivileged `create` could produce an archive carrying a flag at all: nodump is the only
+flag settable without `CAP_LINUX_IMMUTABLE`, and a nodump file is now archived by neither
+tool. The test had been passing only because borge did not yet implement the rule.
+
+It is replaced by three narrower claims rather than one impossible one: the flags are read
+and stored (`TestExaminedAttributesAreRecorded`); a real flag *value* is read, since borge
+can only exclude a nodump file by having read it (the tests above); and a stored flag is
+applied on restore (`TestFlagsSurviveExtraction`), which builds an archive holding a
+flagged item directly, because that is how such an archive actually arises — from a
+privileged backup or another machine.
+
+The rules are not uniform and the unit test exists mostly to pin that: the Apple attribute
+excludes if *present at all* whatever its value, while `user.xdg.robots.backup` excludes
+only when it is exactly `false` — that attribute exists to say "yes, back this up", so
+reading it as a presence check would silently drop files whose owner asked for the
+opposite.

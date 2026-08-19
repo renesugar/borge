@@ -362,8 +362,15 @@ func (w *walker) walk(abs string, depth int) error {
 			}
 			// The directory itself, then the tag files that excluded it - so a restore
 			// can be excluded again the same way.
-			if err := w.archive(abs, stored, &st); err != nil {
+			excluded, err := w.archive(abs, stored, &st)
+			if err != nil {
 				return err
+			}
+			if excluded {
+				// An attribute excluded it as well as the tag. Keeping the tag files of a
+				// directory that is not itself in the archive would store the marker for
+				// something absent.
+				return nil
 			}
 			for _, tag := range tags {
 				if err := w.walk(filepath.Join(abs, tag), depth+1); err != nil {
@@ -390,8 +397,15 @@ func (w *walker) walk(abs string, depth int) error {
 		}
 		w.report('+', stored)
 	default:
-		if err := w.archive(abs, stored, &st); err != nil {
+		excluded, err := w.archive(abs, stored, &st)
+		if err != nil {
 			return err
+		}
+		if excluded {
+			// borg stops here too, setting recurse = False: the nodump flag on a
+			// directory means the subtree, not the directory entry alone. Descending
+			// would archive the children of something that is not in the archive.
+			return nil
 		}
 	}
 
@@ -426,9 +440,19 @@ func (w *walker) walk(abs string, depth int) error {
 }
 
 // archive builds and stores the item for one filesystem object.
-func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
+func (w *walker) archive(abs, stored string, st *unix.Stat_t) (bool, error) {
 	it := &item.Item{Path: stored}
 	w.fillMetadata(it, abs, st)
+
+	// Checked here, after the extended attributes are known and before any content is
+	// read, which is where borg checks it and for borg's stated reason: a file the flags
+	// exclude should not be chunked first. The caller uses the result to decide whether to
+	// descend, because an excluded directory takes its whole subtree with it.
+	if excludedByAttr(it.XAttrs, it.BSDFlags) {
+		w.stats.Skipped++
+		w.report('-', stored)
+		return true, nil
+	}
 
 	status := byte('A')
 	switch st.Mode & unix.S_IFMT {
@@ -438,7 +462,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 	case unix.S_IFLNK:
 		target, err := os.Readlink(abs)
 		if err != nil {
-			return w.fail(abs, err)
+			return false, w.fail(abs, err)
 		}
 		it.Target = &target
 		status = 's'
@@ -449,7 +473,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 	case unix.S_IFREG:
 		chunks, st2, err := w.fileChunks(abs, stored, st)
 		if err != nil {
-			return w.fail(abs, err)
+			return false, w.fail(abs, err)
 		}
 		it.Chunks = chunks
 		it.ChunksSet = true
@@ -465,12 +489,12 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 			// them, and so does borge - archiving one would restore something that is not
 			// the same object.
 			w.stats.Skipped++
-			return nil
+			return false, nil
 		}
 		if w.opts.ReadSpecial {
 			chunks, _, err := w.fileChunks(abs, stored, st)
 			if err != nil {
-				return w.fail(abs, err)
+				return false, w.fail(abs, err)
 			}
 			it.Chunks = chunks
 			it.ChunksSet = true
@@ -487,14 +511,47 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) error {
 
 	default:
 		w.stats.Skipped++
-		return nil
+		return false, nil
 	}
 
 	if err := w.builder.AddItem(it); err != nil {
-		return w.fail(abs, err)
+		return false, w.fail(abs, err)
 	}
 	w.report(status, stored)
-	return nil
+	return false, nil
+}
+
+// Attribute names borg treats as "do not back this up". Both are conventions from
+// elsewhere rather than borg's own: the first is how macOS marks a path excluded from Time
+// Machine, the second is the XDG proposal for telling backup tools to skip a directory.
+const (
+	xattrAppleExclude = "com.apple.metadata:com_apple_backup_excludeItem"
+	xattrXDGBackup    = "user.xdg.robots.backup"
+)
+
+// excludedByAttr is borg's maybe_exclude_by_attr: an item the filesystem itself asks not to
+// be backed up.
+//
+// Three markers, and the tests for them are not uniform, so each is spelled out:
+//
+//   - the Apple attribute excludes if it is *present at all*, whatever its value, because
+//     the value is a plist nobody reads;
+//   - the XDG attribute excludes only when it is exactly "false" - the attribute exists to
+//     say "yes, back this up", and any other value including "true" leaves the item in;
+//   - the nodump flag excludes, which is what the flag has meant since dump(8).
+//
+// borge did not implement any of this until 2026-08-19, so a file its owner had marked "do
+// not back up" was backed up. It could not have been implemented earlier: the rule reads
+// exactly the two item fields borge did not record until the same day. See
+// docs/DIVERGENCES.md #39 and #8.
+func excludedByAttr(xattrs map[string][]byte, bsdFlags *int64) bool {
+	if _, ok := xattrs[xattrAppleExclude]; ok {
+		return true
+	}
+	if v, ok := xattrs[xattrXDGBackup]; ok && string(v) == "false" {
+		return true
+	}
+	return bsdFlags != nil && *bsdFlags&bsdNoDump != 0
 }
 
 // report tells the caller what happened to one path. borg's status characters: "A" added,

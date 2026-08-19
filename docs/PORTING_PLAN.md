@@ -1721,7 +1721,7 @@ a table at all.
 | 6 | `--log-json` | §11.4b | absent entirely; a feature, not an option |
 | 7 | Non-unicode paths in JSON, shared with `pydump.go` | §11.4b | `debug dump-*` does it correctly and the JSON commands do not; the two should be one implementation rather than agreeing by luck |
 | 8 | ~~`bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing~~ | DIVERGENCES #8 | **done 2026-08-19.** `flags_linux.go`; both keys now record "examined"; a flag borge stores survives a restore by borg |
-| 8b | Attribute-based exclusion: nodump, and the two backup-exclusion xattrs | DIVERGENCES #39 | **found 2026-08-19 while testing row 8**, and not implementable before it. borg omits such files from the archive entirely; borge stores them. A difference in archive *contents*, so the most serious remaining row |
+| 8b | ~~Attribute-based exclusion: nodump, and the two backup-exclusion xattrs~~ | DIVERGENCES #39 | **done 2026-08-19**, the same day it was found. Checked before content is read, and an excluded directory ends the walk into its subtree |
 | 9 | Option gate: the reverse direction, and subcommands | §11.4 work 1–2 | until both land, "complete" for a command means "has everything borg has", not "has exactly what borg has" |
 | 10 | Every borge-only option documented as borge-only in its help text | §11.4 work 3 | known: `prune --keep-within/--keep-last/--keep-oldest`, `extract -C`, `version --long`, `--reverse`, `delete --force` |
 | 11 | `--reverse` and `--deleted` decided per command | §11.4c | they reach every command using `listSelectors`; borg enables `--deleted` per command |
