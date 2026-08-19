@@ -201,9 +201,9 @@ failing, so a Linux restore of a FreeBSD archive still works and reports the omi
 instead of hiding it. Restoring them belongs with FreeBSD support, which §0.6 puts after
 1.0.
 
-## 8. bsdflags are neither stored nor restored; xattrs are omitted when empty
+## 8. bsdflags and xattrs — **fixed 2026-08-19**, except the exclusion rule (#39)
 
-**Stage 5 · not implemented · was to be closed before the stage 7 gate, and was not**
+**Stage 5 · filed then, closed in stage 8**
 
 `item.bsdflags` (the Linux inode flags reachable through `FS_IOC_SETFLAGS`: immutable,
 append-only, nodump, and so on) are not applied at extraction. Nothing in the stage 5
@@ -234,8 +234,30 @@ comparisons of the recorded size come out exact (#36).
 
 Both belong in one piece of work: they are the same two lines of `stat_ext_attrs`, the same
 comparison measures them, and either alone leaves borge's item stream differing from
-borg's. The apply half of `bsdflags` still has to run *last* of all attribute restoration,
-since the immutable flag makes every other change impossible.
+borg's.
+
+**Done 2026-08-19.** `internal/archive/flags_linux.go` reads the flags with
+`FS_IOC_GETFLAGS` and maps the three that travel — nodump, immutable, append — to the BSD
+values borg stores, and writes them back with `FS_IOC_SETFLAGS`, masked so that inode bits
+userspace does not control are preserved (borg's issue #9039). The apply runs *last* of all
+attribute restoration at every one of the four call sites, because the immutable flag makes
+every further change to the inode impossible: setting it before the timestamps would lock
+the file against the rest of its own restore. Both keys are now written whenever the
+attribute was examined, so `--noflags` and `--noxattrs` produce byte-identical presence to
+borg's, and `--noflags` does something for the first time.
+
+Measured end to end rather than asserted: a file with the nodump flag, archived by borge,
+comes back with the flag whether *borg* or borge extracts it.
+`TestFileFlagsRoundTripAgainstBorg` and `TestExaminedAttributesAreRecorded` hold both
+halves; against the old code they fail on the stored value, on both restores, and on all
+three key-presence states.
+
+Immutable and append-only are exercised by neither test, deliberately: setting them needs
+`CAP_LINUX_IMMUTABLE`, so an unprivileged run cannot even set one on the source to test
+with. A restore that cannot set them fails silently, as borg's does — the data is restored
+and the flag is not, which is the better of the two available answers and is borg's.
+
+**What is not done is the rule that uses them; see #39.**
 
 ## 9. Sparseness survives only at chunk granularity
 
@@ -1180,3 +1202,34 @@ and there is no single "borg number" to match in any case, since borg's `create`
 `TestImportTarFileCountIsTruthful` pins borge to the item count and asserts borg's doubling
 as well, so that the day upstream fixes this the test fails and the decision gets revisited
 rather than silently persisting.
+
+## 39. borg excludes items by attribute and borge does not
+
+borg does not back up a file carrying the **nodump** flag. `archive.py`'s
+`maybe_exclude_by_attr` raises `BackupItemExcluded` for three cases, and `create` reports
+each as status `-`, the character it uses for an ordinary exclusion:
+
+- `bsdflags & UF_NODUMP` — the standard Unix "do not back this up" marker;
+- the xattr `com.apple.metadata:com_apple_backup_excludeItem`, which is how macOS marks a
+  path excluded from Time Machine;
+- the xattr `user.xdg.robots.backup` set to `false`.
+
+An excluded *directory* is not descended into either (`recurse = False`).
+
+borge implements none of it, so a file its owner marked "do not back up" is backed up:
+
+```
+$ borg  create -r repo a src && borg debug dump-archive a - | grep -c nodump.txt
+0
+$ borge create -r repo b src && borg debug dump-archive b - | grep -c nodump.txt
+1
+```
+
+This is a difference in *which files are in the archive*, which is a more serious class
+than anything in #8 — those were fields on items that were stored either way.
+
+Found on 2026-08-19 while testing the flag capture in #8, and it could not have been found
+before it: borge had no flags to test against, so the rule had nothing to read. Fixing #8
+is what makes this implementable, which is why the two are adjacent and why this is filed
+rather than folded in — it changes what a backup contains, and that deserves its own change
+and its own gate.

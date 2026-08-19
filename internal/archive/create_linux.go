@@ -634,11 +634,24 @@ func (w *walker) fillMetadata(it *item.Item, abs string, st *unix.Stat_t) {
 	inode := st.Ino
 	it.Inode = &inode
 
+	// Both of these record the *key* whenever the attribute was examined, even when there
+	// was nothing to record, because in borg the key's presence is the statement that it
+	// looked: "borg create --noxattrs" leaves the key out and an ordinary create writes an
+	// empty dict. "Checked, found none" and "not recorded" are different answers, and an
+	// archive that cannot tell them apart cannot be distinguished from one taken with the
+	// option. borge wrote neither key until 2026-08-19; see docs/DIVERGENCES.md #8.
 	if !w.opts.NoXAttrs {
-		if attrs, err := GetXAttrs(abs); err == nil && len(attrs) > 0 {
-			it.XAttrs = attrs
-			it.XAttrsSet = true
+		attrs, err := GetXAttrs(abs)
+		if err != nil || attrs == nil {
+			// A filesystem without xattr support answers the same as one with none, which
+			// is also what borg records: the read failing is not the backup failing.
+			attrs = map[string][]byte{}
 		}
+		it.XAttrs, it.XAttrsSet = attrs, true
+	}
+	if !w.opts.NoFlags {
+		flags := GetFlags(abs, st.Mode)
+		it.BSDFlags = &flags
 	}
 	if !w.opts.NoACLs {
 		w.fillACLs(it, abs, st)

@@ -277,6 +277,9 @@ func (x *extractor) item(it *item.Item) error {
 		if err := x.restoreTimes(path, it); err != nil {
 			return x.fail(it.Path, err)
 		}
+		if err := x.restoreFlags(path, it); err != nil {
+			return x.fail(it.Path, err)
+		}
 		x.rememberHardlink(it, path)
 		x.stats.Symlinks++
 		return nil
@@ -300,6 +303,9 @@ func (x *extractor) item(it *item.Item) error {
 			return x.fail(it.Path, err)
 		}
 		if err := x.restoreTimes(path, it); err != nil {
+			return x.fail(it.Path, err)
+		}
+		if err := x.restoreFlags(path, it); err != nil {
 			return x.fail(it.Path, err)
 		}
 		x.rememberHardlink(it, path)
@@ -491,6 +497,9 @@ func (x *extractor) writeFile(it *item.Item, path string) error {
 	if err := x.restoreTimes(path, it); err != nil {
 		return err
 	}
+	if err := x.restoreFlags(path, it); err != nil {
+		return err
+	}
 	return x.checkSize(it, written)
 }
 
@@ -544,6 +553,15 @@ func (x *extractor) finishDirs(next string) error {
 			}
 		}
 		if err := x.restoreTimes(path, top); err != nil {
+			if err := x.fail(top.Path, err); err != nil {
+				return err
+			}
+		}
+		// Last for a directory too: an immutable directory cannot have entries added, so
+		// a flag set before its children were written would fail the rest of the restore.
+		// Directories are deferred to here for the same family of reason - their times
+		// would be changed again by every file written into them.
+		if err := x.restoreFlags(path, top); err != nil {
 			if err := x.fail(top.Path, err); err != nil {
 				return err
 			}

@@ -1720,7 +1720,8 @@ a table at all.
 | 5 | JSON API: `repo-info`, `info`, `version`, `analyze` schemas | §11.4b | four of borg's eight `--json` commands still emit a document of borge's own shape; the other four match as of 2026-08-18 |
 | 6 | `--log-json` | §11.4b | absent entirely; a feature, not an option |
 | 7 | Non-unicode paths in JSON, shared with `pydump.go` | §11.4b | `debug dump-*` does it correctly and the JSON commands do not; the two should be one implementation rather than agreeing by luck |
-| 8 | `bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing | DIVERGENCES #8 | restated 2026-08-18 after measuring both tools' item streams — see the entry above this table |
+| 8 | ~~`bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing~~ | DIVERGENCES #8 | **done 2026-08-19.** `flags_linux.go`; both keys now record "examined"; a flag borge stores survives a restore by borg |
+| 8b | Attribute-based exclusion: nodump, and the two backup-exclusion xattrs | DIVERGENCES #39 | **found 2026-08-19 while testing row 8**, and not implementable before it. borg omits such files from the archive entirely; borge stores them. A difference in archive *contents*, so the most serious remaining row |
 | 9 | Option gate: the reverse direction, and subcommands | §11.4 work 1–2 | until both land, "complete" for a command means "has everything borg has", not "has exactly what borg has" |
 | 10 | Every borge-only option documented as borge-only in its help text | §11.4 work 3 | known: `prune --keep-within/--keep-last/--keep-oldest`, `extract -C`, `version --long`, `--reverse`, `delete --force` |
 | 11 | `--reverse` and `--deleted` decided per command | §11.4c | they reach every command using `listSelectors`; borg enables `--deleted` per command |
@@ -1770,6 +1771,12 @@ described as outstanding until this table was built.
   Doing both at once is the cheaper order — they are the same two lines of
   `stat_ext_attrs`, they are measured by the same comparison, and either alone leaves the
   item stream still differing from borg's.
+
+  **Done 2026-08-19**, and it uncovered a larger gap immediately: borg does not archive a
+  file carrying the nodump flag at all, nor one marked with either of two backup-exclusion
+  xattrs, and borge archives all of them (DIVERGENCES #39, table row 8b). That rule reads
+  exactly the two fields this row was about, so it could not have been found — or fixed —
+  before this landed.
 - **`debug convert-profile`** (DIVERGENCES #14), the only `debug` subcommand not ported.
 - **`transfer`** between two borg 2 repositories — **in scope, decided 2026-08-18.** With
   it, `repo-create --other-repo` and a `BORGE_OTHER_PASSPHRASE` variable, which it cannot
@@ -2726,14 +2733,34 @@ review of known items rather than a fresh audit.
 **Not bugs, but constraints worth revisiting:**
 
 - **Restore is lossy in borg's own terms.** The stage 5 gate compares borge's extraction
-  against *borg's*, not against the original tree, precisely because borg's restore does
-  not reproduce everything it stored — `bsdflags` are read and preserved but never applied
-  (DIVERGENCES #8), and `--sparse` restores holes only at chunk granularity
+  against *borg's*, not against the original tree, because borg's restore does not
+  reproduce everything it stored: `--sparse` restores holes only at chunk granularity
   (DIVERGENCES #9). Once compatibility is lifted, "restore reproduces the source" becomes
   an achievable gate rather than an aspiration.
+
+  **Corrected 2026-08-19.** This entry used to name `bsdflags` here too — "read and
+  preserved but never applied" — which is borge's gap and not borg's. borg captures them
+  with `FS_IOC_GETFLAGS` and applies them with `FS_IOC_SETFLAGS`, last of all attribute
+  restoration (`archive.py:1112`). The same wrong sentence stood in DIVERGENCES #8 and in
+  §11's work list; this was the third copy, and all three are now fixed. It belongs in
+  stage 8 as a fidelity gap, not here as a constraint of compatibility.
 - **Item decoding is lossy for unknown keys** at the `Item` struct boundary, which is why
   `debug dump-archive` reads the raw msgpack instead. A format borge owns can make the
   round trip total.
+- **Every item carries an empty `xattrs` dict and a zero `bsdflags`.** borg writes both on
+  every item it examined, and the *presence* of each key is what says it looked: with
+  `--noxattrs` or `--noflags` the key is absent instead. That is a real distinction —
+  "checked, found none" against "not recorded" — and borge reproduces it as of stage 8
+  (DIVERGENCES #8), because a borge archive that could not express it would be
+  indistinguishable from one taken with the option.
+
+  What a format borge owns could do is carry the distinction without paying per item: it
+  costs roughly 9 to 18 bytes on every item, so a backup of a million files spends 10 to
+  18 MB of item stream saying "nothing here". An archive-level "these attributes were
+  examined" flag plus per-item values only where non-empty says the same thing in a few
+  bytes. Recorded here rather than acted on because the question can only be asked from a
+  faithful baseline: until borge records the fields, any measurement of the saving is
+  measuring the bug.
 
 ### 13.2 Large directories must not slow restore down
 

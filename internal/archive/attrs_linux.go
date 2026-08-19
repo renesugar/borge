@@ -98,6 +98,28 @@ func (x *extractor) restoreAttrsFd(f *os.File, path string, it *item.Item) error
 	return nil
 }
 
+// restoreFlags applies the item's file flags, and is called after restoreTimes at every
+// site rather than from inside restoreAttrs.
+//
+// The ordering is the whole point: the immutable flag makes every further change to the
+// inode impossible, so a restore that set it before the timestamps would lock the file
+// against the rest of its own restore. borg puts it last of all attribute restoration for
+// that reason and says so in a comment; this keeps it visible at the call sites instead of
+// buried where a later change might reorder it.
+//
+// A failure is swallowed, as borg swallows it: setting the immutable flag needs
+// CAP_LINUX_IMMUTABLE, so an unprivileged restore cannot do it, and failing the restore of
+// the data over an attribute the user may not be able to set would be the worse answer.
+// The consequence is worth knowing - a non-root restore of an immutable file gives back
+// the right contents without the flag - and it is borg's behaviour exactly.
+func (x *extractor) restoreFlags(path string, it *item.Item) error {
+	if x.opts.NoAttrs || x.opts.NoFlags || it.BSDFlags == nil || it.Mode == nil {
+		return nil
+	}
+	_ = setFlags(path, *it.BSDFlags, uint32(*it.Mode))
+	return nil
+}
+
 // restoreTimes sets atime, mtime and, where the filesystem supports it, birthtime.
 //
 // Times are nanoseconds since the epoch in the archive, and are restored with nanosecond
