@@ -105,6 +105,11 @@ type ImportTarStats struct {
 	// Meta is the archive metadata as saved, so a caller can report the times and the
 	// command line without reopening the archive it just wrote.
 	Meta *item.ArchiveItem
+	// OriginalSize is the builder's count, sampled after Save, which is borg's rule for
+	// the figure "--stats" and "--json" report. Not Bytes: that is the content read from
+	// the tar, where this also carries the item pointers and the archive object. See
+	// Builder.AddChunk and docs/DIVERGENCES.md #36.
+	OriginalSize int64
 }
 
 // ImportTar reads a tar stream and writes it as a new archive.
@@ -163,6 +168,7 @@ func ImportTar(m *manifest.Manifest, r io.Reader, opts ImportTarOptions) (*Impor
 		return stats, nil, err
 	}
 	stats.Meta = meta
+	stats.OriginalSize = b.Stats().OriginalSize
 	return stats, id, nil
 }
 

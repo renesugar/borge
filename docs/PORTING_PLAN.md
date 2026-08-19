@@ -2019,9 +2019,11 @@ which happens to match borg for `repo-list`'s default format and matches nothing
    represents a path that is not valid unicode; `internal/cli/pydump.go` reproduces exactly
    that for `debug dump-*`. Whatever it does there is what the JSON commands must do, and
    the two should share one implementation rather than agreeing by luck.
-5. **`original_size` and the stored `{size}`**, which `create --json` now publishes through
-   the API and which disagree with borg's by a few hundred bytes in one direction and a few
-   hundred in the other. Measured in `DIVERGENCES.md` #36.
+5. ~~**`original_size` and the stored `{size}`**~~ — **done 2026-08-18.** The stored figure
+   counted the item metadata stream where borg's does not, and the reported one was sampled
+   before the archive was saved. Both fixed and held by tests; the residual difference in
+   the reported figure is the `command_line` spelling (#12) and cannot be closed without
+   changing what the archive says about itself. `DIVERGENCES.md` #36.
 
 `TestJSONOptionSurfaceMatchesBorg` locks the *surface* — which commands take which JSON
 option — by asking both tools and failing in both directions. It does not compare schemas;

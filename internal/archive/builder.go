@@ -64,6 +64,18 @@ type BuilderOptions struct {
 	ChunkSeed uint32
 	// Compressor compresses chunk payloads. Nil means lz4, borg's default.
 	Compressor compress.Compressor
+
+	// CountItemStreamSize includes the item metadata stream in the archive's recorded
+	// size. It is false for create and import-tar and true for recreate, because that is
+	// what borg does - not by design, but see AddChunk: borg's create loses the counter
+	// its item buffer writes into and its recreate does not. The same tree gives
+	// size=341 through borg's create and size=1284447 through its recreate.
+	//
+	// So the recorded size depends on which command wrote the archive, in both tools.
+	// borge reproduces that rather than picking one, because the number is stored and
+	// read back: an archive borge recreated should report what an archive borg recreated
+	// reports. docs/DIVERGENCES.md #36.
+	CountItemStreamSize bool
 }
 
 // Builder writes one archive.
@@ -82,7 +94,10 @@ type Builder struct {
 
 	chunkerParams chunker.Params
 	chunkerKey    []byte
-	chunkSeed     uint32
+
+	// countItemStreamSize is BuilderOptions.CountItemStreamSize.
+	countItemStreamSize bool
+	chunkSeed           uint32
 
 	items *itemStream
 	stats Stats
@@ -119,14 +134,15 @@ func NewBuilder(m *manifest.Manifest, opts BuilderOptions) (*Builder, error) {
 	}
 
 	b := &Builder{
-		manifest:      m,
-		repo:          repo,
-		ro:            ro,
-		chunks:        chunks,
-		chunkerParams: params,
-		chunkerKey:    chunkerKey,
-		chunkSeed:     opts.ChunkSeed,
-		start:         time.Now().UTC(),
+		manifest:            m,
+		countItemStreamSize: opts.CountItemStreamSize,
+		repo:                repo,
+		ro:                  ro,
+		chunks:              chunks,
+		chunkerParams:       params,
+		chunkerKey:          chunkerKey,
+		chunkSeed:           opts.ChunkSeed,
+		start:               time.Now().UTC(),
 	}
 
 	// The item stream is chunked with its own, finer parameters: it is far smaller than
@@ -167,12 +183,45 @@ func (b *Builder) ChunkerParams() chunker.Params { return b.chunkerParams }
 // The returned entry is what goes in an item's chunk list. A chunk already in the
 // repository is not stored again - that is the deduplication - but it is still counted,
 // because an item referencing it still needs its size.
+//
+// # Why the item stream is usually not counted
+//
+// OriginalSize is stored in the archive metadata as "size" and read back by both tools,
+// so it has to be borg's number and not a better one. On the create and import-tar paths
+// borg's is the sum of the file content chunks and the item-*pointer* chunks, and
+// excludes the item metadata stream - which its own code says it includes:
+//
+//	self.items_buffer.flush(flush=True)  # this adds the size of metadata stream chunks
+//	                                     # to stats.osize
+//
+// The comment is untrue, and the reason is worth writing down because nothing about the
+// number looks wrong until you measure it. borg's create does "archive.stats += fso.stats"
+// (create_cmd.py:252) to fold the file processor's counts into the archive's, and
+// Statistics.__add__ builds and returns a *new* object. archive.stats is rebound to it;
+// archive.items_buffer.stats still refers to the old one. Every item-stream chunk written
+// after that point increments a counter nobody reads.
+//
+// Measured rather than deduced, because the code reads the other way: 5000 empty files
+// give an item stream of a few hundred KB and borg still records size=341 - the item
+// pointer chunks alone. 100 empty files and one 1 MB file both record exactly 35 bytes of
+// overhead, which is msgpack's encoding of a one-element list holding one 32-byte id.
+//
+// borg's recreate has no such fold - it uses target.stats throughout - so its item buffer
+// keeps writing into the counter that is read, and a recreated archive records a size that
+// includes the item stream. The same 5000-file tree records 341 through borg's create and
+// 1284447 through its recreate. Hence CountItemStreamSize, set by the recreate path only:
+// the number depends on which command wrote the archive, and borge reproduces that rather
+// than choosing one and disagreeing with borg half the time.
+//
+// So borge matches the behaviour, not the comment. See docs/DIVERGENCES.md #36.
 func (b *Builder) AddChunk(data []byte, roType string) (item.ChunkListEntry, error) {
 	id := b.manifest.Key().IDHash(data)
 	size := int64(len(data))
 
 	b.stats.Chunks++
-	b.stats.OriginalSize += size
+	if roType != repoobj.TypeArchiveStream || b.countItemStreamSize {
+		b.stats.OriginalSize += size
+	}
 
 	if _, seen := b.chunks.Get(id); seen {
 		return item.ChunkListEntry{ID: id, Size: size}, nil

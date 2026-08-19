@@ -492,6 +492,15 @@ func cmdCreate(e *Env, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
+	// The counts are re-read from the builder here, after Save, because that is where
+	// borg reads its own: the archive's "size" is sampled mid-save (after the item
+	// pointers, before the archive object) and what create reports is that plus the
+	// archive object. Reading the snapshot Create() returned would report the state
+	// before any of the three were written - and worse, would report a *different* rule
+	// for a large backup than a small one, since a long walk flushes the item stream
+	// part-way and a short one does not. See docs/DIVERGENCES.md #36.
+	created.Stats = b.Stats()
+
 	if common.json {
 		// The cache block names the directory, not the per-archive file: borg reports
 		// Cache.path, which is the repository's cache directory.

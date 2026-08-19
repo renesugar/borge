@@ -175,7 +175,7 @@ func cmdImportTar(e *Env, args []string) int {
 			return e.fail(err)
 		}
 		doc := archiveCreatedJSON(repo, k, m, path, cacheDir, st.Meta, id,
-			createStatsJSON(int64(st.Files), st.Bytes, st.FileStatus))
+			createStatsJSON(int64(st.Files), st.OriginalSize, st.FileStatus))
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "    ")
 		if err := enc.Encode(doc); err != nil {

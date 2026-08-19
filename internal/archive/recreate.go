@@ -126,6 +126,9 @@ func Recreate(m *manifest.Manifest, id []byte, opts RecreateOptions) (*RecreateS
 		ChunkerParams: params,
 		ChunkSeed:     opts.ChunkSeed,
 		Compressor:    opts.Compressor,
+		// borg's recreate counts the item metadata stream in the archive's size where its
+		// create does not; see Builder.AddChunk and docs/DIVERGENCES.md #36.
+		CountItemStreamSize: true,
 	})
 	if err != nil {
 		return stats, nil, err

@@ -1031,9 +1031,9 @@ twice, and an early reading of this recorded it as "borg offers --json on 11 com
 when the real count is eight. borge implements no prefix expansion (Go's `flag` has none),
 so `borge list --json` is an error, and the difference is argparse's, not the JSON API's.
 
-## 36. `create` and `import-tar` count `original_size` differently from borg
+## 36. `original_size` and the stored `{size}` — **fixed 2026-08-18**
 
-Same tree, same files, one run each:
+Same tree, same files, one run each, before the fix:
 
 | | borg | borge |
 |---|---|---|
@@ -1042,16 +1042,73 @@ Same tree, same files, one run each:
 | stored `{size}`, 1 MB file | 1000035 | 1000483 |
 | stored `{size}`, 8 B in 5 items | 43 | 1131 |
 
-borge's create-time figure is the plaintext content and nothing else. borg's includes the
-archive's own item-metadata stream, which is why its number grows with the *number* of
-items and not only their size. The stored `{size}` field disagrees the other way round.
+Two separate faults, in opposite directions.
 
-Nothing here is a data-format difference — both archives restore identically, and each
-tool is self-consistent — but four numbers a person reads directly disagree, and
-`create --json` now publishes one of them through the API. Recorded rather than fixed
-because matching borg means matching *when* it samples the counter (`archive.py:757`
-writes `stats.osize` into the metadata mid-save, and `create` prints the same counter
-again after the item stream is flushed), which is worth doing deliberately.
+**The stored figure counted the item metadata stream.** It is written into the archive
+metadata and read back by both tools, so `borg info` on a borge-made archive reported
+whatever borge had written — this is interop, not formatting. borg's number is the file
+content chunks plus the item *pointer* chunks, and excludes the item stream.
+
+That is not what borg's code says. `Archive.save()` reads:
+
+```python
+self.items_buffer.flush(flush=True)  # this adds the size of metadata stream chunks
+                                     # to stats.osize
+```
+
+The comment is untrue. `create_cmd.py:252` does `archive.stats += fso.stats` to fold the
+file processor's counts into the archive's, and `Statistics.__add__` **returns a new
+object**. `archive.stats` is rebound to it; `archive.items_buffer.stats` still refers to
+the old one, so every item-stream chunk written from then on increments a counter nobody
+reads.
+
+Measured rather than deduced, because the source reads the other way. 400 empty files
+produce an item stream of tens of KB, and borg records `size=35` — msgpack's encoding of a
+one-element list holding one 32-byte id, and nothing else. 5000 empty files record 341, the
+pointer chunks for a stream chunked into ten pieces. One 1 MB file and 100 empty files both
+record exactly 35 bytes of overhead.
+
+borge now matches the behaviour rather than the comment: `Builder.AddChunk` skips
+`OriginalSize` for `TypeArchiveStream` chunks. Held by `TestArchiveSizeMatchesBorg`, which
+compares the stored size and file count across four tree shapes chosen to separate content
+bytes from item count. Against the old code it fails on all four, by 2000× on the
+many-items case (74869 against borg's 35).
+
+**Except on `recreate`, where borg counts it after all.** The fold that loses the counter
+is in `create_cmd.py`; `ArchiveRecreater` uses `target.stats` throughout and never rebinds
+it, so there the item buffer keeps writing into the counter that is read. The same
+5000-file tree records `size=341` through borg's create and `size=1284447` through its
+recreate — borg disagreeing with itself by a factor of 3700 on identical content.
+
+borge therefore makes it a property of the path (`BuilderOptions.CountItemStreamSize`,
+true only for recreate) rather than a global rule. The first version of this fix was
+global, which matched borg on create and import-tar and broke recreate; nothing caught it
+but a manual check, so `TestRecreateSizeMatchesBorg` now does. It has borg create two
+identical archives and recreates one with each tool, comparing the recreaters alone.
+
+**The reported figure was sampled before the archive was saved.** `Create()` copied the
+builder's counters when the walk ended, which is before the item stream is flushed, before
+the pointers are written and before the archive object exists. borg reads the same counter
+*after* all three. The old number was therefore not merely different — it followed a
+different rule for a large backup than a small one, because a long walk flushes the item
+stream part-way and a short one does not, and for a many-item tree it came out *below* the
+size stored in the archive. Now re-read from the builder after `Save`.
+
+**What still differs, and must.** The reported figure includes the archive object, whose
+size depends on its contents — and borge spells `command_line` differently from borg (#12).
+For the measurement above that is a 42-character difference in the string and a 43-byte
+difference in the number, the extra byte being msgpack's length prefix growing from `str8`
+to `str16` at 256. So the two tools cannot report the identical figure while #12 stands,
+and forcing them to would mean lying about the archive's contents.
+`TestCreateReportedSizeFollowsBorgsRule` pins the relationship instead: for both tools the
+reported figure exceeds the stored one and the gap is the size of an archive object.
+
+**And the item streams themselves are not the same size.** Recreating trees that the two
+tools created *separately* gives 1284447 against 1194429 — about 18 bytes an item — because
+borg writes `bsdflags` and `xattrs` on every item and borge writes neither. Both archives
+restore identically and each tool reads the other's, so this is not a correctness problem,
+but it is why only same-source comparisons are exact. `bsdflags` is #8; the `xattrs` half
+was found here and is not yet recorded elsewhere.
 
 ## 37. borge records a command line for `import-tar` — **fixed 2026-08-18**
 
@@ -1067,3 +1124,37 @@ always reports `"files_stats": {}`; its importer does not route through the acco
 that `create` uses. borge counts the same status characters it counts for `create`, so the
 key has the same meaning and is merely populated. Same shape, more information — recorded
 because it is a difference a frontend can see.
+
+## 38. borg's `import-tar` records twice the files it imported
+
+A tar holding three regular files, imported by each tool:
+
+```
+$ borg  repo-list --format '{archive} size={size} nfiles={nfiles}{NL}'
+tar-tiny size=49 nfiles=6
+$ borge repo-list --format '{archive} size={size} nfiles={nfiles}{NL}'
+tar-tiny size=49 nfiles=3
+```
+
+The sizes agree. The file count does not, and borg's is wrong: the archive holds four
+items, three of them regular files, and `borg list` on borg's own archive says so.
+
+The cause is two counters for one event. `tar_cmds.py:362` does `archive.stats.nfiles += 1`
+for each file the command imports; `archive.py:1775`, inside
+`TarfileObjectProcessor.process_file`, does `self.stats.nfiles += 1` for the same file; and
+`tar_cmds.py:387` then folds the second into the first with `archive.stats += tfo.stats`.
+borg's own `create` of the same tree records 3, so borg disagrees with itself between two
+commands on identical content.
+
+**borge does not match this.** The rule elsewhere in this port is that a stored number is
+borg's number even when borg's is odd — #36 reproduces an accounting quirk exactly, because
+it is stored metadata and a user comparing the two tools should see one answer. This one is
+different in the way that matters: it is falsifiable from outside. `nfiles` claims six files
+in an archive whose listing has three, and one `borg list` disproves it. Matching would mean
+borge deliberately writing into archive metadata something the archive itself contradicts,
+and there is no single "borg number" to match in any case, since borg's `create` and
+`import-tar` disagree.
+
+`TestImportTarFileCountIsTruthful` pins borge to the item count and asserts borg's doubling
+as well, so that the day upstream fixes this the test fails and the decision gets revisited
+rather than silently persisting.

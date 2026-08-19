@@ -165,6 +165,17 @@ way you would treat a change to a published API, and compare it against borg's a
 rather than as text — key by key, not "it parsed". Counting commands is not comparing
 schemas: borge offered JSON on six commands and matched borg's shape on none of them.
 
+**A stored number is borg's number — unless the archive itself disproves it.** Anything
+written into archive metadata is read back by both tools, so borge reproduces borg's
+accounting even where it is accidental: the recorded `size` excludes the item metadata
+stream because borg's create loses the counter its item buffer writes into, and borge
+excludes it too (`DIVERGENCES.md` #36). The line is falsifiability. borg's `import-tar`
+records twice the files it imported, and one `borg list` on borg's own archive disproves
+it, so borge does not copy that one (#38) — reproducing it would mean writing into the
+metadata something the archive contradicts. Note also that "borg's number" may not be one
+number: create, import-tar and recreate do not agree with each other here, so match the
+path rather than the tool.
+
 **`--help` is the authority on what options exist; acceptance is not.** argparse expands
 unambiguous prefixes, so `borg list --json` runs and is `--json-lines` — it appears in no
 help text and is not an option. An hour went into "borg's `--json` is byte-identical to its
