@@ -1700,14 +1700,76 @@ Everything needed for feature parity, once correctness is established.
 > Current state (2026-08-18): 31 implemented, 5 absent with a recorded reason, 0
 > unexplained. Of the five, three are non-goals (`mount`, `umount`, `webdav`, §0.6); the
 > other two are `serve` and `transfer`, and `transfer` is **decided as of 2026-08-18**: it
-> is in scope for borg 2 to borg 2. The list below is the whole of what stage 8 still owes,
-> commands and otherwise:
+> is in scope for borg 2 to borg 2. The table below is the whole of what stage 8 still
+> owes, commands and otherwise; the notes after it give each row its reasoning.
+
+#### What stage 8 still owes — as at 2026-08-18
+
+The stage is not bundled until this table is empty of everything but the last row. Each
+state below was measured on the date shown rather than carried forward from the prose: two
+entries in this section had already outlived their defect by the time the table was built,
+which is the fourth and fifth time that has happened in stage 8, and the reason for having
+a table at all.
+
+| # | Item | Recorded in | State |
+| --- | --- | --- | --- |
+| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | §11 | not started; the largest single item |
+| 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
+| 3 | 35 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. Largest: `create` 6, `prune` 4, `recreate` 4, `check` 3, `diff` 3, `extract` 3, `repo-create` 3 |
+| 4 | `recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter` | §11.2 | part of row 3, listed apart because it is one feature over four options and needs the item-stream walk rather than the filesystem one |
+| 5 | JSON API: `repo-info`, `info`, `version`, `analyze` schemas | §11.4b | four of borg's eight `--json` commands still emit a document of borge's own shape; the other four match as of 2026-08-18 |
+| 6 | `--log-json` | §11.4b | absent entirely; a feature, not an option |
+| 7 | Non-unicode paths in JSON, shared with `pydump.go` | §11.4b | `debug dump-*` does it correctly and the JSON commands do not; the two should be one implementation rather than agreeing by luck |
+| 8 | `bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing | DIVERGENCES #8 | restated 2026-08-18 after measuring both tools' item streams — see the entry above this table |
+| 9 | Option gate: the reverse direction, and subcommands | §11.4 work 1–2 | until both land, "complete" for a command means "has everything borg has", not "has exactly what borg has" |
+| 10 | Every borge-only option documented as borge-only in its help text | §11.4 work 3 | known: `prune --keep-within/--keep-last/--keep-oldest`, `extract -C`, `version --long`, `--reverse`, `delete --force` |
+| 11 | `--reverse` and `--deleted` decided per command | §11.4c | they reach every command using `listSelectors`; borg enables `--deleted` per command |
+| 12 | `--format` on `check` and `diff` | §11.3 | `diff` needs a third key set, its records being changes rather than paths; `check` needs its output reworked first |
+| 13 | Progress output on stderr, where borg puts it | measured 2026-08-18 | `create`, `prune`, `export-tar` done. `borg check -v` writes 526 bytes to stderr and none to stdout; borge writes 158 to stdout and none to stderr. `compact`, `recreate`, `analyze`, `repo-compress`, `repo-space` and `lock` write to stdout and have not been measured against borg |
+| 14 | `debug convert-profile` | DIVERGENCES #14 | the only `debug` subcommand not ported |
+| 15 | **Stage 8 evidence bundle** | §11 | last, and only once rows 1–14 are closed |
+
+Closed since this section was first written, kept here because how each was *found* is
+worth more than the fix: argument permutation (#20), relative source paths (#21), the
+slashdot hack (#24), patterns-file roots (#25), archive-name placeholders (#17), the
+`--json` surface and four of its schemas (#35), the archive size accounting (#36),
+`import-tar`'s command line (#37), and `prune`'s listing — which §11.3 below still
+described as outstanding until this table was built.
 
 - **`serve`** and the remote store backends: `sftp`, `rest`, `s3`, `rclone`.
-- **bsdflags restoration** (DIVERGENCES #8). Read, stored and round-tripped, but not applied
-  at extraction. It was filed as "to be closed before the stage 7 gate" and was not; the
+- **Item fields borg writes and borge does not: `bsdflags` and `xattrs`** (DIVERGENCES #8).
+  Filed as "bsdflags restoration, to be closed before the stage 7 gate" and not closed; the
   gate passed because nothing in the corpus carries a flag, which makes it a second example
-  of a gate measuring only what its corpus happens to contain.
+  of a gate measuring only what its corpus happens to contain. Measuring the two tools'
+  item streams on 2026-08-18 showed the entry understated it in one direction and
+  overstated it in another, so it is restated here:
+
+  **`bsdflags` is not stored either.** The entry says the flags are "read, stored and
+  round-tripped", which is true only of an archive *borg* wrote: borge decodes the field
+  and re-encodes it, but nothing in the tree calls `FS_IOC_GETFLAGS`, so a borge-made
+  archive has no flags in it to restore. Two halves of work, then, not one — capture and
+  apply — and the second must run last of all attribute restoration, since the immutable
+  flag makes every other change impossible.
+
+  Which makes **`--noflags` an option that does nothing**, the case `AGENTS.md` warns
+  about: it is registered, parsed and carried all the way into `CreateOptions.NoFlags` and
+  `ExtractOptions.NoFlags`, and no code reads either field. It suppresses a capture that
+  never happens. It should either work or be removed before the stage 8 bundle.
+
+  It is also why the `flags` key added to the item JSON on 2026-08-18 is permanently null
+  for a borge-made archive where borg sends `0` — "not recorded" against "no flags set".
+
+  **`xattrs` is nearly right and differs on the empty case.** borge reads extended
+  attributes at create and writes them back at extract; what it does not do is write the
+  key when there are none, where borg writes an empty dict on every item unconditionally
+  (`archive.py`, `stat_ext_attrs`). Restores are identical either way, so this is not a
+  correctness gap, but it is stored bytes: the two fields together are about 18 bytes an
+  item, and they are why two archives of the same tree have item streams of different
+  sizes and only same-source size comparisons come out exact (#36).
+
+  Doing both at once is the cheaper order — they are the same two lines of
+  `stat_ext_attrs`, they are measured by the same comparison, and either alone leaves the
+  item stream still differing from borg's.
 - **`debug convert-profile`** (DIVERGENCES #14), the only `debug` subcommand not ported.
 - **`transfer`** between two borg 2 repositories — **in scope, decided 2026-08-18.** With
   it, `repo-create --other-repo` and a `BORGE_OTHER_PASSPHRASE` variable, which it cannot
@@ -2046,9 +2108,10 @@ than inheriting.
 2. **Extend it to subcommands** (`debug`, `key`, `benchmark`), which neither tool lists at
    the top level. The hand audit found the same `--json` no-op on all nineteen of them.
 3. **Document every borge-only option as borge-only**, in its help text.
-4. **Treat `--json` as the API it is**: out of `commonFlags`, implemented for the six
-   commands that are missing it, removed from the ones borg does not offer it on, and
-   `--log-json` added. See (b) above.
+4. ~~**Treat `--json` as the API it is**~~ — **done 2026-08-18 apart from `--log-json`**:
+   out of `commonFlags`, registered only on the eight commands borg has it on, and
+   implemented for `create`, `import-tar`, `prune` and `repo-list`. Four schemas and
+   `--log-json` remain; see (b) above and table rows 5–7.
 5. **Decide `--reverse` and `--deleted` per command** rather than by inheritance.
 
 Until 1 and 2 land, the option gate's "complete" for a command means "has everything borg
@@ -2127,12 +2190,13 @@ nobody wrote down. Both engines together are about 350 lines with no dependencie
 
 - **`diff`** — its records are *changes*, not paths, so it needs a third key set rather than
   a reuse of the item one.
-- **`prune` and `check`** — these need more than the option. borg prints
-  `Keeping archive (rule: daily #1):   {archive:<36} {time} [{id}]`; borge prints
-  `keep   09f75833 a2   ...  (daily[0])`, putting the rule where borg puts a label. Wiring
-  `--format` there means reworking the surrounding output, and for `check` the divergence is
-  larger still: borg's `-v` reports index and pack progress where borge reports per-archive
-  results. The template is the small part.
+- ~~**`prune`**~~ — **done 2026-08-18.** It prints borg's layout, the label padded to 44
+  columns and the archive rendered through `--format`, and takes `--format`, `--short` and
+  `BORGE_PRUNE_FORMAT`. This entry described it as outstanding for a day after it landed.
+- **`check`** — still needs more than the option, and the divergence is larger than a
+  template: borg's `-v` reports index and pack progress where borge reports per-archive
+  results, and borg writes all of it to stderr where borge writes to stdout (table row 13).
+  Reworking the output comes first; the template is the small part.
 - **A trap in both:** borg's `prune` and `check` defaults have **no trailing `{NL}`** — the
   command supplies the newline. Porting them with one appended, or without adding it, puts a
   whole listing on one line.
@@ -2713,7 +2777,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 35 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands. Fifteen numbered items remain, tabled in §11 under "What stage 8 still owes": `serve` and the remote backends, `transfer` (§11.1), 35 per-command options (§11.2), four JSON schemas and `--log-json` (§11.4b), `bsdflags` and `xattrs` (DIVERGENCES #8), and `debug convert-profile` | not yet bundled, and not to be bundled until that table is empty but for its last row |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

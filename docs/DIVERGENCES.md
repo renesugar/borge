@@ -201,19 +201,41 @@ failing, so a Linux restore of a FreeBSD archive still works and reports the omi
 instead of hiding it. Restoring them belongs with FreeBSD support, which §0.6 puts after
 1.0.
 
-## 8. bsdflags are not restored yet
+## 8. bsdflags are neither stored nor restored; xattrs are omitted when empty
 
-**Stage 5 · not implemented · to be closed before the stage 7 gate**
+**Stage 5 · not implemented · was to be closed before the stage 7 gate, and was not**
 
 `item.bsdflags` (the Linux inode flags reachable through `FS_IOC_SETFLAGS`: immutable,
-append-only, nodump, and so on) are read into the item structure and preserved on a
-round trip, but extraction does not apply them. Nothing in the stage 5 corpus carries
-one, so the gate does not currently measure it.
+append-only, nodump, and so on) are not applied at extraction. Nothing in the stage 5
+corpus carries one, so the gate does not measure it.
 
-This is a real gap, not a decision, and it is listed here so it is not mistaken for one.
-It needs an ioctl and has to run *last* of all attribute restoration — the immutable flag
-makes every other change impossible — which is why it is a separate piece of work rather
-than a line in `restoreAttrs`.
+**Corrected 2026-08-18.** This entry used to say the flags were "read into the item
+structure and preserved on a round trip". That is true only of an archive *borg* wrote:
+borge decodes the field and re-encodes it, so it survives a `recreate`, but nothing in the
+tree calls `FS_IOC_GETFLAGS` and so a borge-made archive has no flags in it to restore.
+The gap is two halves, capture and apply, and the entry described neither accurately.
+
+Consequences worth naming separately, because each looks like its own puzzle:
+
+- **`--noflags` does nothing.** It is registered, parsed, and carried into
+  `CreateOptions.NoFlags` and `ExtractOptions.NoFlags`; no code reads either field. It
+  suppresses a capture that never happens. See #32 for the general case.
+- **`flags` in the item JSON is permanently null** for borge-made archives where borg
+  sends `0` — "not recorded" against "no flags set" (#35 added the key, 2026-08-18).
+
+**And `xattrs`, found by the same measurement.** borge reads extended attributes at create
+and writes them back at extract, so the feature works; what it does not do is write the key
+when an item has none. borg writes an empty dict on every item unconditionally
+(`archive.py`, `stat_ext_attrs`, which sets `attrs["xattrs"]` and `attrs["bsdflags"]` with
+no test for emptiness). Restores are identical either way — this is stored bytes, not
+behaviour — but the two fields together are about 18 bytes an item, and they are why two
+archives of the same tree have item streams of different sizes, so that only same-source
+comparisons of the recorded size come out exact (#36).
+
+Both belong in one piece of work: they are the same two lines of `stat_ext_attrs`, the same
+comparison measures them, and either alone leaves borge's item stream differing from
+borg's. The apply half of `bsdflags` still has to run *last* of all attribute restoration,
+since the immutable flag makes every other change impossible.
 
 ## 9. Sparseness survives only at chunk granularity
 
