@@ -354,7 +354,7 @@ func (w *walker) walk(abs string, depth int) error {
 		}
 		if len(tags) > 0 {
 			w.stats.Skipped++
-			w.report('-', stored)
+			w.report('-', abs)
 			if !included || !storable || !w.opts.KeepExcludeTags {
 				// Nothing from here, and no recursion either way: borg returns at this
 				// point whether or not it kept the tags.
@@ -387,7 +387,7 @@ func (w *walker) walk(abs string, depth int) error {
 		// that only showed what would be kept could not confirm that an --exclude did
 		// anything.
 		w.stats.Skipped++
-		w.report('-', stored)
+		w.report('-', abs)
 	case w.opts.DryRun:
 		// Nothing is read and nothing is stored, but the counting is real so that
 		// --stats means something.
@@ -395,7 +395,7 @@ func (w *walker) walk(abs string, depth int) error {
 			w.stats.Stats.NFiles++
 			w.stats.Stats.OriginalSize += st.Size
 		}
-		w.report('+', stored)
+		w.report('+', abs)
 	default:
 		excluded, err := w.archive(abs, stored, &st)
 		if err != nil {
@@ -450,7 +450,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) (bool, error) {
 	// descend, because an excluded directory takes its whole subtree with it.
 	if excludedByAttr(it.XAttrs, it.BSDFlags) {
 		w.stats.Skipped++
-		w.report('-', stored)
+		w.report('-', abs)
 		return true, nil
 	}
 
@@ -517,7 +517,7 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) (bool, error) {
 	if err := w.builder.AddItem(it); err != nil {
 		return false, w.fail(abs, err)
 	}
-	w.report(status, stored)
+	w.report(status, abs)
 	return false, nil
 }
 
@@ -557,6 +557,14 @@ func excludedByAttr(xattrs map[string][]byte, bsdFlags *int64) bool {
 // report tells the caller what happened to one path. borg's status characters: "A" added,
 // "d" directory, "s" symlink, "i" special file, "h" a further hard link, "U" unchanged,
 // "-" excluded, and "+" for anything a dry run would have stored.
+//
+// The path is the one *walked*, not the one stored, which is borg's choice and matters for
+// exactly one case: an absolute source. "borg create A /srv/data --list" reports
+// "/srv/data/f" where the archive holds "srv/data/f", and borge reported the stored form
+// until 2026-08-19. The two coincide for a relative source, which is why it went unnoticed.
+// A listing answers "what is being read", so the source path is the useful one - and under
+// --log-json it becomes file_status.path, which a frontend uses to show progress against
+// the filesystem the user is looking at.
 func (w *walker) report(status byte, stored string) {
 	w.stats.FileStatus[string(status)]++
 	if w.opts.OnItem != nil {

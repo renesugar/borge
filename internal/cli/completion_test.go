@@ -41,7 +41,11 @@ func TestCompletionSeesEveryCommandsFlags(t *testing.T) {
 	// subcommand. "completion" takes a shell and nothing else. Everything else has at
 	// least the repository flags, so an empty list means the probe stopped seeing them.
 	groups := map[string]bool{"debug": true, "benchmark": true, "key": true}
-	noOptions := map[string]bool{"completion": true, "help": true}
+	// "completion" takes a shell and "help" a topic, so neither has options of its own -
+	// but both still carry --log-json, which every command registers because borg puts it
+	// on every command. Spelled out rather than left as "no options" so that a future
+	// option arriving on either is a failure rather than a silent pass.
+	onlyLogJSON := map[string]bool{"completion": true, "help": true}
 	for _, c := range spec {
 		switch {
 		case groups[c.Name]:
@@ -58,9 +62,9 @@ func TestCompletionSeesEveryCommandsFlags(t *testing.T) {
 						"the subcommand's flags", c.Name, sub.Name)
 				}
 			}
-		case noOptions[c.Name]:
-			if len(c.Flags) != 0 {
-				t.Errorf("%s is listed as taking no options but registered %v", c.Name, c.Flags)
+		case onlyLogJSON[c.Name]:
+			if len(c.Flags) != 1 || c.Flags[0] != "--log-json" {
+				t.Errorf("%s should register --log-json and nothing else, got %v", c.Name, c.Flags)
 			}
 		case len(c.Flags) == 0:
 			t.Errorf("%s registered no options at all; either it really has none, or it "+

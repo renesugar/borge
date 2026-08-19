@@ -1718,7 +1718,7 @@ a table at all.
 | 3 | 35 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. Largest: `create` 6, `prune` 4, `recreate` 4, `check` 3, `diff` 3, `extract` 3, `repo-create` 3 |
 | 4 | `recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter` | §11.2 | part of row 3, listed apart because it is one feature over four options and needs the item-stream walk rather than the filesystem one |
 | 5 | JSON API: `repo-info`, `info`, `version`, `analyze` schemas | §11.4b | four of borg's eight `--json` commands still emit a document of borge's own shape; the other four match as of 2026-08-18 |
-| 6 | `--log-json` | §11.4b | absent entirely; a feature, not an option |
+| 6 | ~~`--log-json`~~ | §11.4b | **done 2026-08-19.** Registered on every command through `newFlagSet`, borge's equivalent of borg's common parser. All of stderr becomes JSON, not only the messages borge thought to convert |
 | 7 | Non-unicode paths in JSON, shared with `pydump.go` | §11.4b | `debug dump-*` does it correctly and the JSON commands do not; the two should be one implementation rather than agreeing by luck |
 | 8 | ~~`bsdflags` capture and apply; `xattrs` empty key; `--noflags` doing nothing~~ | DIVERGENCES #8 | **done 2026-08-19.** `flags_linux.go`; both keys now record "examined"; a flag borge stores survives a restore by borg |
 | 8b | ~~Attribute-based exclusion: nodump, and the two backup-exclusion xattrs~~ | DIVERGENCES #39 | **done 2026-08-19**, the same day it was found. Checked before content is read, and an excluded directory ends the walk into its subtree |

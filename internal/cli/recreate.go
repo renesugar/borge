@@ -157,7 +157,11 @@ func cmdRecreate(e *Env, args []string) int {
 		return ExitOK
 	}
 	if *list {
-		opts.OnItem = func(st byte, p string) { fmt.Fprintf(e.Stdout, "%c %s\n", st, p) }
+		// On stderr, where borg puts it: "borg recreate --list" writes its listing to
+		// stderr and leaves stdout for the command's data. Under --log-json it becomes a
+		// file_status object, which borg emits for create and recreate and no other
+		// command.
+		opts.OnItem = func(st byte, p string) { e.logFileStatus(st, p) }
 	}
 
 	for _, info := range infos {

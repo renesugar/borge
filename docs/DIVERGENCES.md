@@ -1277,3 +1277,66 @@ excludes if *present at all* whatever its value, while `user.xdg.robots.backup` 
 only when it is exactly `false` — that attribute exists to say "yes, back this up", so
 reading it as a presence check would silently drop files whose owner asked for the
 opposite.
+
+## 40. `create --list` named the stored path, not the one it read — **fixed 2026-08-19**
+
+`borg create A /srv/data --list` reports `A /srv/data/f`; borge reported `A srv/data/f`,
+the path as archived. A listing answers "what is being read", and borg names the file on
+the filesystem the user is looking at.
+
+The two strings are identical for a relative source, which is how this survived: every test
+that compared listings used one. It surfaced only when `--log-json` made the same string
+into `file_status.path`, a field a frontend uses to show progress against the source tree.
+
+`TestCreateListPathMatchesBorg` uses an absolute source and fails first if borg's own
+listing comes back relative, so the case it exists for cannot quietly stop being exercised.
+
+## 41. `--log-json` — **implemented 2026-08-19**
+
+borg's `--log-json` turns stderr into one JSON object per line, each tagged with a `type`
+(`docs/internals/frontends.rst`). It is the other half of the frontend API: `--json` gives a
+frontend the command's result, `--log-json` gives it everything the command said on the way.
+borge had it on none of its commands.
+
+**The contract is that it is *all* of stderr.** A frontend parses line by line, so a single
+plain-text line in the middle is a parse error — worse than not offering the option. Rather
+than converting a hundred call sites and hoping none was missed, borge wraps stderr itself:
+anything written to it that did not come from a level-aware helper becomes an INFO
+`log_message`. A message nobody has thought about yet still comes out as valid JSON.
+`TestLogJSONIsAlwaysParseable` runs five commands chosen for the different ways borge writes
+— a listing, a summary, a `Done.` hint, a warning, an error — and fails on the first
+unparseable line.
+
+Registered in `newFlagSet` rather than in `commonFlags`, because borg has it on every
+command including the six borge builds without a repository (`version`, `help`,
+`completion`, and the `key`, `debug` and `benchmark` parents). Every borge command builds
+its options through that one function, which makes it borge's equivalent of borg's common
+parser.
+
+**Installed only after a successful parse**, which reproduces borg's documented caveat
+rather than merely tolerating it: "JSON logging requires successful argument parsing. Even
+with `--log-json` specified, a parsing error will be printed in plain text, because logging
+set-up happens after all arguments are parsed." `TestLogJSONParseErrorStaysPlainText`
+asserts that for *both* tools, so it is recorded as shared behaviour a frontend must expect.
+
+**One documented type differs from the document.** `frontends.rst` says a `log_message`
+carries `time`, and its own worked example shows `created` instead. Measuring borg settles
+it: the key is `time`. borge follows what borg does, as in #36.
+
+**What borge does not emit, and why.** borg's three progress types — `archive_progress`,
+`progress_message`, `progress_percent` — are "not produced unless `--progress` is
+specified", and borge has no `--progress` at all: it is one of the absent common options.
+There is nothing to report and nowhere to report it from, so the types are absent rather
+than empty. The prompt types are likewise absent, borge's only prompt being for a
+passphrase and written to the terminal. Both are silence, not wrong output: a frontend that
+sees no progress objects learns nothing false.
+
+**One difference in granularity.** borg emits one object per *log call*, so a multi-line
+warning is a single object with newlines inside its message. borge's wrapper sees bytes, so
+for output that did not come through `errorf`/`warnf` it emits one object per line. Every
+line is a valid object of the right type; the contract holds and the granularity differs.
+
+`file_status` objects are emitted by `create` and `recreate` under `--list`, and by no other
+command, as borg does. Making borge's match borg's exposed #40. It also moved `recreate`'s
+listing from stdout to stderr, where borg puts it — measured: `borg recreate --list` writes
+309 bytes to stderr and none of the listing to stdout.

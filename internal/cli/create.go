@@ -403,7 +403,7 @@ func cmdCreate(e *Env, args []string) int {
 		// are both log output. borge wrote both to stdout until 2026-08-18, which was
 		// merely different until --json arrived and made it corrupting: a listing line
 		// ahead of the document is a parse error for the frontend reading it.
-		opts.OnItem = func(st byte, p string) { fmt.Fprintf(e.Stderr, "%c %s\n", st, p) }
+		opts.OnItem = func(st byte, p string) { e.logFileStatus(st, p) }
 	}
 
 	for _, stream := range streams {

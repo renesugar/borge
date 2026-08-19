@@ -30,13 +30,30 @@ func TestCreateDryRun(t *testing.T) {
 		}
 	}
 
+	// relToSrc normalises either spelling of a path to one relative to the source root.
+	//
+	// The two sides of this test speak different forms and that is correct: a listing
+	// names the path borge *read* ("/tmp/x/f.txt"), while the archive holds the path it
+	// *stored* ("tmp/x/f.txt") - see DIVERGENCES.md #40. This test is about which items a
+	// dry run promises, not how they are spelled, so both are reduced to the same thing.
+	// The spelling has its own test, TestCreateListPathMatchesBorg.
+	abs := filepath.ToSlash(src)
+	rel := strings.TrimPrefix(abs, "/")
+	relToSrc := func(p string) string {
+		if p == abs || p == rel {
+			return "."
+		}
+		p = strings.TrimPrefix(p, abs+"/")
+		return strings.TrimPrefix(p, rel+"/")
+	}
+
 	// statuses splits a --list run into the paths it said it would keep and drop.
 	statuses := func(out string) (kept, dropped []string) {
 		for _, line := range strings.Split(out, "\n") {
 			if len(line) < 3 {
 				continue
 			}
-			path := strings.TrimPrefix(line[2:], strings.TrimPrefix(filepath.ToSlash(src), "/")+"/")
+			path := relToSrc(line[2:])
 			switch line[0] {
 			case '+':
 				kept = append(kept, path)
@@ -64,8 +81,7 @@ func TestCreateDryRun(t *testing.T) {
 		t.Fatalf("a dry run that reported %d kept and %d dropped proves nothing about "+
 			"either\n%s", len(kept), len(dropped), stderr)
 	}
-	if strings.Join(dropped, ",") != strings.TrimPrefix(filepath.ToSlash(src), "/")+"/sub" &&
-		!strings.HasSuffix(dropped[0], "sub") {
+	if strings.Join(dropped, ",") != "sub" && !strings.HasSuffix(dropped[0], "sub") {
 		t.Errorf("the excluded directory is not what was reported dropped: %v", dropped)
 	}
 
@@ -82,7 +98,7 @@ func TestCreateDryRun(t *testing.T) {
 	}
 	var stored []string
 	for _, p := range sortedItemPaths(t, r.mustRun("list", "-r", r.path, "real", "--json-lines")) {
-		stored = append(stored, strings.TrimPrefix(p, strings.TrimPrefix(filepath.ToSlash(src), "/")+"/"))
+		stored = append(stored, relToSrc(p))
 	}
 	sort.Strings(stored)
 	if strings.Join(kept, "\n") != strings.Join(stored, "\n") {

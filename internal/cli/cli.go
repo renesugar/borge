@@ -61,6 +61,10 @@ type Env struct {
 	// prompted is a passphrase typed at the terminal, kept for the rest of this command
 	// so a second unlock does not ask again. Never written anywhere.
 	prompted *string
+
+	// logger is set by --log-json, and is also the Stderr this Env writes to once it is.
+	// Nil means the ordinary text form.
+	logger *jsonLogger
 }
 
 func (e *Env) lookup(name string) (string, bool) {
@@ -79,10 +83,20 @@ func (e *Env) lookupBorg(name string) (string, bool) {
 }
 
 func (e *Env) errorf(format string, args ...any) {
+	if e.logger != nil {
+		// Straight to the record rather than through the wrapped writer, so the level is
+		// the real one and a multi-line message stays one object.
+		e.logger.emit("ERROR", fmt.Sprintf(format, args...))
+		return
+	}
 	fmt.Fprintf(e.Stderr, "borge: "+format+"\n", args...)
 }
 
 func (e *Env) warnf(format string, args ...any) {
+	if e.logger != nil {
+		e.logger.emit("WARNING", fmt.Sprintf(format, args...))
+		return
+	}
 	fmt.Fprintf(e.Stderr, "borge: warning: "+format+"\n", args...)
 }
 
@@ -217,7 +231,15 @@ func newFlagSet(e *Env, name string) *flagSet {
 	if e.captureFlags != nil {
 		e.captureFlags(inner)
 	}
-	return &flagSet{FlagSet: inner}
+	fs := &flagSet{FlagSet: inner, env: e, name: name}
+	// Registered here rather than in commonFlags because borg's --log-json is on every
+	// command, including the six that take no repository: version, help, completion, and
+	// the key, debug and benchmark parents. Every borge command builds its options through
+	// this function, so this is the one place that reaches all of them - borge's
+	// equivalent of borg's common parser.
+	inner.BoolVar(&fs.logJSON, "log-json", false,
+		"write stderr as one JSON object per line instead of text")
+	return fs
 }
 
 // newPassthroughFlagSet is newFlagSet for a command whose trailing arguments are another

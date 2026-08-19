@@ -43,6 +43,12 @@ type flagSet struct {
 	// passthrough leaves the arguments as typed: what follows the first positional
 	// belongs to a program borge is about to run, not to borge.
 	passthrough bool
+
+	// env and name are what --log-json needs once parsing succeeds; see Parse.
+	env  *Env
+	name string
+	// logJSON is bound to the --log-json option newFlagSet registers.
+	logJSON bool
 }
 
 // Parse permutes the arguments and parses them.
@@ -50,7 +56,16 @@ func (fs *flagSet) Parse(args []string) error {
 	if !fs.passthrough {
 		args = permute(fs.FlagSet, args)
 	}
-	return fs.FlagSet.Parse(args)
+	err := fs.FlagSet.Parse(args)
+	// Only after a successful parse, which is borg's rule and not an accident of where
+	// this sits: "JSON logging requires successful argument parsing. Even with --log-json
+	// specified, a parsing error will be printed in plain text, because logging set-up
+	// happens after all arguments are parsed" (frontends.rst). A frontend therefore has
+	// to be ready for a plain-text usage error, from either tool.
+	if err == nil && fs.logJSON && fs.env != nil {
+		fs.env.enableJSONLog(fs.name)
+	}
+	return err
 }
 
 // permute returns args with the options ahead of the positionals.
