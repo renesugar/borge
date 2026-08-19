@@ -882,3 +882,35 @@ what the defaults were before adding options to change them.
 
 `--nobirthtime` is accepted and does nothing on Linux, in both tools: birthtime is only
 reachable through `statx`, which neither reads here. Recorded rather than silently ignored.
+
+## 31. A dry run says what it would do
+
+**Stage 8 · `internal/cli/manage.go` · deliberate**
+
+`borg delete --dry-run` without `--list` prints **nothing**. borge prints a summary:
+
+```
+borge delete --dry-run -a 'sh:daily-*' --force
+would delete 3 archive(s); nothing was changed (pass --list to see which)
+```
+
+The whole point of a dry run is to decide something from what it says, and silence is an
+answer nobody can act on. "Three archives would go" and "your selector matched nothing"
+look identical when both print nothing — and this is the command where being wrong is
+irreversible. See `PORTING_PLAN.md` §2.3, which collects the same failure in arguments.
+
+The summary appears with `--list` too, without the pointer: "nothing was changed" is the
+reassurance a dry run exists to give, and it should not depend on which options happened to
+be passed. `undelete --dry-run` does the same.
+
+**Scoped to dry runs.** Every real path — `delete`, `delete --list`, `undelete`,
+`undelete --list` — is byte-identical to borg's, and stays that way. There is a format
+there that scripts parse; there is none in a dry run, because borg emits nothing.
+
+**Fairness to borg's silence.** borge can afford this because it already refuses an empty
+selection outright (#28) and requires `--force` for a multi-archive delete, so the summary
+is extra detail rather than the only signal. In borg the same silence covers "matched
+nothing" as well, which is the worse case, and `--list` is the only cure.
+
+The `--dry-run` help on both commands names `--list`, so the pointer reaches a reader who
+never runs the command with the wrong options in the first place.

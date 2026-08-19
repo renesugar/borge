@@ -73,6 +73,8 @@ type TarOptions struct {
 	StripComponents int
 	// OnWarning reports an item that could not be represented.
 	OnWarning func(path, reason string)
+	// OnItem is called with each item's stored path as it is written, for --list.
+	OnItem func(path string)
 }
 
 // TarStats counts what an export wrote.
@@ -128,6 +130,11 @@ func (a *Archive) ExportTar(w io.Writer, opts TarOptions) (*TarStats, error) {
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
+		}
+		// Reported after the header is written rather than before, so a listing never
+		// names an item that then failed to be exported.
+		if opts.OnItem != nil {
+			opts.OnItem(it.Path)
 		}
 		stats.Items++
 

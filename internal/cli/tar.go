@@ -178,6 +178,7 @@ func cmdExportTar(e *Env, args []string) int {
 	format := fs.String("tar-format", "PAX",
 		"PAX (xattrs, ACLs, sub-second times), BORG (PAX plus the whole item) or GNU")
 	strip := fs.Int("strip-components", 0, "remove this many leading path components")
+	list := fs.Bool("list", false, "print each item as it is exported")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -248,6 +249,11 @@ func cmdExportTar(e *Env, args []string) int {
 		Format:          tarFormat,
 		StripComponents: *strip,
 		Filter:          func(it *item.Item) bool { return matcher.Match(it.Path) },
+		OnItem: func(path string) {
+			if *list {
+				fmt.Fprintln(e.Stdout, path)
+			}
+		},
 		OnWarning: func(p, reason string) {
 			e.warnf("%s: %s", p, reason)
 			status = ExitWarning

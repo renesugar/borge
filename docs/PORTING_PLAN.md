@@ -597,6 +597,18 @@ The recurring shape is worth stating plainly: **a silent no-op looks exactly lik
 which is why none of the four was caught by the seven stages of differential testing that
 preceded them. They were caught by running a command and looking at the result.
 
+**Silence is an answer nobody can act on.** The three questions above are about input; there
+is a fourth about output, and `delete --dry-run` is the live example. Without `--list` it
+prints *nothing* — in borg and now in borge — so "two archives would be deleted" and
+"nothing matched your selector" look exactly alike, and the whole point of a dry run is to
+decide something from what it says. Inherited silence is still silence: a command whose
+purpose is to inform has to be readable without a second option, or has to say which option
+to add. borge does both. The `--dry-run` help on `delete` and `undelete` names `--list`, *and* a
+dry run prints a summary of what it would do (DIVERGENCES #31) — because output that says
+what happened, including that nothing did, is what the user is there for. The divergence is
+scoped to dry runs, where borg prints nothing at all: every real path stays byte-identical,
+because that output has a format scripts parse and a dry run's has none.
+
 **The asymmetry that falls out of this.** Applying the rule to selectors produced a policy
 worth naming: a **write** command whose filter matched nothing is an error (DIVERGENCES
 #28), a **read** command's is not. Asking to list a set that turns out to be empty has been
@@ -1789,8 +1801,17 @@ Everything needed for feature parity, once correctness is established.
   total to **58**. **`--timestamp` followed** on `create`, `recreate` and `import-tar`
   — three commands, one parser — taking the total to **55**, and **`create --dry-run`**
   after it, to **54**, and the **timestamp-storage group** (`--atime`, `--noctime`,
-  `--nobirthtime`) to **51**. Still there: `--sparse`, `--tags`, the four `--stdin-*` and
-  the four `--paths-from-*`.
+  `--nobirthtime`) to **51**, and **`--list` on `delete`, `undelete` and `export-tar`** to
+  **48**. Still there on `create`: `--sparse`, `--tags`, the four `--stdin-*` and the four
+  `--paths-from-*`.
+
+  The `--list` work came with two changes to output borge already had, both asked for and
+  both measured against borg first. **`-v` no longer lists archives**: borg's `-v` is a log
+  level and prints exactly what a plain run does, with per-archive lines only under
+  `--list`; borge printed its own line under `-v` and a different one under `--dry-run`, so
+  one event had three shapes and none was borg's. And **`delete` now ends with borg's
+  `Done. Run "borge compact" to free space.`**, which borge omitted entirely — the sentence
+  that stops a user wondering why the disk did not shrink, and which `prune` already had.
 
   The timestamp group turned up a defect worth more than the options: **borge stored an
   access time borg leaves out**, on every item, so every archive was bigger than borg's for
@@ -2517,7 +2538,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 51 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 48 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

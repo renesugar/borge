@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repoobj"
@@ -32,7 +33,9 @@ func cmdDelete(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	sel.register(fs)
-	dryRun := fs.Bool("dry-run", false, "say what would be deleted, delete nothing")
+	dryRun := fs.Bool("dry-run", false,
+		"say what would be deleted, delete nothing (with --list, say which)")
+	list := fs.Bool("list", false, "print each archive as it is deleted")
 	force := fs.Bool("force", false, "delete without requiring a selector to match exactly one archive")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
@@ -79,24 +82,68 @@ func cmdDelete(e *Env, args []string) int {
 		return ExitError
 	}
 
-	for _, info := range infos {
-		if *dryRun {
-			fmt.Fprintf(e.Stdout, "would delete %s %s\n", hex.EncodeToString(info.ID)[:8], info.Name)
-			continue
+	for i, info := range infos {
+		if !*dryRun {
+			if err := o.manifest.Archives.Delete(info.ID); err != nil {
+				return e.fail(err)
+			}
 		}
-		if err := o.manifest.Archives.Delete(info.ID); err != nil {
-			return e.fail(err)
-		}
-		if common.verbose {
-			fmt.Fprintf(e.Stdout, "deleted %s %s\n", hex.EncodeToString(info.ID)[:8], info.Name)
-		}
-	}
-	if !*dryRun {
-		if err := o.manifest.Write(); err != nil {
+		if err := e.listArchive(*list, *dryRun, "delete", "Deleted archive", info, i, len(infos)); err != nil {
 			return e.fail(err)
 		}
 	}
+	if *dryRun {
+		e.reportDryRun("delete", *list, len(infos))
+		return ExitOK
+	}
+	if err := o.manifest.Write(); err != nil {
+		return e.fail(err)
+	}
+	// borg says this on every real delete, and it is the sentence that stops a user
+	// wondering why the disk did not shrink: the delete is soft until a compaction runs.
+	fmt.Fprintln(e.Stdout, `Done. Run "borge compact" to free space.`)
 	return ExitOK
+}
+
+// reportDryRun says what a dry run would have done.
+//
+// borg prints nothing at all here, and silence is an answer nobody can act on: the whole
+// point of a dry run is to decide something from what it says. So borge says it, and says
+// which option to pass to see the detail. See docs/DIVERGENCES.md #31 and
+// PORTING_PLAN.md §2.3.
+//
+// Dry runs only. The real paths are byte-identical to borg's and are left that way -
+// there is a format there that scripts parse, and there is none here.
+func (e *Env) reportDryRun(verb string, listed bool, n int) {
+	hint := " (pass --list to see which)"
+	if listed {
+		hint = ""
+	}
+	fmt.Fprintf(e.Stdout, "would %s %d archive(s); nothing was changed%s\n", verb, n, hint)
+}
+
+// listArchive prints borg's per-archive line for delete and undelete.
+//
+// borg prints these *only* under --list: its -v (which is --info) produces exactly what a
+// plain run does. borge used to print its own line under -v and another under --dry-run,
+// which meant three different shapes for one event; there is one now, and it is borg's.
+//
+// The template is borg's fixed archive format - neither command takes --format - and the
+// counter is borg's too: it tells a user watching a long delete how far along it is.
+func (e *Env) listArchive(list, dryRun bool, verb, doneLabel string, info manifest.Info, i, total int) error {
+	if !list {
+		return nil
+	}
+	label := doneLabel + ": "
+	if dryRun {
+		label = "Would " + verb + ": "
+	}
+	line, err := formatter.Format("{archive:<36} {time} [{id}]", archiveValues(info))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(e.Stdout, "%s%s (%d/%d)\n", label, line, i+1, total)
+	return nil
 }
 
 // cmdUndelete restores soft-deleted archives.
@@ -106,7 +153,9 @@ func cmdUndelete(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	sel.register(fs)
-	dryRun := fs.Bool("dry-run", false, "say what would be restored, restore nothing")
+	dryRun := fs.Bool("dry-run", false,
+		"say what would be restored, restore nothing (with --list, say which)")
+	list := fs.Bool("list", false, "print each archive as it is restored")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -138,23 +187,24 @@ func cmdUndelete(e *Env, args []string) int {
 		return ExitError
 	}
 
-	for _, info := range infos {
-		if *dryRun {
-			fmt.Fprintf(e.Stdout, "would undelete %s %s\n", hex.EncodeToString(info.ID)[:8], info.Name)
-			continue
+	for i, info := range infos {
+		if !*dryRun {
+			if err := o.manifest.Archives.Undelete(info.ID); err != nil {
+				return e.fail(err)
+			}
 		}
-		if err := o.manifest.Archives.Undelete(info.ID); err != nil {
-			return e.fail(err)
-		}
-		if common.verbose {
-			fmt.Fprintf(e.Stdout, "undeleted %s %s\n", hex.EncodeToString(info.ID)[:8], info.Name)
-		}
-	}
-	if !*dryRun {
-		if err := o.manifest.Write(); err != nil {
+		if err := e.listArchive(*list, *dryRun, "undelete", "Undeleted archive", info, i, len(infos)); err != nil {
 			return e.fail(err)
 		}
 	}
+	if *dryRun {
+		e.reportDryRun("undelete", *list, len(infos))
+		return ExitOK
+	}
+	if err := o.manifest.Write(); err != nil {
+		return e.fail(err)
+	}
+	fmt.Fprintln(e.Stdout, "Done.")
 	return ExitOK
 }
 

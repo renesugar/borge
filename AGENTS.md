@@ -151,6 +151,13 @@ parsed value actually ends up. `PORTING_PLAN.md` §2.3 has the pattern and the t
 A silent no-op looks exactly like success, which is why none of the four was caught by
 seven stages of differential testing.
 
+**Silence is an answer nobody can act on.** `borge delete --dry-run` without `--list`
+prints nothing, so "two archives would go" and "your selector matched nothing" look
+identical — and that is inherited from borg, which does the same. Where borge must match
+borg's output it says which option to add instead (the `--dry-run` help names `--list`);
+where borge is deciding for itself, make the informing command informative. `PORTING_PLAN.md`
+§2.3.
+
 **Say what you did not do.** A stage note that lists only successes is not a record.
 
 ---
