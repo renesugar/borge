@@ -1804,8 +1804,17 @@ Everything needed for feature parity, once correctness is established.
   `--nobirthtime`) to **51**, and **`--list` on `delete`, `undelete` and `export-tar`** to
   **48**, and the **`--paths-from-*` group** (`--paths-from-stdin`,
   `--paths-from-command`, `--paths-from-shell-command`, `--paths-delimiter`) to **44**.
-  Still there on `create`: `--sparse`, `--tags`, the four `--stdin-*`, and
-  `--content-from-command`.
+  and the **stdin-content group** (`--stdin-name`, `--stdin-mode`, `--stdin-user`,
+  `--stdin-group`, `--content-from-command`, and `-` as a path) to **39**. `create` is down
+  from 40 missing to 6: `--sparse`, `--tags`, `--filter`, `--files-changed`,
+  `--exclude-dataless`, `--read-special-timeout`.
+
+  The stdin group is where a port drifts silently, because there is no file on disk and
+  every piece of metadata is invented. Two details had to be measured: borg sets **all
+  three timestamps to the moment of the backup**, whatever `--atime` and `--noctime` say —
+  those options are about copying an inode, and a pipe has none — and a failing
+  `--content-from-command` **fails the backup**, because a truncated dump stored as a
+  complete one is the worst outcome the feature has.
 
   The paths-from group is not another way to name paths, and two consequences of borg's
   "all control is external: no more, no less" are easy to miss. A directory in the list is
@@ -2547,7 +2556,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 44 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands; `serve`, the remote backends, `transfer` (§11.1), 39 per-command options (§11.2), bsdflags restore and `debug convert-profile` remain (§11) | not yet bundled, and not to be bundled until §11 is empty |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

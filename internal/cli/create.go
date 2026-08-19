@@ -199,6 +199,8 @@ func cmdCreate(e *Env, args []string) int {
 	timestamp.register(fs)
 	var pathsFrom pathsFromFlags
 	pathsFrom.register(fs)
+	var stdin stdinFlags
+	stdin.register(fs)
 	storeATime := fs.Bool("atime", false, "store each item's access time")
 	noCTime := fs.Bool("noctime", false, "do not store the inode change time")
 	noBirthTime := fs.Bool("nobirthtime", false, "do not store the creation time")
@@ -223,6 +225,22 @@ func cmdCreate(e *Env, args []string) int {
 	}
 	if err := pathsFrom.check(fs.Args()[1:]); err != nil {
 		return e.fail(err)
+	}
+	streamOpts, err := stdin.options()
+	if err != nil {
+		return e.fail(err)
+	}
+	if stdin.fromCmd {
+		if pathsFrom.any() {
+			e.errorf("--content-from-command reads the content of one file from a " +
+				"command; it cannot also take its list of paths from one")
+			return ExitError
+		}
+		if fs.NArg() < 2 {
+			e.errorf("no command given; the arguments after the archive name are the " +
+				"command whose output becomes the file's content")
+			return ExitError
+		}
 	}
 	if !pathsFrom.any() && fs.NArg() < 2 && len(roots) == 0 {
 		e.errorf("create needs at least one path, on the command line or as an " +
@@ -334,6 +352,15 @@ func cmdCreate(e *Env, args []string) int {
 	}
 
 	status := ExitOK
+	// A "-" among the paths is standard input's *content*, not a path to walk, and
+	// --content-from-command replaces the paths entirely with a command to run. Both
+	// become one item; borg handles them in the same loop that walks the rest, which is
+	// why they can be mixed with real paths.
+	streams, paths, err := splitStreams(e, paths, stdin.fromCmd, fs.Args()[1:])
+	if err != nil {
+		return e.fail(err)
+	}
+
 	opts := archive.CreateOptions{
 		Paths:         paths,
 		Matcher:       matcher,
@@ -366,9 +393,36 @@ func cmdCreate(e *Env, args []string) int {
 		opts.OnItem = func(st byte, p string) { fmt.Fprintf(e.Stdout, "%c %s\n", st, p) }
 	}
 
-	created, err := b.Create(opts)
-	if err != nil {
-		return e.fail(err)
+	for _, stream := range streams {
+		if *dryRun {
+			// Nothing is read: a dry run must not drain a pipe it is not going to store,
+			// because the data would be gone for the real run.
+			fmt.Fprintf(e.Stdout, "+ %s\n", streamOpts.Name)
+			continue
+		}
+		r, cleanup, err := stream(e)
+		if err != nil {
+			return e.fail(err)
+		}
+		_, err = b.AddStream(r, streamOpts)
+		if cleanupErr := cleanup(); err == nil {
+			err = cleanupErr
+		}
+		if err != nil {
+			return e.fail(err)
+		}
+	}
+
+	// With only a stream to archive there is nothing to walk, and Create refuses an empty
+	// path list - rightly, since for every other caller that means a mistake.
+	created := &archive.CreateStats{}
+	if len(paths) > 0 {
+		created, err = b.Create(opts)
+		if err != nil {
+			return e.fail(err)
+		}
+	} else {
+		created.Stats = b.Stats()
 	}
 
 	// A dry run stops here. Nothing was read and nothing was stored, so there is no

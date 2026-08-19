@@ -940,3 +940,27 @@ Both are warnings rather than errors: the command is still doing something coher
 refusing it would break a script that passes a fixed set of options to several invocations.
 Both go to stderr, so a piped listing is unaffected. See `PORTING_PLAN.md` §2.3 — an option
 that silently does nothing is the same failure as a filter that silently matches everything.
+
+## 33. `--format` prints "None" for a key an item does not carry
+
+**Stage 8 · `internal/cli/itemformat.go` · reproduced on purpose**
+
+borg's item data holds Python's `None` for a key the item does not have, and formatting it
+produces the four letters `None`:
+
+```
+borge list --format '{path}|{user}|{uid}{NL}' ARCHIVE
+stdin|None|None
+```
+
+It reaches `uid`, `gid`, `user`, `group`, `flags` and `inode`, and in practice only for
+items that were never files — the ones `create ARCHIVE -` and `--content-from-command`
+make, which have no inode to take ownership from unless `--stdin-user` is given.
+
+**It is a Python artifact showing through**, and it looks like a bug in Go source, which is
+why it is written down here. borge reproduces it because a listing is something people
+parse: printing an empty column instead would break a script that greps for `None`, and
+"borge is tidier than borg" is not a reason worth a compatibility break before stage 10.
+
+The alternative — an empty column — is the tidier answer and is what borge did first. It
+was changed after a differential over a streamed item showed the difference.

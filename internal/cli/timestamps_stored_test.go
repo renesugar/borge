@@ -157,3 +157,26 @@ func itemDump(t *testing.T, r *borgRepo, name string) string {
 	}
 	return string(out)
 }
+
+// timeKeysOf is the sorted timestamp keys of the first item in a dump, as a string.
+func timeKeysOf(t *testing.T, dump string) string {
+	t.Helper()
+	var doc struct {
+		Items []map[string]any `json:"_items"`
+	}
+	if err := json.Unmarshal([]byte(dump), &doc); err != nil {
+		t.Fatalf("dump does not parse: %v", err)
+	}
+	for _, it := range doc.Items {
+		var keys []string
+		for k := range it {
+			if strings.Contains(k, "time") {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		return strings.Join(keys, ",")
+	}
+	t.Fatal("the dump has no items")
+	return ""
+}

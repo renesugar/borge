@@ -60,15 +60,15 @@ func itemValues(it *item.Item, archiveName, archiveID string) map[string]any {
 		"hlid":        hex.EncodeToString(it.HLID),
 	}
 
-	values["uid"] = intOrEmpty(it.UID)
-	values["gid"] = intOrEmpty(it.GID)
+	values["uid"] = intOrNone(it.UID)
+	values["gid"] = intOrNone(it.GID)
 	values["user"] = nameOrID(it.User, it.UID)
 	values["group"] = nameOrID(it.Group, it.GID)
-	values["flags"] = intOrEmpty(it.BSDFlags)
+	values["flags"] = intOrNone(it.BSDFlags)
 	if it.Inode != nil {
 		values["inode"] = int64(*it.Inode)
 	} else {
-		values["inode"] = ""
+		values["inode"] = "None"
 	}
 
 	// borg's format_time is OutputTimestamp(item.get(key) or item.mtime): every one of
@@ -88,15 +88,23 @@ func itemValues(it *item.Item, archiveName, archiveID string) map[string]any {
 	return values
 }
 
-func intOrEmpty(v *int64) any {
+// intOrNone is borg's rendering of an absent number in a format string.
+//
+// borg's item_data holds Python's None for a key the item does not carry, and formatting
+// it produces the four letters "None". That is a Python artifact showing through, and it
+// looks like a bug in Go source - but it is what borg prints, and a script that greps a
+// listing for it would break if borge printed an empty column instead. Reproduced
+// deliberately; see docs/DIVERGENCES.md #33 for the whole list of keys it reaches.
+func intOrNone(v *int64) any {
 	if v == nil {
-		return ""
+		return "None"
 	}
 	return *v
 }
 
 // nameOrID is borg's item.get("user", str(uid)): the stored name, or the numeric id when
-// there is none, or an empty string when there is neither.
+// there is none. With neither - a streamed item given no --stdin-user - borg formats
+// str(None), so this is "None" too. See intOrNone.
 func nameOrID(name *string, id *int64) string {
 	if name != nil && *name != "" {
 		return *name
@@ -104,7 +112,7 @@ func nameOrID(name *string, id *int64) string {
 	if id != nil {
 		return strconv.FormatInt(*id, 10)
 	}
-	return ""
+	return "None"
 }
 
 func timeOrEmpty(ns *int64, format func(time.Time) string) string {

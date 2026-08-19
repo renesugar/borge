@@ -238,6 +238,69 @@ func chunkData(c chunker.Chunk) []byte {
 }
 
 // AddItem appends an item to the metadata stream.
+// StreamOptions describe the single item a stream becomes.
+type StreamOptions struct {
+	// Name is the path stored for it. borg's default is "stdin".
+	Name string
+	// Mode is the permission bits; the regular-file type is added here.
+	Mode int64
+	// User and Group are stored when non-empty, with UID and GID beside them.
+	User, Group string
+	UID, GID    *int64
+}
+
+// AddStream archives a stream of bytes as one regular file.
+//
+// This is how "borge create ARCHIVE -" and --content-from-command store what they read:
+// there is no file on disk, so there is nothing to stat, and every piece of metadata is
+// either given on the command line or invented here.
+//
+// # The timestamps are all "now", and all three are stored
+//
+// borg's process_pipe sets atime, ctime and mtime to the moment of the backup, and it does
+// so whatever --atime and --noctime say - those options are about what to copy from a
+// file's inode, and a pipe has no inode. Reproduced, because an archive of a database dump
+// that borg and borge disagree about is one that cannot be compared.
+func (b *Builder) AddStream(r io.Reader, opts StreamOptions) (int64, error) {
+	chunks, err := b.ChunkFile(r)
+	if err != nil {
+		return 0, err
+	}
+	var size int64
+	for _, c := range chunks {
+		size += int64(c.Size)
+	}
+
+	now := time.Now().UnixNano()
+	mode := opts.Mode | item.SIFREG
+	it := &item.Item{
+		Path:      opts.Name,
+		Mode:      &mode,
+		Size:      &size,
+		Chunks:    chunks,
+		ChunksSet: true,
+		MTime:     &now,
+		ATime:     &now,
+		CTime:     &now,
+	}
+	if opts.User != "" {
+		user := opts.User
+		it.User = &user
+	}
+	if opts.Group != "" {
+		group := opts.Group
+		it.Group = &group
+	}
+	it.UID, it.GID = opts.UID, opts.GID
+
+	if err := b.AddItem(it); err != nil {
+		return 0, err
+	}
+	b.stats.NFiles++
+	b.stats.OriginalSize += size
+	return size, nil
+}
+
 func (b *Builder) AddItem(it *item.Item) error {
 	if it.IsRegular() {
 		b.stats.NFiles++
