@@ -122,6 +122,15 @@ exists because a stage was declared complete against a hand-maintained list of r
 work while five commands were missing. It asks `borg --help` what commands exist. It caught
 a bug in itself on its first run, which is the same failure in miniature.
 
+**A test that normalises away a difference cannot see that difference come back.** Every
+diff test sorted both sides before comparing, with a comment saying the order was "a
+difference real and separate from what this test is about" - so when borge's diff turned out
+to be sorted where borg's is not, nothing failed. Normalising is sometimes right (key order
+inside a JSON object is not a promise), but write down what the normalisation hides, and
+when the hidden difference is fixed, take the normalisation out: `TestDiffDefaultOrderIsBorgs`
+now asserts borg's order *and* that it differs from the sorted order, so a tree that
+happened to stream in sorted order fails the test rather than passing it.
+
 **Ask it at every level.** That gate compared top-level names only, so `debug` matched
 `debug` and thirteen subcommands were never compared; the option gate did compare them, but
 enumerated them from *borge*, so a subcommand borge lacked was not on the list. Each gate

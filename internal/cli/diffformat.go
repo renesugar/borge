@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/item"
 )
 
 // borg has three format key sets, not two: the archive one that repo-list, prune, info and
@@ -147,4 +148,132 @@ func splitOwner(s string) (string, string) {
 		return s[:i], s[i+1:]
 	}
 	return s, ""
+}
+
+// diffSortKeys is borg's DIFF_SORT_KEYS: the fields "diff --sort-by" accepts.
+//
+// A third key set again - these are neither the format keys above nor list's item keys.
+// "size_added" can be sorted by and not printed; "{content}" can be printed and not sorted
+// by. borg keeps them apart and so does this.
+var diffSortKeys = []string{
+	"path", "size_added", "size_removed", "size_diff", "size",
+	"user", "group", "uid", "gid", "ctime", "mtime", "ctime_diff", "mtime_diff",
+}
+
+// diffSortKey computes one changed path's key for one field.
+//
+// # Where the values come from, which is not where it looks
+//
+// borg builds an ItemDiff from two items and fills the missing side with
+// Item.create_deleted(path) - an item carrying its path and nothing else. Its key function
+// then reads the plain attributes from item2 (`d._item2 or d._item1`, and _item2 is never
+// None), so for a *removed* path the owner is "", the uid is -1 and the timestamps are 0:
+// the sort sees the placeholder, not the version that was there before.
+//
+// That reads like a bug and is not worth diverging over - "sort by user" is asking about
+// the state in the second archive, which is precisely what a removed path has none of. It
+// is reproduced here by reading Item2 and treating nil as that placeholder.
+func diffSortKey(field string, d archive.Diff) sortKey {
+	switch field {
+	case "path":
+		// borg sorts by remove_surrogates(path): a byte that is not valid UTF-8 compares
+		// as "?", so two paths differing only in undecodable bytes sort as equal and keep
+		// their stream order. Sorting by the raw bytes would be defensible and would not
+		// be borg's answer.
+		return textSortKey(approximateText(d.Path))
+	case "size_added":
+		added, _ := diffContentSizes(d)
+		return numSortKey(added)
+	case "size_removed":
+		_, removed := diffContentSizes(d)
+		return numSortKey(removed)
+	case "size_diff":
+		added, removed := diffContentSizes(d)
+		return numSortKey(added - removed)
+	case "size":
+		// The size in the second archive, and zero where there is no second version.
+		if d.Item2 == nil {
+			return numSortKey(0)
+		}
+		return numSortKey(itemSize(d.Item2))
+	case "ctime_diff", "mtime_diff":
+		return numSortKey(diffTimestamp(field[:5], d.Item2) - diffTimestamp(field[:5], d.Item1))
+	case "user":
+		if d.Item2 == nil {
+			return textSortKey("")
+		}
+		return textSortKey(stringOrEmpty(d.Item2.User))
+	case "group":
+		if d.Item2 == nil {
+			return textSortKey("")
+		}
+		return textSortKey(stringOrEmpty(d.Item2.Group))
+	case "uid":
+		if d.Item2 == nil {
+			return numSortKey(-1)
+		}
+		return numSortKey(idOrMissing(d.Item2.UID))
+	case "gid":
+		if d.Item2 == nil {
+			return numSortKey(-1)
+		}
+		return numSortKey(idOrMissing(d.Item2.GID))
+	case "ctime", "mtime":
+		return numSortKey(diffTimestamp(field, d.Item2))
+	}
+	// Unreachable: the spec is validated against diffSortKeys before either archive is read.
+	return textSortKey("")
+}
+
+// diffContentSizes returns the bytes added and removed by the *content* change, and zero
+// for a path whose change is anything else.
+//
+// A directory or a symlink that came or went is filed under its own key rather than under
+// content (see diffValues above), and borg's key function looks up "content" alone - so
+// sorting by size_added puts a new directory with the zeroes, not with the new files.
+func diffContentSizes(d archive.Diff) (added, removed int64) {
+	for _, c := range d.Changes {
+		switch c.Kind {
+		case archive.ChangeModified:
+			return c.Added, c.Removed
+		case archive.ChangeAdded:
+			if c.ItemKind == "" {
+				return c.Added, 0
+			}
+		case archive.ChangeRemoved:
+			if c.ItemKind == "" {
+				return 0, c.Removed
+			}
+		}
+	}
+	return 0, 0
+}
+
+// diffTimestamp reads a raw nanosecond timestamp, defaulting to zero.
+//
+// No fallback to mtime here, unlike the item sort keys: borg's diff key function reads
+// item.get(ts, 0) directly, and a "sort by ctime" that quietly became a sort by mtime
+// would make ctime_diff report differences that are not there.
+func diffTimestamp(field string, it *item.Item) int64 {
+	if it == nil {
+		return 0
+	}
+	var ts *int64
+	switch field {
+	case "mtime":
+		ts = it.MTime
+	case "ctime":
+		ts = it.CTime
+	}
+	if ts == nil {
+		return 0
+	}
+	return *ts
+}
+
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

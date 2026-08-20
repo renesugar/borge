@@ -12,7 +12,7 @@ package archive
 import (
 	"encoding/hex"
 	"fmt"
-	"sort"
+	"iter"
 	"time"
 
 	"github.com/renesugar/borge/internal/item"
@@ -73,6 +73,12 @@ type Change struct {
 type Diff struct {
 	Path    string
 	Changes []Change
+
+	// Item1 and Item2 are the two versions, nil where the path is absent from that
+	// archive. They are carried because --sort-by sorts by fields no Change records -
+	// the owner, the timestamps, the size in the second archive - and borg's ItemDiff
+	// holds both items for exactly that reason.
+	Item1, Item2 *item.Item
 }
 
 // Empty reports whether the two versions are the same.
@@ -93,62 +99,177 @@ type DiffOptions struct {
 
 // Compare walks two archives and reports the differences.
 //
-// Both item streams are in the same order, so the walk is a merge rather than two full
-// reads into memory - but a file that exists in only one archive puts the streams out of
-// step, so unmatched items are held aside until the other stream produces them or ends.
+// # Order, and why it is not sorted
+//
+// borg zips the two item streams positionally and yields a comparison the moment both
+// sides produce the same path; a path that appears in only one stream is held aside as an
+// *orphan* until the other stream produces it, or until both streams end. Whatever is
+// still orphaned then is emitted at the end - archive2's leftovers first, as added, then
+// archive1's, as removed.
+//
+// borge used to collect both streams into maps and walk the union sorted by path. The
+// comment here called that "the same answer with less state", and it was not: it is borg's
+// "--sort-by path" output, not borg's default, so every line matched borg's and the order
+// did not. Two archives of the same tree usually stream in the same order, which is why it
+// went unnoticed - the difference only shows when a path is added or removed, or when the
+// tree was archived from roots given in a different order.
+//
+// Sorting now belongs to --sort-by, where borg puts it, and this function's job is to
+// produce borg's order.
+//
+// # Streaming both sides at once
+//
+// The positional zip needs both streams stepped in lockstep, which a callback iterator
+// cannot do. iter.Pull2 turns each into a pull iterator; only one of them runs at a time,
+// and each holds its own unpacker and reads whole objects through repo.Get, so their reads
+// interleave exactly as two sequential walks' would. What this buys is borg's memory
+// profile: only the orphans are held, where the old map walk held every item of both
+// archives - for two archives of the same tree, everything against nothing.
 func Compare(a, b *Archive, opts DiffOptions, fn func(Diff) error) error {
-	itemsA, err := collectItems(a, opts.Filter)
-	if err != nil {
-		return err
-	}
-	itemsB, err := collectItems(b, opts.Filter)
-	if err != nil {
-		return err
-	}
+	next1, stop1 := iter.Pull2(itemSeq(a, opts.Filter))
+	defer stop1()
+	next2, stop2 := iter.Pull2(itemSeq(b, opts.Filter))
+	defer stop2()
 
-	// A stable, sorted walk over the union of paths. borg zips the two streams and holds
-	// orphans aside; sorting is the same answer with less state, and it makes the output
-	// order deterministic, which borg's is not when paths appear in different orders.
-	paths := make([]string, 0, len(itemsA)+len(itemsB))
-	seen := map[string]bool{}
-	for p := range itemsA {
-		paths = append(paths, p)
-		seen[p] = true
-	}
-	for p := range itemsB {
-		if !seen[p] {
-			paths = append(paths, p)
-		}
-	}
-	sort.Strings(paths)
+	// Orphans keep insertion order: they are emitted in the order the stream produced
+	// them, as Python's dicts do, so a tail of added files reads the way the archive was
+	// written rather than in a hash order that changes between runs.
+	orphans1 := newOrphans()
+	orphans2 := newOrphans()
 
-	for _, p := range paths {
-		d := diffItems(p, itemsA[p], itemsB[p], opts)
+	emit := func(path string, x, y *item.Item) error {
+		d := diffItems(path, x, y, opts)
 		if d.Empty() {
+			return nil
+		}
+		return fn(d)
+	}
+
+	for {
+		it1, err1, ok1 := next1()
+		if err1 != nil {
+			return err1
+		}
+		it2, err2, ok2 := next2()
+		if err2 != nil {
+			return err2
+		}
+		if !ok1 && !ok2 {
+			break
+		}
+
+		if ok1 && ok2 && it1.Path == it2.Path {
+			if err := emit(it1.Path, it1, it2); err != nil {
+				return err
+			}
 			continue
 		}
-		if err := fn(d); err != nil {
+		if ok1 {
+			if partner := orphans2.take(it1.Path); partner != nil {
+				if err := emit(it1.Path, it1, partner); err != nil {
+					return err
+				}
+			} else {
+				orphans1.put(it1)
+			}
+		}
+		if ok2 {
+			if partner := orphans1.take(it2.Path); partner != nil {
+				if err := emit(it2.Path, partner, it2); err != nil {
+					return err
+				}
+			} else {
+				orphans2.put(it2)
+			}
+		}
+	}
+
+	// What is left had no partner in the other archive: present only in archive2 is an
+	// addition, present only in archive1 is a removal.
+	for _, added := range orphans2.rest() {
+		if err := emit(added.Path, nil, added); err != nil {
+			return err
+		}
+	}
+	for _, deleted := range orphans1.rest() {
+		if err := emit(deleted.Path, deleted, nil); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func collectItems(a *Archive, filter func(string) bool) (map[string]*item.Item, error) {
-	out := map[string]*item.Item{}
-	err := a.Items(func(it *item.Item) error {
-		if filter != nil && !filter(it.Path) {
+// itemSeq turns an archive's callback walk into a pull-able sequence.
+//
+// The sentinel is ErrStopIteration, which Items treats as "stop, not a failure": without
+// it, abandoning the walk early - which iter.Pull2's stop does on every return path -
+// would read the rest of the item stream for nothing.
+func itemSeq(a *Archive, filter func(string) bool) iter.Seq2[*item.Item, error] {
+	return func(yield func(*item.Item, error) bool) {
+		stopped := false
+		err := a.Items(func(it *item.Item) error {
+			if filter != nil && !filter(it.Path) {
+				return nil
+			}
+			if !yield(it, nil) {
+				stopped = true
+				return ErrStopIteration
+			}
 			return nil
+		})
+		if err != nil && !stopped {
+			yield(nil, err)
 		}
-		out[it.Path] = it
+	}
+}
+
+// orphans is an insertion-ordered set of items keyed by path.
+type orphans struct {
+	order []*item.Item
+	index map[string]int
+}
+
+func newOrphans() *orphans { return &orphans{index: map[string]int{}} }
+
+func (o *orphans) put(it *item.Item) {
+	// The same path twice in one stream is not something a borg archive holds, but the
+	// behaviour is defined rather than left to chance: Python's "orphans[path] = item" on
+	// a key already present replaces the value and leaves the position alone, so the later
+	// item is kept and it is kept where the first one was.
+	if i, dup := o.index[it.Path]; dup {
+		o.order[i] = it
+		return
+	}
+	o.index[it.Path] = len(o.order)
+	o.order = append(o.order, it)
+}
+
+// take removes and returns the item at path, or nil.
+func (o *orphans) take(path string) *item.Item {
+	i, ok := o.index[path]
+	if !ok {
 		return nil
-	})
-	return out, err
+	}
+	it := o.order[i]
+	o.order[i] = nil
+	delete(o.index, path)
+	return it
+}
+
+// rest returns the items still held, in the order they were added.
+func (o *orphans) rest() []*item.Item {
+	out := make([]*item.Item, 0, len(o.index))
+	for _, it := range o.order {
+		if it != nil {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // diffItems compares one path's two versions. Either may be nil, meaning absent.
 func diffItems(path string, a, b *item.Item, opts DiffOptions) Diff {
-	d := Diff{Path: path}
+	d := Diff{Path: path, Item1: a, Item2: b}
 	add := func(c Change) { d.Changes = append(d.Changes, c) }
 
 	switch {

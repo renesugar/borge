@@ -162,3 +162,71 @@ func checkItemFormat(template string) error {
 	_, err := formatter.Format(template, itemFormatKeys())
 	return err
 }
+
+// itemSortKeys is borg's ITEM_SORT_KEYS: the fields "list --sort-by" accepts.
+//
+// Not the format keys. A format string can print {archivename} or {num_chunks}; neither is
+// something to sort by, and borg's list keeps the two sets apart.
+var itemSortKeys = []string{"path", "type", "mode", "user", "uid", "group", "gid", "size",
+	"mtime", "ctime", "atime"}
+
+// itemSortKey computes one item's key for one field.
+//
+// borg's own comment on this function is "mirroring what ItemFormatter displays", and that
+// is the whole rule: sorting by "user" on an item with no user name has to order by the
+// numeric id *as text*, because that is what the listing shows in that column. Sorting by
+// something the reader cannot see would look like no sort at all.
+func itemSortKey(field string, it *item.Item) sortKey {
+	switch field {
+	case "path":
+		return textSortKey(it.Path)
+	case "type":
+		return textSortKey(item.FormatMode(it.ModeOr(0))[:1])
+	case "mode":
+		return textSortKey(item.FormatMode(it.ModeOr(0)))
+	case "size":
+		return numSortKey(itemSize(it))
+	case "uid":
+		return numSortKey(idOrMissing(it.UID))
+	case "gid":
+		return numSortKey(idOrMissing(it.GID))
+	case "user":
+		return textSortKey(nameOrID(it.User, it.UID))
+	case "group":
+		return textSortKey(nameOrID(it.Group, it.GID))
+	case "mtime", "ctime", "atime":
+		return numSortKey(timestampOrMTime(field, it))
+	}
+	// Unreachable: the spec is validated against itemSortKeys before any item is read.
+	return textSortKey("")
+}
+
+// idOrMissing is borg's "-1 if value is None else value" for uid and gid.
+func idOrMissing(v *int64) int64 {
+	if v == nil {
+		return -1
+	}
+	return *v
+}
+
+// timestampOrMTime is borg's "item.get(field) or item.get('mtime') or 0" - the same
+// fallback the {atime} format key has, so that sorting by a timestamp borg does not store
+// orders by the one it shows instead of putting every item at zero.
+func timestampOrMTime(field string, it *item.Item) int64 {
+	var ts *int64
+	switch field {
+	case "mtime":
+		ts = it.MTime
+	case "ctime":
+		ts = it.CTime
+	case "atime":
+		ts = it.ATime
+	}
+	if ts == nil || *ts == 0 {
+		ts = it.MTime
+	}
+	if ts == nil {
+		return 0
+	}
+	return *ts
+}

@@ -30,8 +30,17 @@ func cmdDiff(e *Env, args []string) int {
 	contentOnly := fs.Bool("content-only", false, "report only content changes, not metadata")
 	numericIDs := fs.Bool("numeric-ids", false, "compare numeric uid/gid rather than names")
 	format := fs.String("format", "", "output format, e.g. '{change} {path}{NL}'")
+	sortBy := fs.String("sort-by", "", "sort by comma-separated fields, '>' for descending, e.g. '>size_added,path'")
+	sameChunker := fs.Bool("same-chunker-params", false,
+		"compare chunk ids even though the archives record different chunker parameters")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
+	}
+	sorting := fs.wasSet("sort-by")
+	if sorting {
+		if _, err := validateSortSpec(*sortBy, diffSortKeys); err != nil {
+			return e.fail(err)
+		}
 	}
 	// borg's default, and its key set is a third one: not the archive keys repo-list uses
 	// nor the item keys list uses, but the changes between two versions of a path. See
@@ -74,11 +83,22 @@ func cmdDiff(e *Env, args []string) int {
 
 	// Chunk ids are only comparable when both archives were chunked the same way. If they
 	// were not, every file would look modified, so the comparison falls back to sizes and
-	// says nothing it cannot support.
-	comparable := sameChunkerParams(a, b)
-	if !comparable && common.verbose {
-		e.warnf("the two archives were chunked differently (%v vs %v), so content is compared "+
-			"by size only", a.Meta.ChunkerParams, b.Meta.ChunkerParams)
+	// says nothing it cannot support - "modified: (can't get size)".
+	//
+	// --same-chunker-params overrides the check, for the case borg's own message names:
+	// somebody who knows the parameters are the same anyway. The archives record what they
+	// were chunked with, so this is only ever needed when that record is wrong or absent.
+	//
+	// The warning is unconditional, as borg's is. It used to be printed only under -v,
+	// which is the wrong way round: the run that needs it is the one whose output silently
+	// loses every byte count, and that run is usually not a verbose one.
+	comparable := *sameChunker || sameChunkerParams(a, b)
+	if !comparable {
+		// borg's wording, both lines, its level and its exit code: this is a warning that
+		// changes what the output can say, not a failure. One record under --log-json, as
+		// borg emits it - see warnRaw.
+		e.warnRaw("--chunker-params might be different between archives, diff will be slow.\n" +
+			"If you know for certain that they are the same, pass --same-chunker-params to override this check.")
 	}
 
 	opts := archive.DiffOptions{
@@ -89,7 +109,7 @@ func cmdDiff(e *Env, args []string) int {
 	}
 
 	changed := 0
-	err = archive.Compare(a, b, opts, func(d archive.Diff) error {
+	emit := func(d archive.Diff) error {
 		changed++
 		if *jsonLines {
 			return writeDiffJSON(e.Stdout, d)
@@ -98,14 +118,37 @@ func cmdDiff(e *Env, args []string) int {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprint(e.Stdout, line)
-		return err
-	})
-	if err != nil {
-		return e.fail(err)
+		_, werr := fmt.Fprint(e.Stdout, line)
+		return werr
 	}
+
+	if !sorting {
+		// The default is borg's order: the two item streams zipped, with whatever appears
+		// in only one of them at the end. Nothing is held but the orphans.
+		if err := archive.Compare(a, b, opts, emit); err != nil {
+			return e.fail(err)
+		}
+	} else {
+		var diffs []archive.Diff
+		if err := archive.Compare(a, b, opts, func(d archive.Diff) error {
+			diffs = append(diffs, d)
+			return nil
+		}); err != nil {
+			return e.fail(err)
+		}
+		sortBySpec(diffs, *sortBy, diffSortKey)
+		for _, d := range diffs {
+			if err := emit(d); err != nil {
+				return e.fail(err)
+			}
+		}
+	}
+
 	if common.verbose {
-		fmt.Fprintf(e.Stdout, "%d path(s) differ\n", changed)
+		// borge's own summary line, which borg has no equivalent of. On stderr, because
+		// diff's stdout is the data: a script reading "borge diff -v" into a parser must
+		// not find a count at the end of it.
+		fmt.Fprintf(e.Stderr, "%d path(s) differ\n", changed)
 	}
 	return ExitOK
 }

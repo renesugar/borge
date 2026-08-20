@@ -1684,11 +1684,97 @@ a padded `changed link`. Routing the text through the same formatter made the wh
 borg's, byte for byte, which is what `TestDiffFormatMatchesBorg` now checks across six
 format strings.
 
-**One difference remains and is not this row's:** borge sorts its diff output and borg does
-not, so the two agree line by line but not in order. borg has `--sort-by` for that and
-borge does not — one of the two options `diff` is still missing (table row 3). The tests
-compare sorted output and say so.
+~~**One difference remains and is not this row's:** borge sorts its diff output and borg
+does not, so the two agree line by line but not in order.~~ **Fixed 2026-08-20**, see #48.
 
 **`borge diff --format '{content}'` also gained `BORG_UNITS` for free**, because the size
 rendering now goes through the same `formatBytesIn` the rest of borge uses. borg's
 `format_file_size` honours that variable everywhere too.
+
+---
+
+## 48. `--sort-by`, and the order borge printed instead — **fixed 2026-08-20**
+
+**Stage 8 · `internal/cli/sortspec.go`, `internal/archive/diff.go`**
+**· found by reading borg's default**
+
+Four options — `list --sort-by`, `list --depth`, `diff --sort-by` and
+`diff --same-chunker-params` — which took both commands to zero missing. Two of them are
+the reason this entry is here.
+
+### borge's diff was sorted; borg's is not
+
+borge collected both item streams into maps and walked the union sorted by path. The
+comment in the code called that "the same answer with less state", and it was neither: it
+is borg's `--sort-by path` output, not borg's default, so **every line matched borg's and
+the sequence did not**. borg zips the two streams positionally, yields a comparison as soon
+as both sides produce the same path, and holds anything unmatched aside as an *orphan* —
+emitting archive2's leftovers at the end as additions, then archive1's as removals:
+
+```
+modified:     +9 B    -13 B [mtime: …] src/zebra.txt     borg, default
+modified:    +34 B    -13 B [mtime: …] src/apple.txt
+added:                  4 B src/aaa_new.txt
+removed:               14 B src/middle.txt
+
+added:                  4 B src/aaa_new.txt              borge, before
+modified:    +34 B    -13 B [mtime: …] src/apple.txt
+removed:               14 B src/middle.txt
+modified:     +9 B    -13 B [mtime: …] src/zebra.txt
+```
+
+It survived because two archives of the same tree usually stream in the same order, so the
+difference only shows when a path is added or removed, or when the roots were given in a
+different order. And because **every test sorted both sides before comparing**, which is
+the exact shape of a test that cannot see an ordering bug. `TestDiffDefaultOrderIsBorgs`
+now asserts borg's order *and* that it differs from the sorted order, so a tree that
+happened to stream in sorted order fails the test rather than passing it.
+
+Reproducing borg's zip needs both streams stepped in lockstep, which a callback iterator
+cannot do; `iter.Pull2` turns each into a pull iterator. Only one runs at a time and each
+holds its own unpacker, so their reads interleave exactly as two sequential walks' would.
+It also buys borg's memory profile: only the orphans are held, where the map walk held
+every item of *both* archives.
+
+### Sorting, where borg puts it
+
+borg has **two** `--sort-by` options and its own `sorting.py` says so at the top: `repo-list`
+sorts archives by a spec with no direction prefixes, while `list` and `diff` sort an
+archive's contents and take `<` and `>` per field. borge had the first; this is the second.
+The key sets are a third and fourth set, sharing nothing with the format keys — `size_added`
+can be sorted by and not printed, `{content}` printed and not sorted by.
+
+Two behaviours are worth naming because they are not what a fresh implementation would do:
+
+- **A stable pass per field, applied last to first.** A compound comparison would give the
+  same answer, but this is borg's, and it means a field borge computes slightly differently
+  cannot reorder what the fields above it settled. Descending is a reversed *comparison*,
+  not a reversed slice, so ties keep their input order — Python's `sort(reverse=True)` does
+  not reverse ties either.
+- **`diff --sort-by user` sorts removed paths under `""`.** borg fills the missing side of
+  an `ItemDiff` with `Item.create_deleted(path)` — an item carrying its path and nothing
+  else — and its key function reads the plain attributes from item2. So for a removed path
+  the owner is empty, the uid is `-1` and the timestamps are `0`. That reads like a bug and
+  is not worth diverging over: sorting by user asks about the state in the second archive,
+  which a removed path has none of.
+
+### Three things the options were adjacent to
+
+- **An empty spec is an error.** `--sort-by ''` fails in borg with "unsupported sort field:
+  empty spec", while *omitting* the option means do not sort. A Go flag holding `""` cannot
+  tell those apart, so `flagSet.wasSet` asks whether the option appeared at all. `--depth`
+  needed the same: `--depth -1` lists nothing, and omitting it lists everything.
+- **The chunker-params warning was conditional.** borg prints "--chunker-params might be
+  different between archives, diff will be slow." unconditionally; borge printed its own
+  wording only under `-v`. That is the wrong way round — the run that needs it is the one
+  whose every byte count silently becomes `(can't get size)`, and that run is usually not a
+  verbose one. Now borg's wording, both lines, always, exit code unchanged.
+
+  Matching it exposed a smaller one underneath. Writing the two lines to stderr made
+  `--log-json` emit **two records at INFO**, because the JSON logger wraps stderr and splits
+  on newlines, where borg emits **one record at WARNING** with a `\n` in its message — so a
+  frontend filtering on `levelname` saw no warning at all. `Env.warnRaw` now emits borg's
+  text unprefixed in text mode and as a single record in JSON mode.
+- **borge's own "N path(s) differ" line was on stdout.** borg has no equivalent, and diff's
+  stdout is the data: a script reading `borge diff -v` into a parser found a count at the
+  end of it. Moved to stderr, which is where #46 put every other report.

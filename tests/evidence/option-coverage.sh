@@ -80,7 +80,8 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # It went UP to 36 on 2026-08-19, without borge losing anything: the gate started comparing
 # the group subcommands and found "key remove --passphrase". A number that only ever falls
 # is a number that has stopped measuring. Down to 34 the same day, when --format reached
-# check and diff.
+# check and diff; down to 30 on 2026-08-20, when list and diff both reached zero - the two
+# --sort-by options, list's --depth and diff's --same-chunker-params.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -91,7 +92,7 @@ declare -A budget=(
     [create]=6
     [debug]=0
     [delete]=0
-    [diff]=2
+    [diff]=0
     [export-tar]=1
     [extract]=3
     [find]=0
@@ -99,7 +100,7 @@ declare -A budget=(
     [import-tar]=2
     [info]=0
     [key]=0
-    [list]=2
+    [list]=0
     [prune]=4
     [recreate]=4
     [rename]=0

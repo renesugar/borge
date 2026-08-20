@@ -100,6 +100,25 @@ func (e *Env) warnf(format string, args ...any) {
 	fmt.Fprintf(e.Stderr, "borge: warning: "+format+"\n", args...)
 }
 
+// warnRaw is warnf for a warning whose text is borg's rather than borge's.
+//
+// Two differences, both because the message is being *matched* and not merely emitted:
+// there is no "borge: warning:" prefix, since borg's print_warning writes the message
+// alone; and a message spanning several lines stays one record under --log-json, where
+// writing it to Stderr directly would give one record per line.
+//
+// That second half is not hypothetical. diff's chunker-params warning is two lines, and
+// borge emitted it as two INFO records - because it reached stderr as plain text and the
+// JSON logger splits on newlines - where borg emits a single WARNING record with a "\n"
+// in its message. A frontend matching on levelname saw nothing at all.
+func (e *Env) warnRaw(message string) {
+	if e.logger != nil {
+		e.logger.emit("WARNING", message)
+		return
+	}
+	fmt.Fprintln(e.Stderr, message)
+}
+
 // command is one subcommand.
 type command struct {
 	name    string

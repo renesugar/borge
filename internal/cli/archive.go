@@ -245,6 +245,8 @@ func cmdList(e *Env, args []string) int {
 	jsonLines := fs.Bool("json-lines", false, "print one JSON object per item")
 	short := fs.Bool("short", false, "print only paths")
 	format := fs.String("format", "", "output format, e.g. '{mode} {path}{NL}'")
+	sortBy := fs.String("sort-by", "", "sort by comma-separated fields, '>' for descending, e.g. '>size,path'")
+	depth := fs.Int("depth", 0, "list only paths at or above this directory depth")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -252,6 +254,16 @@ func cmdList(e *Env, args []string) int {
 		e.errorf("list needs an archive name")
 		return ExitError
 	}
+	// Validated here, with the format, and for the same reason: both are cheap to check
+	// and expensive to discover late. An explicitly empty spec is an error, as it is in
+	// borg - see flagSet.wasSet.
+	sorting := fs.wasSet("sort-by")
+	if sorting {
+		if _, err := validateSortSpec(*sortBy, itemSortKeys); err != nil {
+			return e.fail(err)
+		}
+	}
+	limitDepth := fs.wasSet("depth")
 	// Validated before the archive is opened, as borg does: a bad key found on the ten
 	// thousandth item has already printed nine thousand lines.
 	listFormat, _ := e.lookupBorg("LIST_FORMAT")
@@ -280,11 +292,23 @@ func cmdList(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
-	enc := json.NewEncoder(e.Stdout)
-	err = a.Items(func(it *item.Item) error {
+	// borg's item_filter: the patterns, and then the depth. borg counts the separators in
+	// the stored path, so "src/a.txt" is depth 1 and "--depth 0" lists nothing of it - the
+	// depth is of the path as archived, not relative to whatever was passed on the command
+	// line.
+	keep := func(it *item.Item) bool {
 		if !matcher.Match(it.Path) {
-			return nil
+			return false
 		}
+		return !limitDepth || strings.Count(it.Path, "/") <= *depth
+	}
+
+	enc := json.NewEncoder(e.Stdout)
+
+	// Without --sort-by the items are written as they stream, which is what lets a listing
+	// of a huge archive start printing at once. Sorting has to read them all first, and
+	// borg's help says so in as many words.
+	emit := func(it *item.Item) error {
 		if *jsonLines {
 			data, err := itemJSONData(it, template, a.Info.Name, hex.EncodeToString(a.ID))
 			if err != nil {
@@ -296,11 +320,38 @@ func cmdList(e *Env, args []string) int {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprint(e.Stdout, line)
-		return err
+		_, werr := fmt.Fprint(e.Stdout, line)
+		return werr
+	}
+
+	if !sorting {
+		err = a.Items(func(it *item.Item) error {
+			if !keep(it) {
+				return nil
+			}
+			return emit(it)
+		})
+		if err != nil {
+			return e.fail(err)
+		}
+		return ExitOK
+	}
+
+	var items []*item.Item
+	err = a.Items(func(it *item.Item) error {
+		if keep(it) {
+			items = append(items, it)
+		}
+		return nil
 	})
 	if err != nil {
 		return e.fail(err)
+	}
+	sortBySpec(items, *sortBy, itemSortKey)
+	for _, it := range items {
+		if err := emit(it); err != nil {
+			return e.fail(err)
+		}
 	}
 	return ExitOK
 }

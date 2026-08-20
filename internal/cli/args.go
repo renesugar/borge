@@ -51,6 +51,25 @@ type flagSet struct {
 	logJSON bool
 }
 
+// wasSet reports whether an option appeared on the command line, as against holding its
+// default value.
+//
+// Needed wherever borg distinguishes "not given" from "given an empty or extreme value",
+// which argparse does for free with a default of None. An empty --sort-by is an error in
+// borg ("unsupported sort field: empty spec") while omitting it means do not sort, and
+// "--depth -1" lists nothing while omitting it lists everything. Comparing against the zero value
+// cannot tell those apart, and quietly treating one as the other is the kind of difference
+// that only shows up in somebody's script.
+func (fs *flagSet) wasSet(name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
+}
+
 // Parse permutes the arguments and parses them.
 func (fs *flagSet) Parse(args []string) error {
 	if !fs.passthrough {

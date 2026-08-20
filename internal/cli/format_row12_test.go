@@ -14,17 +14,19 @@ import (
 // the one repo-list and prune already use - and diff needs a third, whose records are
 // changes rather than paths or archives. See DIVERGENCES.md #47.
 
-// sortedLines makes two listings comparable without depending on the order they came in.
-// borg's diff does not sort and borge's does; that difference is real and separate, and
-// this test is about what each line says.
-func sortedLines(s string) []string {
+// outputLines splits a listing, keeping the order it came in.
+//
+// It used to sort, because borg's diff did not sort and borge's did - "a difference real
+// and separate from what this test is about". That difference is gone (DIVERGENCES #48),
+// and with it the reason to look away from the order: sorting here would hide a return of
+// exactly the bug that was fixed.
+func outputLines(s string) []string {
 	var out []string
 	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
 		if line != "" {
 			out = append(out, line)
 		}
 	}
-	sort.Strings(out)
 	return out
 }
 
@@ -72,7 +74,7 @@ func TestDiffFormatMatchesBorg(t *testing.T) {
 			if code != ExitOK {
 				t.Fatalf("borge diff exited %d\n%s", code, stderr)
 			}
-			want, got := sortedLines(borgOut), sortedLines(borgeOut)
+			want, got := outputLines(borgOut), outputLines(borgeOut)
 			if len(want) == 0 {
 				t.Fatalf("borg reported no differences; the comparison would pass on anything")
 			}

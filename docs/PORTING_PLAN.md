@@ -1723,7 +1723,7 @@ a table at all.
 | --- | --- | --- | --- |
 | 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | §11 | not started; the largest single item |
 | 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
-| 3 | 35 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. Largest: `create` 6, `prune` 4, `recreate` 4, `check` 3, `diff` 3, `extract` 3, `repo-create` 3 |
+| 3 | 30 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. `list` and `diff` reached zero 2026-08-20 (DIVERGENCES #48). Largest now: `create` 6, `prune` 4, `recreate` 4, `extract` 3, `repo-create` 3 |
 | 4 | `recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter` | §11.2 | part of row 3, listed apart because it is one feature over four options and needs the item-stream walk rather than the filesystem one |
 | 5 | ~~JSON API: `repo-info`, `info`, `version`, `analyze` schemas~~ | §11.4b | **done 2026-08-19.** All eight of borg's `--json` commands now match, held by `TestJSONSchemaMatchesBorg` |
 | 6 | ~~`--log-json`~~ | §11.4b | **done 2026-08-19.** Registered on every command through `newFlagSet`, borge's equivalent of borg's common parser. All of stderr becomes JSON, not only the messages borge thought to convert |
