@@ -489,7 +489,10 @@ func cmdExtract(e *Env, args []string) int {
 		},
 	}
 	if *list {
-		opts.OnProgress = func(it *item.Item) { fmt.Fprintln(e.Stdout, it.Path) }
+		// On stderr, where borg puts it: "borg extract --list" writes its listing to
+		// stderr and leaves stdout for --stdout's file contents. borge wrote to stdout,
+		// so "borge extract --stdout --list f" interleaved the names into the data.
+		opts.OnProgress = func(it *item.Item) { fmt.Fprintln(e.Stderr, it.Path) }
 	}
 
 	stats, err := a.Extract(opts)
@@ -501,7 +504,7 @@ func cmdExtract(e *Env, args []string) int {
 		status = ExitWarning
 	}
 	if common.verbose {
-		fmt.Fprintf(e.Stdout,
+		fmt.Fprintf(e.Stderr,
 			"extracted %d items (%d files, %d dirs, %d symlinks, %d hard links, %d other), %d bytes\n",
 			stats.Items, stats.Files, stats.Dirs, stats.Symlinks, stats.Hardlinks, stats.Others, stats.Bytes)
 	}

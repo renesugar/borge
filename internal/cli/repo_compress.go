@@ -65,7 +65,7 @@ func cmdRepoCompress(e *Env, args []string) int {
 
 	result, err := recompressRepository(o.repo, ro, *dryRun, func(line string) {
 		if common.verbose || *dryRun {
-			fmt.Fprintln(e.Stdout, line)
+			fmt.Fprintln(e.Stderr, line)
 		}
 	})
 	if err != nil {
@@ -73,9 +73,9 @@ func cmdRepoCompress(e *Env, args []string) int {
 	}
 
 	if *stats || common.verbose || *dryRun {
-		fmt.Fprintf(e.Stdout, "Objects: %d total, %d recompressed, %d already as wanted, %d kept (no gain)\n",
+		fmt.Fprintf(e.Stderr, "Objects: %d total, %d recompressed, %d already as wanted, %d kept (no gain)\n",
 			result.Total, result.Recompressed, result.AlreadyWanted, result.Kept)
-		fmt.Fprintf(e.Stdout, "Repository: %d bytes before, %d after\n", result.BytesBefore, result.BytesAfter)
+		fmt.Fprintf(e.Stderr, "Repository: %d bytes before, %d after\n", result.BytesBefore, result.BytesAfter)
 	}
 	return ExitOK
 }

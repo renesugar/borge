@@ -1726,7 +1726,7 @@ a table at all.
 | 10 | ~~Every borge-only option documented as borge-only in its help text~~ | §11.4 work 3 | **done 2026-08-19.** Two markers, because there are two cases: "(borge only)" where borg has no such option anywhere, "(borge only on this command)" where borg has it elsewhere. The gate now fails on an unmarked one |
 | 11 | ~~`--reverse` and `--deleted` decided per command~~ | §11.4c | **done 2026-08-19**, removing both from twelve commands. `--first`, `--last` and `--sort-by` on `prune` are the same leakage and are *not* decided — they change what prune deletes, so they want their own evidence |
 | 12 | `--format` on `check` and `diff` | §11.3 | `diff` needs a third key set, its records being changes rather than paths; `check` needs its output reworked first |
-| 13 | Progress output on stderr, where borg puts it | measured 2026-08-18 | `create`, `prune`, `export-tar` done. `borg check -v` writes 526 bytes to stderr and none to stdout; borge writes 158 to stdout and none to stderr. `compact`, `recreate`, `analyze`, `repo-compress`, `repo-space` and `lock` write to stdout and have not been measured against borg |
+| 13 | ~~Progress output on stderr, where borg puts it~~ | measured 2026-08-19 | **done.** `check`, `compact`, `repo-compress`, `break-lock`, `recreate`, `repo-create` and `extract --list` moved; `analyze`, `repo-space`, `repo-info`, `list` and `info` were already right, because their output *is* the data |
 | 14 | `debug convert-profile` | DIVERGENCES #14 | the only `debug` subcommand not ported |
 | 15 | **Stage 8 evidence bundle** | §11 | last, and only once rows 1–14 are closed |
 

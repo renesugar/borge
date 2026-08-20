@@ -56,7 +56,7 @@ func cmdBreakLock(e *Env, args []string) int {
 		return e.fail(err)
 	}
 	if len(held) == 0 {
-		fmt.Fprintln(e.Stdout, "no locks are held on this repository")
+		fmt.Fprintln(e.Stderr, "no locks are held on this repository")
 		return ExitOK
 	}
 
@@ -69,7 +69,7 @@ func cmdBreakLock(e *Env, args []string) int {
 	for _, h := range held {
 		age := time.Since(h.Time).Round(time.Second)
 		if h.Stale {
-			fmt.Fprintf(e.Stdout, "breaking stale %s lock locks/%s: %s pid %d, last refreshed %s ago\n",
+			fmt.Fprintf(e.Stderr, "breaking stale %s lock locks/%s: %s pid %d, last refreshed %s ago\n",
 				lockKind(h.Exclusive), h.Key, h.Host, h.PID, age)
 			continue
 		}
@@ -81,7 +81,7 @@ func cmdBreakLock(e *Env, args []string) int {
 	if err := repo.BreakLock(); err != nil {
 		return e.fail(err)
 	}
-	fmt.Fprintf(e.Stdout, "%d lock(s) broken\n", len(held))
+	fmt.Fprintf(e.Stderr, "%d lock(s) broken\n", len(held))
 	return status
 }
 

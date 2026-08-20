@@ -87,7 +87,7 @@ func cmdCheck(e *Env, args []string) int {
 		// Repair rewrites archives and the chunk index. Rebuilding the index from the
 		// packs first is what makes that safe: an index that disagrees with what the packs
 		// actually hold would make repair "fix" archives against a fiction.
-		fmt.Fprintln(e.Stdout, "rebuilding the chunk index from the packs...")
+		fmt.Fprintln(e.Stderr, "rebuilding the chunk index from the packs...")
 		if err := o.repo.RebuildChunkIndex(); err != nil {
 			return e.fail(err)
 		}
@@ -122,18 +122,18 @@ func cmdCheck(e *Env, args []string) int {
 	}
 
 	if c.repaired > 0 {
-		fmt.Fprintf(e.Stdout, "%d archive(s) repaired; the originals are soft-deleted and can "+
+		fmt.Fprintf(e.Stderr, "%d archive(s) repaired; the originals are soft-deleted and can "+
 			"still be inspected until a compaction runs.\n", c.repaired)
 	}
 	if c.errors == 0 {
-		fmt.Fprintf(e.Stdout, "Archive and repository consistency check complete, no problems found.\n")
+		fmt.Fprintf(e.Stderr, "Archive and repository consistency check complete, no problems found.\n")
 		if common.verbose {
-			fmt.Fprintf(e.Stdout, "checked %d object(s) and %d archive(s), %d chunk reference(s)\n",
+			fmt.Fprintf(e.Stderr, "checked %d object(s) and %d archive(s), %d chunk reference(s)\n",
 				c.objects, c.archives, c.references)
 		}
 		return ExitOK
 	}
-	fmt.Fprintf(e.Stdout, "%d error(s) found.\n", c.errors)
+	fmt.Fprintf(e.Stderr, "%d error(s) found.\n", c.errors)
 	return ExitError
 }
 
@@ -232,7 +232,7 @@ func (c *checker) checkArchives(opts manifest.ListOptions) error {
 					return err
 				}
 				c.repaired++
-				fmt.Fprintf(c.env.Stdout,
+				fmt.Fprintf(c.env.Stderr,
 					"removed the directory entry for %s, whose archive object is missing\n",
 					hex.EncodeToString(info.ID)[:8])
 			}
@@ -251,15 +251,15 @@ func (c *checker) checkArchives(opts manifest.ListOptions) error {
 			c.references += report.ItemsKept
 			if report.Repaired {
 				c.repaired++
-				fmt.Fprintf(c.env.Stdout, "repaired %s: kept %d item(s), %d stream chunk(s) lost, "+
+				fmt.Fprintf(c.env.Stderr, "repaired %s: kept %d item(s), %d stream chunk(s) lost, "+
 					"new archive %s\n",
 					info.Name, report.ItemsKept, report.StreamChunksMissing,
 					hex.EncodeToString(report.NewID)[:8])
 			} else if report.Damaged() && c.dryRun {
-				fmt.Fprintf(c.env.Stdout, "would repair %s: %d item(s) readable, %d stream chunk(s) lost\n",
+				fmt.Fprintf(c.env.Stderr, "would repair %s: %d item(s) readable, %d stream chunk(s) lost\n",
 					info.Name, report.ItemsKept, report.StreamChunksMissing)
 			} else if c.verbose {
-				fmt.Fprintf(c.env.Stdout, "archive %s: ok\n", info.Name)
+				fmt.Fprintf(c.env.Stderr, "archive %s: ok\n", info.Name)
 			}
 			continue
 		}
@@ -296,7 +296,7 @@ func (c *checker) checkArchives(opts manifest.ListOptions) error {
 			c.problem("archive %s: %d further missing chunk(s) not listed", info.Name, missing-10)
 		}
 		if c.verbose {
-			fmt.Fprintf(c.env.Stdout, "archive %s: ok\n", info.Name)
+			fmt.Fprintf(c.env.Stderr, "archive %s: ok\n", info.Name)
 		}
 	}
 	return nil

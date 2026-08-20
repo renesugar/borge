@@ -152,7 +152,7 @@ func cmdRecreate(e *Env, args []string) int {
 		return ExitError
 	}
 	if !opts.NeedsWork() {
-		fmt.Fprintln(e.Stdout, "nothing to do: pass --chunker-params, --compression, "+
+		fmt.Fprintln(e.Stderr, "nothing to do: pass --chunker-params, --compression, "+
 			"a pattern, or --comment")
 		return ExitOK
 	}
@@ -170,12 +170,12 @@ func cmdRecreate(e *Env, args []string) int {
 			return e.fail(fmt.Errorf("%s: %w", info.Name, err))
 		}
 		if *dryRun {
-			fmt.Fprintf(e.Stdout, "%s: would keep %d item(s), exclude %d\n",
+			fmt.Fprintf(e.Stderr, "%s: would keep %d item(s), exclude %d\n",
 				info.Name, result.ItemsKept, result.ItemsExcluded)
 			continue
 		}
 		if *stats || common.verbose {
-			fmt.Fprintf(e.Stdout,
+			fmt.Fprintf(e.Stderr,
 				"%s -> %s: kept %d item(s), excluded %d, rewrote %d file(s), read %d chunk(s) (%d bytes)\n",
 				info.Name, hex.EncodeToString(newID)[:8], result.ItemsKept, result.ItemsExcluded,
 				result.FilesRewrit, result.ChunksRead, result.BytesRead)
@@ -186,7 +186,7 @@ func cmdRecreate(e *Env, args []string) int {
 		if err := m.Write(); err != nil {
 			return e.fail(err)
 		}
-		fmt.Fprintln(e.Stdout, "the original archives are soft-deleted; "+
+		fmt.Fprintln(e.Stderr, "the original archives are soft-deleted; "+
 			"run 'borge compact' to reclaim the space")
 	}
 	return ExitOK

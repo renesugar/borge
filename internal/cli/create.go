@@ -90,15 +90,15 @@ func cmdRepoCreate(e *Env, args []string) int {
 			return e.fail(err)
 		}
 		if storage == key.StorageKeyfile {
-			fmt.Fprintf(e.Stdout, "Key stored in %s\n", blob.Path)
-			fmt.Fprintln(e.Stdout, "Keep this file safe. Your data will be inaccessible without it.")
+			fmt.Fprintf(e.Stderr, "Key stored in %s\n", blob.Path)
+			fmt.Fprintln(e.Stderr, "Keep this file safe. Your data will be inaccessible without it.")
 		}
 	} else {
 		k, err = key.ByName(mode, nil, nil)
 		if err != nil {
 			return e.fail(err)
 		}
-		fmt.Fprintln(e.Stdout, "Encryption is NOT enabled: this repository authenticates nothing.")
+		fmt.Fprintln(e.Stderr, "Encryption is NOT enabled: this repository authenticates nothing.")
 	}
 
 	// A new repository still needs a manifest: it is what every later command reads
@@ -111,8 +111,8 @@ func cmdRepoCreate(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
-	fmt.Fprintf(e.Stdout, "Repository created: %s\n", path)
-	fmt.Fprintf(e.Stdout, "Encryption: %s\n", k.Name())
+	fmt.Fprintf(e.Stderr, "Repository created: %s\n", path)
+	fmt.Fprintf(e.Stderr, "Encryption: %s\n", k.Name())
 	return ExitOK
 }
 

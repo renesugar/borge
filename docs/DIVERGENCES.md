@@ -1529,3 +1529,44 @@ the help now says so.
 The option-coverage gate fails on a borge-only option whose help does not carry a marker,
 so this cannot rot: recording a reason in the gate's table and telling the user are two
 different things, and only the second is visible to somebody reading `--help`.
+
+## 46. Reports on stdout, where borg puts them on stderr — **fixed 2026-08-19**
+
+stdout carries a command's data; stderr carries what it says about the work. borg draws
+that line and borge did not. Measured, byte counts from the same repository:
+
+| | borg out/err | borge out/err (before) |
+| --- | --- | --- |
+| `check -v` | 0 / 405 | **420 / 0** |
+| `compact -v` | 0 / 456 | **276 / 0** |
+| `repo-compress -v` | 0 / 38 | **180 / 0** |
+| `repo-create` | 0 / 121 | **206 / 0** |
+| `extract --list` | 0 / 412 | **404 / 0** |
+| `break-lock` | 0 / 0 | **37 / 0** |
+
+Every one of those is a report about work, not the result of it, and every one is now on
+stderr. `create`, `prune` and `export-tar` had been fixed earlier for the same reason —
+each time because something needed stdout to be clean and found it was not.
+
+**What was already right, and was checked rather than assumed:** `analyze`, `repo-space`,
+`repo-info`, `list` and `info` write to stdout in both tools, because there their output
+*is* the data. Moving them would have been the same mistake in the other direction.
+
+**The failure this prevents** is not cosmetic. `borge extract --stdout --list` would have
+interleaved the item names into the file contents on the same stream — the same defect as
+`export-tar --list` (#28) and `create --list --json` (#41), which is three times now. borge
+has no `--stdout` yet, so `TestExtractStdoutStaysData` skips rather than passing, and turns
+itself on the moment the option lands.
+
+**Two places where borg disagrees with itself**, recorded because reproducing them would be
+copying a mistake:
+
+- `borg recreate` writes `Processing <name> <id>` to **stdout** while its `--list` listing
+  goes to stderr. borge's recreate has no equivalent of that line — it prints a summary
+  instead — and puts it on stderr with the rest.
+- `borg break-lock` says nothing at all. borge reports whether any lock was held, on
+  stderr, because "no locks are held" and "the command did nothing" are different answers
+  (`PORTING_PLAN.md` §2.3).
+
+`TestReportingCommandsWriteToStderr` holds the rule for six commands and fails if fewer
+than four of them say anything, so it cannot pass by testing silence.

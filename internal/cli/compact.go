@@ -78,11 +78,11 @@ func cmdCompact(e *Env, args []string) int {
 				return e.fail(err)
 			}
 			if common.verbose {
-				fmt.Fprintf(e.Stdout, "removed soft-deleted archive %s\n", hex.EncodeToString(id)[:8])
+				fmt.Fprintf(e.Stderr, "removed soft-deleted archive %s\n", hex.EncodeToString(id)[:8])
 			}
 		}
 	} else if len(deletedIDs) > 0 {
-		fmt.Fprintf(e.Stdout, "would remove %d soft-deleted archive(s)\n", len(deletedIDs))
+		fmt.Fprintf(e.Stderr, "would remove %d soft-deleted archive(s)\n", len(deletedIDs))
 	}
 
 	// Step 4: sweep.
@@ -91,7 +91,7 @@ func cmdCompact(e *Env, args []string) int {
 		DryRun:    *dryRun,
 		OnProgress: func(line string) {
 			if common.verbose || *dryRun {
-				fmt.Fprintln(e.Stdout, line)
+				fmt.Fprintln(e.Stderr, line)
 			}
 		},
 	})
@@ -106,12 +106,12 @@ func cmdCompact(e *Env, args []string) int {
 	}
 
 	if *stats || common.verbose || *dryRun {
-		fmt.Fprintf(e.Stdout, "Archives: %d\n", live)
-		fmt.Fprintf(e.Stdout, "Chunks: %d, of which %d still referenced\n",
+		fmt.Fprintf(e.Stderr, "Archives: %d\n", live)
+		fmt.Fprintf(e.Stderr, "Chunks: %d, of which %d still referenced\n",
 			result.ChunksBefore, result.ChunksAlive)
-		fmt.Fprintf(e.Stdout, "Packs: %d before, %d dropped, %d rewritten, %d unchanged\n",
+		fmt.Fprintf(e.Stderr, "Packs: %d before, %d dropped, %d rewritten, %d unchanged\n",
 			result.PacksBefore, result.PacksDropped, result.PacksRewrit, result.PacksKept)
-		fmt.Fprintf(e.Stdout, "Repository size: %d bytes before, %d after (%d reclaimed)\n",
+		fmt.Fprintf(e.Stderr, "Repository size: %d bytes before, %d after (%d reclaimed)\n",
 			result.BytesBefore, result.BytesAfter, result.BytesBefore-result.BytesAfter)
 	}
 	return ExitOK
@@ -164,7 +164,7 @@ func collectReferences(e *Env, o *opened, verbose bool) (map[string]bool, int, e
 			return nil, 0, fmt.Errorf("archive %s: %w", info.Name, err)
 		}
 		if verbose {
-			fmt.Fprintf(e.Stdout, "analysed %s (%s)\n", info.Name, hex.EncodeToString(info.ID)[:8])
+			fmt.Fprintf(e.Stderr, "analysed %s (%s)\n", info.Name, hex.EncodeToString(info.ID)[:8])
 		}
 	}
 	return used, len(infos), nil

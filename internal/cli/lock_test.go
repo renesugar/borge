@@ -21,12 +21,14 @@ func sleepBriefly() { time.Sleep(10 * time.Millisecond) }
 func TestBreakLockOnAnUnlockedRepository(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 
-	stdout, stderr, code := r.borge(t, "break-lock")
+	// break-lock reports on stderr, where borg puts everything it says about the work;
+	// stdout is for a command's data and break-lock has none (DIVERGENCES.md #46).
+	_, stderr, code := r.borge(t, "break-lock")
 	if code != ExitOK {
 		t.Fatalf("break-lock exited %d on an unlocked repository\n%s", code, stderr)
 	}
-	if !strings.Contains(stdout, "no locks") {
-		t.Errorf("break-lock did not report that there was nothing to break:\n%s", stdout)
+	if !strings.Contains(stderr, "no locks") {
+		t.Errorf("break-lock did not report that there was nothing to break:\n%s", stderr)
 	}
 }
 
@@ -77,16 +79,18 @@ func TestBreakLockRemovesALiveLockAndWarns(t *testing.T) {
 		t.Skip("borg did not take a lock in time; nothing to break")
 	}
 
-	stdout, stderr, code := r.borge(t, "break-lock")
+	// break-lock reports on stderr, where borg puts everything it says about the work;
+	// stdout is for a command's data and break-lock has none (DIVERGENCES.md #46).
+	_, stderr, code := r.borge(t, "break-lock")
 	if code != ExitWarning {
 		t.Errorf("break-lock on a live lock exited %d, want ExitWarning (%d)\n%s%s",
-			code, ExitWarning, stdout, stderr)
+			code, ExitWarning, "", stderr)
 	}
 	if !strings.Contains(stderr, "live") {
 		t.Errorf("break-lock did not warn that the lock was live:\n%s", stderr)
 	}
-	if !strings.Contains(stdout, "lock(s) broken") {
-		t.Errorf("break-lock did not report what it broke:\n%s", stdout)
+	if !strings.Contains(stderr, "lock(s) broken") {
+		t.Errorf("break-lock did not report what it broke:\n%s", stderr)
 	}
 
 	entries, err := os.ReadDir(locks)

@@ -233,12 +233,14 @@ func TestRepoCompressRecompresses(t *testing.T) {
 
 	// A second run has nothing to do: everything already has the wanted compression. Left
 	// unguarded this is a loop that rewrites the whole repository on every run.
-	stdout, _, code = r.borge(t, "repo-compress", "-C", "zstd,19", "-stats")
+	// Read from stderr: repo-compress reports its work there, where borg does, and stdout
+	// carries a command's data only (DIVERGENCES.md #46).
+	_, stderr, code = r.borge(t, "repo-compress", "-C", "zstd,19", "-stats")
 	if code != ExitOK {
 		t.Fatalf("the second repo-compress exited %d", code)
 	}
-	if !strings.Contains(stdout, "0 recompressed") {
-		t.Errorf("a second recompression to the same setting was not a no-op:\n%s", stdout)
+	if !strings.Contains(stderr, "0 recompressed") {
+		t.Errorf("a second recompression to the same setting was not a no-op:\n%s", stderr)
 	}
 }
 
@@ -294,12 +296,12 @@ func TestRecreateWithNothingToDoDoesNothing(t *testing.T) {
 	r, _ := recreateRepo(t)
 
 	before := borgArchiveNames(t, r)
-	stdout, _, code := r.borge(t, "recreate", "original")
+	_, stderr, code := r.borge(t, "recreate", "original")
 	if code != ExitOK {
 		t.Fatalf("recreate exited %d", code)
 	}
-	if !strings.Contains(stdout, "nothing to do") {
-		t.Errorf("a recreate with no options did not say it had nothing to do: %q", stdout)
+	if !strings.Contains(stderr, "nothing to do") {
+		t.Errorf("a recreate with no options did not say it had nothing to do: %q", stderr)
 	}
 	if names := borgArchiveNames(t, r); strings.Join(names, ",") != strings.Join(before, ",") {
 		t.Errorf("the archive list changed: %v -> %v", before, names)
