@@ -281,6 +281,25 @@ func cmdTag(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
+	// Validated before anything is rewritten, and validated for --add, --remove and --set
+	// alike: borge accepted any string at all, so "borge tag --add 'my tag'" wrote a tag
+	// borg refuses to create - and one that a comma-separated "{tags}" listing cannot be
+	// read back from. Found while giving create the same option.
+	for _, tag := range append(append([]string{}, add...), remove...) {
+		if err := validateTag(tag); err != nil {
+			return e.fail(err)
+		}
+	}
+	if *set != "" {
+		for _, tag := range strings.Split(*set, ",") {
+			if tag = strings.TrimSpace(tag); tag != "" {
+				if err := validateTag(tag); err != nil {
+					return e.fail(err)
+				}
+			}
+		}
+	}
+
 	return e.rewriteArchives(common, opts, func(meta *item.ArchiveItem) error {
 		tags := map[string]bool{}
 		if *set == "" {

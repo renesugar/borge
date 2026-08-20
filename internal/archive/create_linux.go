@@ -28,6 +28,8 @@ import (
 	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/patterns"
+	"math"
+	"time"
 )
 
 // CreateOptions control what a backup includes and how.
@@ -92,11 +94,71 @@ type CreateOptions struct {
 	// is opened and updated after it is chunked.
 	Files *cache.FilesCache
 
+	// FilesChanged selects how a file changing while it is read is detected: by ctime
+	// (borg's default), by mtime, or not at all. See readFile.
+	FilesChanged FilesChangedMode
+
+	// ReadSpecialTimeout bounds a read from a fifo or character device under
+	// --read-special: if nothing arrives for this long, the file is reported as an error
+	// and the backup carries on. Zero or less means wait forever, which is what a fifo
+	// with no writer does otherwise - borg opens such a fifo with O_NONBLOCK precisely so
+	// that the wait becomes this timeout rather than a hang.
+	ReadSpecialTimeout time.Duration
+
+	// Sparse asks the reader to skip a sparse file's holes instead of reading them.
+	//
+	// It changes no stored bytes: an all-zero region is recorded by size with no data
+	// either way, because both tools detect an all-zero block "regardless of sparse mode"
+	// (borg's reader.pyx). What it changes is the reading - a hole is seeked over rather
+	// than read - so a 100 GB file with 1 GB of data in it costs 1 GB of reads.
+	//
+	// borg's help says "supported only by fixed chunker" and borge's implementation has
+	// the same limit, for the same reason: a content-defined chunker's boundaries depend
+	// on the bytes it has seen, so skipping a hole would have to synthesise the zeros to
+	// keep the rolling hash honest - at which point nothing was saved.
+	Sparse bool
+
+	// ExcludeDataless skips a file carrying the SF_DATALESS flag: a macOS placeholder for
+	// content that lives in cloud storage and is not on this machine. Reading one makes
+	// macOS download it, so the check happens before the file is opened.
+	//
+	// Nothing on Linux sets that flag, so this is inert here - but it is the flag word
+	// borge already reads, and an option that silently did nothing on the platform it was
+	// written for would be worse than one that does nothing on this one.
+	ExcludeDataless bool
+
 	// OnItem is called for each item as it is archived.
 	OnItem func(status byte, path string)
 	// OnError is called for a per-path failure. Returning an error aborts; returning nil
 	// continues. Nil means "abort on the first error".
 	OnError func(path string, err error) error
+	// OnWarning reports something worth saying that is not a failure - a file being
+	// re-read because it changed, so far.
+	OnWarning func(path, message string)
+}
+
+// FilesChangedMode is --files-changed.
+type FilesChangedMode string
+
+const (
+	// FilesChangedCTime is borg's default everywhere but Windows. ctime moves for a
+	// metadata change as well as a data change, which makes it the cautious choice: it
+	// reports some files that were not written to, and misses none that were.
+	FilesChangedCTime FilesChangedMode = "ctime"
+	// FilesChangedMTime watches the modification time alone.
+	FilesChangedMTime FilesChangedMode = "mtime"
+	// FilesChangedDisabled does not look. borg offers it, and the cost of it is that a
+	// file written during the backup is stored torn and reported as though it were fine.
+	FilesChangedDisabled FilesChangedMode = "disabled"
+)
+
+// ParseFilesChanged validates a --files-changed value.
+func ParseFilesChanged(s string) (FilesChangedMode, error) {
+	switch FilesChangedMode(s) {
+	case FilesChangedCTime, FilesChangedMTime, FilesChangedDisabled:
+		return FilesChangedMode(s), nil
+	}
+	return "", fmt.Errorf("archive: --files-changed must be ctime, mtime or disabled, got %q", s)
 }
 
 // CreateStats is what a backup did, beyond the chunk accounting in Stats.
@@ -201,6 +263,11 @@ type walker struct {
 
 func (w *walker) fail(path string, err error) error {
 	w.stats.Errors++
+	// borg reports a failed item in the listing as "E", and counts it in files_stats -
+	// which is where "Error files: N" in its summary comes from. borge reported the
+	// warning and nothing else, so "create --list" showed a file that was neither stored
+	// nor mentioned, and --filter E selected nothing.
+	w.report('E', path)
 	if w.opts.OnError == nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
@@ -454,6 +521,15 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) (bool, error) {
 		return true, nil
 	}
 
+	// --exclude-dataless, checked here for borg's stated reason: "this needs to be done
+	// BEFORE opening the file, as opening would otherwise materialize the file contents".
+	// borg reports these with "x", not the "-" an exclude pattern gets.
+	if w.opts.ExcludeDataless && it.BSDFlags != nil && *it.BSDFlags&sfDataless != 0 {
+		w.stats.Skipped++
+		w.report('x', abs)
+		return true, nil
+	}
+
 	status := byte('A')
 	switch st.Mode & unix.S_IFMT {
 	case unix.S_IFDIR:
@@ -492,22 +568,37 @@ func (w *walker) archive(abs, stored string, st *unix.Stat_t) (bool, error) {
 			return false, nil
 		}
 		if w.opts.ReadSpecial {
-			chunks, _, err := w.fileChunks(abs, stored, st)
+			chunks, st2, err := w.fileChunks(abs, stored, st)
 			if err != nil {
 				return false, w.fail(abs, err)
 			}
 			it.Chunks = chunks
 			it.ChunksSet = true
 			// Reading a special file turns it into a regular one on restore, which is what
-			// --read-special is for: the point is to capture what flows through it.
+			// --read-special is for: the point is to capture what flows through it. And it
+			// is reported as the regular file it has become - "A", "M" or "C" - which is
+			// borg's behaviour: only the *unread* special file gets a type letter.
 			mode := int64(st.Mode&0o7777) | item.SIFREG
 			it.Mode = &mode
+			status = st2
 		} else {
 			rdev := int64(st.Rdev)
 			it.RDev = &rdev
 			w.markHardlink(it, st)
+			// One letter per kind, as borg has them: "f" fifo, "c" character device, "b"
+			// block device. borge reported "i" for all three, which is borg's letter for
+			// something else entirely - content read from stdin or a pipe (archive.py:
+			// 'status = "i"  # stdin (or other pipe)'). So "create --list" named the wrong
+			// kind, and "--filter f" selected nothing.
+			switch st.Mode & unix.S_IFMT {
+			case unix.S_IFIFO:
+				status = 'f'
+			case unix.S_IFCHR:
+				status = 'c'
+			default:
+				status = 'b'
+			}
 		}
-		status = 'i'
 
 	default:
 		w.stats.Skipped++
@@ -618,20 +709,22 @@ func (w *walker) fileChunks(abs, stored string, st *unix.Stat_t) ([]item.ChunkLi
 		}
 	}
 
-	f, err := os.Open(abs)
+	chunks, changed, err := w.readFile(abs, st)
 	if err != nil {
 		return nil, status, err
 	}
-	defer f.Close()
-
-	chunks, err := w.builder.ChunkFile(f)
-	if err != nil {
-		return nil, status, err
+	if changed {
+		// borg's "C": the file changed while it was being read, so what was stored is a
+		// mix of before and after. It is stored anyway - a torn copy of a busy file is
+		// usually better than no copy - but it is reported, and it is NOT memorized in
+		// the files cache, because a cache entry would let the next run skip re-reading
+		// the one file known to be wrong.
+		status = 'C'
 	}
 	if st.Nlink > 1 {
 		w.hardlinks[hlKey] = chunks
 	}
-	if w.opts.Files != nil {
+	if w.opts.Files != nil && !changed {
 		w.opts.Files.Memorize(cacheKey, cache.FileInfo{
 			Size:  st.Size,
 			Inode: int64(st.Ino),
@@ -640,6 +733,220 @@ func (w *walker) fileChunks(abs, stored string, st *unix.Stat_t) ([]item.ChunkLi
 		}, chunks)
 	}
 	return chunks, status, nil
+}
+
+// maxFileReadRetries is borg's MAX_RETRIES, and the count includes the first attempt.
+const maxFileReadRetries = 10
+
+// readFile reads and chunks a file, retrying while it keeps changing underneath.
+//
+// # Why a backup tool has to look
+//
+// A file being written while it is read is stored as a mix of before and after: not the old
+// contents and not the new ones, but something that never existed. borg stats the file
+// again after reading it, and if the timestamp moved it throws the work away and starts
+// over - up to ten times, sleeping a little longer each time - on the theory that whatever
+// was writing will stop. If it never stops, the last attempt is stored and marked "C".
+//
+// borge did none of this until 2026-08-20. It read the file, stored it, and reported "A" or
+// "M", so a torn file looked exactly like a good one. See DIVERGENCES.md #52.
+func (w *walker) readFile(abs string, st *unix.Stat_t) ([]item.ChunkListEntry, bool, error) {
+	before := *st
+	for retry := 0; ; retry++ {
+		last := retry == maxFileReadRetries-1
+
+		chunks, changed, err := w.readOnce(abs, &before)
+		if err != nil {
+			return nil, false, err
+		}
+		if !changed {
+			return chunks, false, nil
+		}
+		if last {
+			return chunks, true, nil
+		}
+
+		// borg's schedule: 1ms, then 10^(retry/2) times that - retry 6 is a second. Long
+		// enough for a log rotation or a save to finish, short enough that ten of them do
+		// not stall a backup.
+		sleep := time.Duration(float64(time.Millisecond) * math.Pow(10, float64(retry)/2))
+		if w.opts.OnWarning != nil {
+			w.opts.OnWarning(abs, fmt.Sprintf(
+				"file changed while we read it, slept %.3fs, next: retry %d of %d",
+				sleep.Seconds(), retry+1, maxFileReadRetries-1))
+		}
+		time.Sleep(sleep)
+
+		// A fresh stat before trying again, as borg takes: the file may have been
+		// replaced, and the next comparison must be against what is there now.
+		var fresh unix.Stat_t
+		if err := unix.Lstat(abs, &fresh); err != nil {
+			return nil, false, err
+		}
+		before = fresh
+	}
+}
+
+// readOnce reads the file and reports whether it changed while being read.
+func (w *walker) readOnce(abs string, before *unix.Stat_t) ([]item.ChunkListEntry, bool, error) {
+	f, reader, err := w.open(abs, before)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	startReading := time.Now().UnixNano()
+	chunks, err := w.builder.ChunkFile(reader)
+	if err != nil {
+		return nil, false, err
+	}
+	endReading := time.Now().UnixNano()
+
+	var after unix.Stat_t
+	if err := unix.Fstat(int(f.Fd()), &after); err != nil {
+		return nil, false, err
+	}
+	return chunks, w.changedWhileReading(before, &after, startReading, endReading), nil
+}
+
+// open opens a file for reading, applying --read-special-timeout where it applies.
+//
+// # Why a fifo needs O_NONBLOCK to have a timeout at all
+//
+// Opening a fifo for reading blocks until a writer connects - in the kernel, before any
+// read happens - so a deadline on the reads alone would never be reached. borg opens with
+// O_NONBLOCK for exactly that: the open returns at once, and the waiting becomes a read
+// that the deadline can bound. borge does the same, and then sets a read deadline through
+// os.File's SetReadDeadline, which works on a pipe or character device because Go's runtime
+// polls them.
+func (w *walker) open(abs string, st *unix.Stat_t) (*os.File, io.Reader, error) {
+	special := st.Mode&unix.S_IFMT == unix.S_IFIFO || st.Mode&unix.S_IFMT == unix.S_IFCHR
+	if w.opts.ReadSpecialTimeout <= 0 || !special {
+		f, err := os.Open(abs)
+		if err != nil {
+			return nil, nil, err
+		}
+		if w.opts.Sparse && st.Mode&unix.S_IFMT == unix.S_IFREG {
+			r, err := newSparseReader(f, st.Size)
+			if err != nil {
+				f.Close()
+				return nil, nil, err
+			}
+			return f, r, nil
+		}
+		return f, f, nil
+	}
+	fd, err := unix.Open(abs, unix.O_RDONLY|unix.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, &os.PathError{Op: "open", Path: abs, Err: err}
+	}
+	f := os.NewFile(uintptr(fd), abs)
+	return f, &specialFileReader{fd: fd, timeout: w.opts.ReadSpecialTimeout}, nil
+}
+
+// noWriterPollInterval is borg's NO_WRITER_POLL_INTERVAL: how often to look again at a fifo
+// nobody has opened for writing.
+const noWriterPollInterval = 100 * time.Millisecond
+
+// specialFileReader reads a fifo or character device under a timeout.
+//
+// # Why an empty read is not the end
+//
+// A fifo opened O_RDONLY|O_NONBLOCK with no writer returns zero bytes from read(2) - which
+// everywhere else means end of file. Here it means "nobody has connected yet", and treating
+// it as EOF is what made borge store an *empty file* for a fifo where borg reports an error.
+// So zero bytes counts as EOF only once some data has actually arrived; before that, it is
+// something to wait through.
+//
+// borg spells out the consequence and it is worth keeping: a writer that connects and closes
+// without writing anything produces a timeout, not empty content.
+//
+// # The timeout is a gap, not a budget
+//
+// It bounds how long a read waits for data to *arrive*, and it restarts whenever any
+// arrives. A slow writer trickling bytes forever never times out; a writer that stops for
+// longer than the timeout does.
+type specialFileReader struct {
+	fd      int
+	timeout time.Duration
+	gotData bool
+}
+
+func (r *specialFileReader) Read(p []byte) (int, error) {
+	deadline := time.Now().Add(r.timeout)
+	for {
+		n, err := unix.Read(r.fd, p)
+		switch {
+		case n > 0:
+			r.gotData = true
+			return n, nil
+		case err == unix.EAGAIN || err == unix.EWOULDBLOCK:
+			// A writer is connected but has nothing for us right now.
+		case err != nil:
+			return 0, err
+		case r.gotData:
+			// A real end of file: every writer closed after sending something.
+			return 0, io.EOF
+		}
+		if remaining := time.Until(deadline); remaining <= 0 {
+			return 0, &os.PathError{Op: "read", Path: "", Err: unix.ETIMEDOUT}
+		}
+		// Waiting for a writer that is not there yet cannot be waited *on*, so it is
+		// polled; waiting for data from a connected writer can be, and poll returns as
+		// soon as it arrives or the writer closes.
+		wait := noWriterPollInterval
+		if err != nil { // EAGAIN: there is a writer, so the fd is pollable
+			if until := time.Until(deadline); until < wait {
+				wait = until
+			}
+			fds := []unix.PollFd{{Fd: int32(r.fd), Events: unix.POLLIN}}
+			_, _ = unix.Poll(fds, int(wait.Milliseconds()))
+			continue
+		}
+		if until := time.Until(deadline); until < wait {
+			wait = until
+		}
+		time.Sleep(wait)
+	}
+}
+
+// timeDiffers is borg's TIME_DIFFERS1_NS: 20ms of slack around the read window.
+const timeDiffers = 20 * time.Millisecond
+
+// changedWhileReading compares the timestamps taken before and after the read.
+//
+// The straightforward half is "the timestamp moved". The other half is borg's answer to
+// issue #3536, and it is the reason a naive implementation misses real corruption: if the
+// file was changed just before the first stat, and changed again during the read, the
+// second timestamp can equal the first because the filesystem's clock granularity hid it.
+// So a timestamp that merely *falls inside the read window* is treated as suspicious too,
+// widened by 20ms at each end.
+func (w *walker) changedWhileReading(before, after *unix.Stat_t, startReading, endReading int64) bool {
+	// Special files are never checked, and borg says why: "fifos change naturally, because
+	// they are fed from the other side. no problem" - and block or character devices do not
+	// change ctime when read at all. Checking them anyway is not merely noisy: it makes
+	// borge re-read the fifo, and the second read finds the writer gone. Measured, having
+	// written the check without this and watched a fifo's contents disappear.
+	switch before.Mode & unix.S_IFMT {
+	case unix.S_IFIFO, unix.S_IFCHR, unix.S_IFBLK, unix.S_IFSOCK:
+		return false
+	}
+
+	var oldNS, newNS int64
+	switch w.opts.FilesChanged {
+	case FilesChangedDisabled:
+		return false
+	case FilesChangedMTime:
+		oldNS = before.Mtim.Sec*1e9 + before.Mtim.Nsec
+		newNS = after.Mtim.Sec*1e9 + after.Mtim.Nsec
+	default: // FilesChangedCTime, borg's default on everything but Windows
+		oldNS = before.Ctim.Sec*1e9 + before.Ctim.Nsec
+		newNS = after.Ctim.Sec*1e9 + after.Ctim.Nsec
+	}
+	if oldNS != newNS {
+		return true
+	}
+	return startReading-int64(timeDiffers) < newNS && newNS < endReading+int64(timeDiffers)
 }
 
 // markHardlink sets an item's hlid when its inode has more than one link.

@@ -86,7 +86,10 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # import-tar and create; down to 22 when prune reached zero - --keep, --from and the two
 # quarterly rules - which also took the alias gap from 17 to 11, prune having six short
 # spellings borge did not have; down to 19 when extract reached zero - --stdout, --continue
-# and --stats, the last of which needed the store to start counting what it does.
+# and --stats, the last of which needed the store to start counting what it does; down to 14
+# when create reached zero - --sparse, --tags, --files-changed, --read-special-timeout and
+# --exclude-dataless, of which --files-changed was a missing safety feature rather than a
+# missing flag.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -94,7 +97,7 @@ declare -A budget=(
     [check]=2
     [compact]=0
     [completion]=0
-    [create]=5
+    [create]=0
     [debug]=0
     [delete]=0
     [diff]=0

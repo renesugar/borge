@@ -23,6 +23,7 @@ import (
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repository"
+	"time"
 )
 
 // cmdRepoCreate makes a new repository.
@@ -186,11 +187,18 @@ func cmdCreate(e *Env, args []string) int {
 	fs.StringVar(compression, "compression", "lz4", "compression spec")
 	chunkerParams := fs.String("chunker-params", "", "chunker parameters, e.g. fastcdc,19,23,21,2")
 	oneFileSystem := fs.Bool("one-file-system", false, "do not cross mount points")
+	fs.BoolVar(oneFileSystem, "x", false, "do not cross mount points")
 	numericIDs := fs.Bool("numeric-ids", false, "store numeric uid/gid only")
 	noXAttrs := fs.Bool("noxattrs", false, "do not store extended attributes")
 	noACLs := fs.Bool("noacls", false, "do not store ACLs")
 	noFlags := fs.Bool("noflags", false, "do not store file flags")
 	readSpecial := fs.Bool("read-special", false, "read the contents of fifos and devices")
+	sparse := fs.Bool("sparse", false,
+		"skip over the holes of a sparse file instead of reading them (fixed chunker only)")
+	readSpecialTimeout := fs.Float64("read-special-timeout", -1,
+		"with --read-special, give up on a fifo or character device after this many seconds; 0 waits forever")
+	excludeDataless := fs.Bool("exclude-dataless", false,
+		"skip files flagged DATALESS: macOS placeholders whose content is not on this machine")
 	excludeCaches := fs.Bool("exclude-caches", false,
 		"skip directories holding a CACHEDIR.TAG")
 	var excludeIfPresent multiFlag
@@ -211,7 +219,11 @@ func cmdCreate(e *Env, args []string) int {
 	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
 	list := fs.Bool("list", false, "print each item as it is archived")
 	statusFilter := fs.String("filter", "", "only list items whose status is one of these characters")
+	tags := fs.String("tags", "", "tag the new archive, comma-separated (borge only in that form)")
+	filesChanged := fs.String("files-changed", string(archive.FilesChangedCTime),
+		"how to detect a file changing while it is read: ctime, mtime or disabled")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	fs.BoolVar(stats, "s", false, "print statistics when finished")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -222,6 +234,29 @@ func cmdCreate(e *Env, args []string) int {
 		*stats = true
 	}
 	e.setStatusFilter(*statusFilter)
+	archiveTags, err := validateTags(*tags)
+	if err != nil {
+		return e.fail(err)
+	}
+	changedMode, err := archive.ParseFilesChanged(*filesChanged)
+	if err != nil {
+		return e.fail(err)
+	}
+	// borg's default is "no timeout" and its 0 means "wait forever", so the two have to be
+	// distinguishable: -1 here is the option not being given at all.
+	specialTimeout := time.Duration(0)
+	if fs.wasSet("read-special-timeout") {
+		if *readSpecialTimeout < 0 {
+			e.errorf("--read-special-timeout cannot be negative")
+			return ExitError
+		}
+		specialTimeout = time.Duration(*readSpecialTimeout * float64(time.Second))
+		if *readSpecialTimeout == 0 {
+			// borg: "Give 0 to wait forever." Which is what no timeout at all does, so
+			// the two coincide - said here rather than left to be inferred from a zero.
+			specialTimeout = 0
+		}
+	}
 	// "R PATH" lines in a patterns file are paths to back up, so they count towards
 	// having something to do: borg accepts a create whose only root came from a patterns
 	// file, and borge used to refuse it (docs/DIVERGENCES.md #25).
@@ -388,9 +423,19 @@ func cmdCreate(e *Env, args []string) int {
 		ExcludeCaches: *excludeCaches,
 		// A copy: the option value outlives this call in the caller's flag set, and a
 		// walker holding the same slice would see a later change.
-		ExcludeIfPresent: append([]string(nil), excludeIfPresent...),
-		KeepExcludeTags:  *keepExcludeTags,
-		Files:            files,
+		ExcludeIfPresent:   append([]string(nil), excludeIfPresent...),
+		KeepExcludeTags:    *keepExcludeTags,
+		Files:              files,
+		FilesChanged:       changedMode,
+		ExcludeDataless:    *excludeDataless,
+		ReadSpecialTimeout: specialTimeout,
+		Sparse:             *sparse,
+		OnWarning: func(p, msg string) {
+			// A warning, not a failure: the file is being read again, and the backup
+			// carries on either way. borg logs the same thing at warning level without
+			// changing its exit code.
+			e.warnf("%s: %s", p, msg)
+		},
 		OnError: func(p string, err error) error {
 			// One unreadable file does not abandon the backup: the rest is still worth
 			// having, and the exit code says something was missed.
@@ -490,6 +535,7 @@ func cmdCreate(e *Env, args []string) int {
 		Comment:     comm,
 		CommandLine: commandLine(args),
 		CWD:         cwd,
+		Tags:        archiveTags,
 	})
 	if err != nil {
 		return e.fail(err)
@@ -548,4 +594,63 @@ func cmdCreate(e *Env, args []string) int {
 // can read and rerun, and the absolute path of the binary is noise.
 func commandLine(args []string) string {
 	return "borge create " + strings.Join(args, " ")
+}
+
+// validateTags reads --tags: a comma-separated list, each part validated as borg validates
+// a tag.
+//
+// # Which of borg's forms this is, and which it cannot be
+//
+// borg's help says "comma-separated or multiple arguments", and measuring finds neither
+// quite true:
+//
+//	borg --tags one two          -> one,two   (argparse nargs="+")
+//	borg --tags one --tags two   -> two       (the second overwrites the first)
+//	borg --tags one,two          -> error     (its validator forbids "," in a tag)
+//
+// Go's flag package cannot express nargs="+" - an option takes exactly one argument - so
+// the form that works in borg is the one borge cannot have. Repetition overwrites here as
+// it does there, because a Go string flag is last-wins and because *silently accumulating*
+// where borg keeps only the last would lose a user's tags on the way back to borg.
+//
+// What borge adds is the comma, and it is safe precisely because borg refuses it: no valid
+// borg tag contains one, so splitting can never mis-read a legitimate tag, and a script
+// written with "--tags a,b" fails loudly under borg rather than doing something different.
+// It also matches borge's own "tag --set", which has always been comma-separated. Recorded
+// in DIVERGENCES.md #52.
+func validateTags(spec string) ([]string, error) {
+	if spec == "" {
+		return nil, nil
+	}
+	var out []string
+	for _, tag := range strings.Split(spec, ",") {
+		if err := validateTag(tag); err != nil {
+			return nil, err
+		}
+		out = append(out, tag)
+	}
+	return out, nil
+}
+
+// validateTag is borg's text_validator(name="tag", min_length=1, max_length=10,
+// invalid_chars=" ,$") plus its special-tag rule, in borg's wording.
+//
+// The characters are forbidden for reasons the format shows: a comma separates tags in
+// "{tags}" and in "--set", a space would make a listing ambiguous, and "$" is what a shell
+// expands. The length limit is borg's and is not obviously necessary, but a tag borge
+// accepts and borg refuses is an archive borg cannot make - so the limit is kept.
+func validateTag(tag string) error {
+	if len(tag) < 1 {
+		return fmt.Errorf("Invalid tag: %q [length < 1]", tag)
+	}
+	if len(tag) > 10 {
+		return fmt.Errorf("Invalid tag: %q [length > 10]", tag)
+	}
+	if strings.ContainsAny(tag, " ,$") {
+		return fmt.Errorf("Invalid tag: %q [invalid chars detected matching \" ,$\"]", tag)
+	}
+	if strings.HasPrefix(tag, "@") && tag != manifest.ProtectedTag {
+		return errors.New("Unknown special tags given.")
+	}
+	return nil
 }

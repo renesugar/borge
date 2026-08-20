@@ -130,3 +130,15 @@ func setFlags(path string, bsdFlags int64, mode uint32) error {
 	}
 	return nil
 }
+
+// sfDataless is macOS's SF_DATALESS, the flag on a placeholder whose content lives in
+// cloud storage rather than on this machine. borg falls back to the literal value for the
+// same reason borge uses one: it is only in Python's stat module from 3.13, and it is not
+// in any Linux header at all.
+//
+// It appears in this file, which is the Linux flag translation, because that is where the
+// bsdflags word borge stores is defined - and an archive made on macOS by borg carries the
+// flag into a word borge reads on Linux. Nothing on Linux sets it, so --exclude-dataless
+// excludes nothing here; the constant is what makes the option mean the same thing when
+// borge is built for macOS.
+const sfDataless = 0x40000000

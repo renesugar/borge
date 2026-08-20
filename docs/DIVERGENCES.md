@@ -2044,3 +2044,105 @@ file counts are in `files_stats`, the times are in the archive metadata — so t
 formatting work rather than missing information. It is one command's summary and it is not
 in the option gate's sight, which is exactly why it is recorded here rather than left to be
 noticed.
+
+---
+
+## 52. A file that changed while borge read it — **fixed 2026-08-20**
+
+**Stage 8 · `internal/archive/create_linux.go` · found by implementing `--files-changed`**
+
+`create`'s last five options — `--files-changed`, `--sparse`, `--tags`,
+`--read-special-timeout` and `--exclude-dataless` — which take `create` to zero missing.
+The first of them was not a missing flag but **a missing safety feature**.
+
+### borge stored torn files and called them whole
+
+A file written while it is being read is stored as a mix of before and after: not the old
+contents, not the new ones, and nothing that ever existed. borg stats the file again after
+reading it, and if the timestamp moved it throws the work away and starts over — up to ten
+times, sleeping longer each time — on the theory that whatever was writing will stop. If it
+never stops, the last attempt is stored and marked **`C`**, counted in
+`files_changed_while_reading`, and **not memorized in the files cache**, so the next run
+reads it again rather than trusting the copy known to be wrong.
+
+borge did none of that. It read the file, stored it, and reported `A`, and a database or a
+log rotated mid-backup looked exactly like a file that had been sitting still.
+
+Two details of borg's check are worth keeping, because a straightforward implementation
+misses both:
+
+- **A timestamp that merely falls inside the read window counts as a change.** borg's answer
+  to its issue #3536: if the file was changed just before the first stat and again during
+  the read, the second timestamp can equal the first because the filesystem's clock
+  granularity hid it. So the window is widened by 20 ms at each end and anything landing
+  inside it is treated as suspicious.
+- **Special files are never checked.** borg: "fifos change naturally, because they are fed
+  from the other side. no problem." Checking them anyway is not merely noisy — it made borge
+  re-read a fifo, and the second read found the writer gone and the data lost. Measured,
+  having written the check without the exemption first.
+
+### Two more differences the same work uncovered
+
+**Every fifo, character device and block device was reported as `i`.** borg has a letter for
+each — `f`, `c`, `b` — and `i` is its letter for something else entirely: content read from
+stdin or a pipe (`archive.py`: `status = "i"  # stdin (or other pipe)`). So `create --list`
+named the wrong kind of thing and `--filter f` selected nothing. A special file read under
+`--read-special` now reports `A`/`M`/`C` like the regular file it has become, which is also
+borg's behaviour.
+
+**A failed item was reported not at all.** borg prints `E` for a file it could not read and
+counts it in `files_stats`, which is where its "Error files: N" comes from. borge printed
+the warning and left the listing silent, so a file that was neither stored nor mentioned
+looked like one that was never there.
+
+### `--read-special-timeout`, and why an empty read is not the end
+
+A fifo opened `O_RDONLY|O_NONBLOCK` with no writer returns zero bytes from `read(2)` — which
+everywhere else means end of file. Here it means "nobody has connected yet". borge's first
+attempt used Go's `SetReadDeadline`, which cannot tell those apart, and stored an **empty
+file** for a fifo where borg reports an error.
+
+borg's rule, ported: zero bytes counts as EOF only once some data has actually arrived, and
+the timeout is a *gap* — it restarts whenever data arrives, so a slow writer trickling bytes
+forever never times out. borg spells out the consequence and it is reproduced: a writer that
+connects and closes without writing produces a timeout, not empty content.
+
+### `--tags`: three forms, and borge can have two of them
+
+borg's help says "comma-separated or multiple arguments". Measured, neither is quite true:
+
+```
+borg --tags one two          ->  one,two   (argparse nargs="+")
+borg --tags one --tags two   ->  two       (the second overwrites the first)
+borg --tags one,two          ->  error     (its validator forbids "," in a tag)
+```
+
+Go's flag package cannot express `nargs="+"`, so the form that works in borg is the one
+borge cannot have. borge accepts a **comma-separated list**, which is safe precisely because
+borg refuses commas inside a tag: no valid borg tag contains one, so splitting cannot
+mis-read a legitimate tag, and `--tags a,b` fails loudly under borg rather than doing
+something different. Repetition **overwrites** in borge as it does in borg — accumulating
+would silently lose tags when the same command line was run under the other tool.
+
+borge had **no tag validation at all**, on `create --tags` or on the `tag` command that
+already existed: `borge tag --add 'my tag'` wrote a tag borg refuses to create, and one a
+comma-separated `{tags}` listing cannot be read back from. borg's rules — 1 to 10
+characters, none of `` ,$``, a leading `@` only for `@PROT` — now apply in both places, with
+borg's wording.
+
+### `--sparse` changes no stored byte
+
+It is a read optimisation: an all-zero region is recorded by size with no data whether or
+not it is given, because both tools detect an all-zero block "regardless of sparse mode"
+(borg's `reader.pyx`). What it changes is that a hole is *seeked over* rather than read, so a
+100 GB file holding 1 GB costs 1 GB of reads. The test asserts exactly that: an archive made
+with `--sparse` is byte-identical to one made without it and to borg's.
+
+### `--exclude-dataless` is inert on Linux, and says so
+
+`SF_DATALESS` marks a macOS placeholder whose content lives in cloud storage; reading one
+makes macOS download it, which is why the check happens before the file is opened. Nothing
+on Linux sets that flag, so the option excludes nothing here. It is implemented against the
+flag word borge already stores, so it will mean the same thing when borge is built for
+macOS — an option that did nothing on the platform it was written for would be worse than
+one that does nothing on this one.
