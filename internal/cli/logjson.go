@@ -160,6 +160,23 @@ func (e *Env) logFileStatus(status byte, path string) {
 	fmt.Fprintf(e.Stderr, "%c %s\n", status, path)
 }
 
+// groupHelpRequested reports whether a command group's first argument asks for the group's
+// own help rather than naming a subcommand.
+//
+// The same gap as takeParentLogJSON below and found the same way: "debug", "key" and
+// "benchmark" build no FlagSet, so nothing in them had ever seen an option. borg's groups
+// are argparse parsers, so "borg debug --help" prints the group's usage and exits 0; borge
+// answered 'unknown debug command "--help"' on stderr and exited 2 until 2026-08-20.
+//
+// It surfaced while making command-coverage.sh descend into the groups: the gate has to ask
+// borge for its subcommand list the way it asks borg, and the obvious way to ask was the
+// one spelling that did not work.
+func groupHelpRequested(arg string) bool {
+	// The three spellings Go's flag package answers, so that a group and a command agree
+	// on what asking for help looks like.
+	return arg == "-h" || arg == "-help" || arg == "--help"
+}
+
 // takeParentLogJSON handles --log-json given to a command *group* - "debug", "key",
 // "benchmark" - before the subcommand name.
 //

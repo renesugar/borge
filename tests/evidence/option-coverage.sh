@@ -39,6 +39,10 @@
 # used to report none, so the comparison was empty rather than wrong. That found "key
 # remove --passphrase", missing and unseen through eight stages.
 #
+# It sees a subcommand borge does not have only if borge has it: the enumeration is borge's.
+# A subcommand borg has and borge lacks is command-coverage.sh's business, and was nobody's
+# until 2026-08-20 - see the note above GROUP_SUBS.
+#
 # # What this gate deliberately does not see
 #
 #   - Semantics. Both tools having an option called "v" says nothing about it meaning the
@@ -125,6 +129,7 @@ declare -A budget=(
     [debug put-obj]=0
     [debug delete-obj]=0
     [debug format-obj]=0
+    [debug convert-profile]=0
     [debug parse-obj]=0
     [debug id-hash]=0
     [key export]=0
@@ -265,10 +270,18 @@ fi
 
 # The three command groups carry their options on their subcommands, and neither tool lists
 # those at the top level: both sides reported none and the comparison was empty rather than
-# wrong. Enumerated from borge, because borg's group help shows only "<command> ..." and
-# names no subcommand at all - so the list has to come from the side that prints one, and a
-# subcommand borg does not have drops out below when its --help fails, exactly as a
-# borge-only *command* does.
+# wrong.
+#
+# The list is borge's, so this loop only ever sees a subcommand both tools have - which is
+# what an option comparison needs. The comment here used to justify that by saying borg's
+# group help "names no subcommand at all", which was untrue: "borg debug --help" lists all
+# thirteen of them under "<command>". The false reason is what made the blind spot look
+# deliberate, and it cost "debug convert-profile" eight stages unseen - invisible here
+# because the list came from borge, and invisible to command-coverage.sh because that
+# compared top-level names, where "debug" matched. Since 2026-08-20 the missing direction
+# belongs to command-coverage.sh, which descends into the groups and asks borg - both ways,
+# so a subcommand borge has and borg does not is reported there too, exactly as a borge-only
+# *command* is. Here it simply drops out below, when borg's --help for it fails.
 GROUP_SUBS=()
 for grp in debug key benchmark; do
     while IFS= read -r sub; do

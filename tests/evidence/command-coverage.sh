@@ -13,6 +13,19 @@
 #
 # Exit status: 0 if every borg command is either implemented or has a recorded reason,
 # 1 if any command is unaccounted for.
+#
+# # The command groups, since 2026-08-20
+#
+# "debug", "key" and "benchmark" carry their real commands one level down, and until this
+# date neither gate could see a missing one. This script compared top-level names, where
+# "debug" is a single name and matched; the option gate compared the groups' subcommands but
+# enumerated them from *borge*, so a subcommand borge did not have was never on the list it
+# compared. Both halves were true and "debug convert-profile" still fell between them and
+# went unseen through eight stages, exactly as "key remove --passphrase" had one level down.
+#
+# borg does publish the list - under "<command>" in each group's own --help - so there is a
+# side to ask, which is the only thing that makes this a gate rather than another table
+# written by hand.
 
 set -uo pipefail
 
@@ -31,6 +44,9 @@ fi
 
 # deferred maps a borg command borge does not implement to where that is written down.
 # A command missing from both this table and borge is an unexplained gap and fails.
+#
+# A group's subcommand is keyed by its full name, "debug convert-profile", so a deferred
+# subcommand records its reason the same way a deferred command does.
 declare -A deferred=(
     [mount]="non-goal for 1.0 (PORTING_PLAN 0.6): FUSE, deferred to section 9"
     [umount]="non-goal for 1.0 (PORTING_PLAN 0.6): pairs with mount"
@@ -69,6 +85,34 @@ borg_commands() {
 
 borge_commands() {
     "$BORGE" 2>&1 |
+        sed -n '/^commands:/,$p' |
+        grep -E '^  [a-z][a-z0-9-]* ' |
+        awk '{print $1}' |
+        sort -u
+}
+
+# GROUP_CMDS are the commands whose subcommands are the real commands. Named here rather
+# than discovered: both tools show a group in the top-level list exactly like any other
+# command, so there is nothing in either help text that says "this one has more inside".
+#
+# Not called GROUPS. That is one of bash's own variables - the caller's Unix group ids - and
+# an assignment to it is silently discarded, so the loop below ran over group numbers, found
+# no command named "1000", and reported nothing at all while still exiting 0.
+GROUP_CMDS=(debug key benchmark)
+
+borg_subcommands() {
+    # The group's own help lists them under "<command>", indented one level deeper than the
+    # option sections above it - so the block is taken from that line on, as the top-level
+    # list is taken from "For more details".
+    "$BORG" "$1" --help 2>&1 |
+        sed -n '/^  <command>/,$p' |
+        grep -E '^    [a-z][a-z0-9-]* ' |
+        awk '{print $1}' |
+        sort -u
+}
+
+borge_subcommands() {
+    "$BORGE" "$1" --help 2>&1 |
         sed -n '/^commands:/,$p' |
         grep -E '^  [a-z][a-z0-9-]* ' |
         awk '{print $1}' |
@@ -114,6 +158,54 @@ for c in "${BORG_CMDS[@]}"; do
     fi
 done
 
+# The groups, one level down. Counted into the same three totals: a subcommand is a
+# command, and splitting the score would let a whole group empty out while the summary
+# still read "every borg command implemented".
+for grp in "${GROUP_CMDS[@]}"; do
+    if [ -z "${have[$grp]:-}" ]; then
+        # The group itself is absent, which the loop above has already reported. Descending
+        # into it would report each of its subcommands as a second, dependent failure.
+        continue
+    fi
+    mapfile -t SUBS < <(borg_subcommands "$grp")
+    if [ "${#SUBS[@]}" -lt 2 ]; then
+        echo "command-coverage: found only ${#SUBS[@]} subcommands under '$grp'; the group" \
+             "help format has changed and this script needs updating" >&2
+        exit 64
+    fi
+    declare -A have_sub=()
+    while IFS= read -r sub; do
+        [ -n "$sub" ] && have_sub[$sub]=1
+    done < <(borge_subcommands "$grp")
+    if [ "${#have_sub[@]}" -lt 2 ]; then
+        echo "command-coverage: borge lists only ${#have_sub[@]} subcommands under '$grp';" \
+             "the usage format has changed and this script needs updating" >&2
+        exit 64
+    fi
+
+    for sub in "${SUBS[@]}"; do
+        full="$grp $sub"
+        if [ -n "${have_sub[$sub]:-}" ]; then
+            printf '%-16s %s\n' "$full" "implemented"
+            implemented=$((implemented + 1))
+        elif [ -n "${deferred[$full]:-}" ]; then
+            printf '%-16s %s\n' "$full" "absent - ${deferred[$full]}"
+            explained=$((explained + 1))
+        else
+            printf '%-16s %s\n' "$full" "ABSENT AND UNEXPLAINED"
+            unexplained=$((unexplained + 1))
+        fi
+    done
+
+    # And the other way, as for the top-level commands.
+    for sub in "${!have_sub[@]}"; do
+        found=
+        for b in "${SUBS[@]}"; do [ "$b" = "$sub" ] && found=1 && break; done
+        [ -z "$found" ] && printf '%-16s %s\n' "$grp $sub" "borge-only (not a borg subcommand)"
+    done
+    unset have_sub
+done
+
 # Commands borge has that borg does not. None today, but a port that grew its own
 # command without saying so is worth noticing too.
 for c in "${BORGE_CMDS[@]}"; do
@@ -125,7 +217,7 @@ for c in "${BORGE_CMDS[@]}"; do
 done
 
 echo
-echo "borg commands:        ${#BORG_CMDS[@]}"
+echo "borg commands:        ${#BORG_CMDS[@]} top-level, plus the subcommands of ${GROUP_CMDS[*]}"
 echo "implemented in borge: $implemented"
 echo "absent, recorded:     $explained"
 echo "absent, unexplained:  $unexplained"

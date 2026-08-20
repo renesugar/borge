@@ -345,17 +345,75 @@ the two tools' output stays readable.
 The leading number on a finding line is the object's position in a scan whose order is the
 chunk index's, and the two implementations do not promise to agree on it.
 
-## 14. `debug convert-profile` is not implemented
+## 14. `debug convert-profile` writes a plainer marshal file — **implemented 2026-08-20**
 
-**Stage 8 · nothing to port**
+**Stage 8 · `internal/cli/pymarshal.go` · compared against borg as loaded objects**
 
-borg's `debug convert-profile` reads a borg profile (msgpack) and writes a **Python
-`marshal`** file for `pstats` to open. The output format is a CPython implementation detail
-with no reader outside CPython, and borge produces no borg profiles to convert in the first
-place — its profiling is Go's `pprof`. Porting it would mean writing a Python bytecode
-serialiser to convert a file borge never creates.
+`BORG_DEBUG_PROFILE=<file>` makes borg write cProfile's statistics as **msgpack** instead of
+CPython's **marshal**, and says why in a comment: a profile may be mailed to a developer,
+and "a format that is impossible to interpret outside an insecure implementation" is a poor
+thing to send over the internet. `debug convert-profile` is the step back — msgpack in,
+marshal out — run by whoever has `pstats` or `pyprof2calltree` and wants to open the file.
 
-Recorded here rather than left as an unexplained gap in the subcommand list.
+This entry used to say the command was not ported, for a reason that was wrong twice over:
+
+- **"Porting it would mean writing a Python bytecode serialiser."** marshal serialises
+  *data*, not bytecode. A profile holds strings, ints, floats, tuples and dicts, and the
+  writer for those is [`internal/cli/pymarshal.go`](../internal/cli/pymarshal.go) — 275
+  lines, most of them explaining CPython's format rather than producing it.
+- **"borge produces no borg profiles to convert in the first place."** True, and beside the
+  point: the input is *borg's*, and borg's profiles do not stop existing because the backups
+  moved to borge. A port that replaces borg and leaves the old profiles unreadable by the
+  tool that replaced it has left a job undone. (It is also still true that borge has no
+  profiler of its own. When it gets one it will write Go's `pprof`, which `pstats` cannot
+  read and which this command has nothing to do with — the earlier claim that borge's
+  "profiling is Go's `pprof`" described an intention, not any code in the tree.)
+
+**The divergence that remains is the bytes.** marshal has versions, and `marshal.dump`
+defaults to the newest: version 3 added back-references, so an object appearing twice is
+written once and referred to afterwards, and version 4 added a short form for ASCII strings.
+Which objects get a reference is decided by **reference count** — `w_ref` in
+`Python/marshal.c` returns early when `Py_REFCNT(v) == 1` — so borg's file records which
+strings and small integers the interpreter happened to be sharing at the time. Reproducing
+it byte for byte would mean emulating CPython's refcounting.
+
+borge writes the plain forms instead: no references, no short ASCII. Every version of
+`marshal.load` reads them, and the object loaded from borge's file is **equal** to the
+object loaded from borg's, which is the whole of what a profile reader needs. On the profile
+of a `borg repo-list` run — 499 entries, some seven and a half thousand calls — borge's
+file is about 12% longer (152,433 bytes against borg's 135,963), loads to the same dict,
+and `pstats.Stats` opens it directly.
+
+This is the opposite choice from the debug dumps in [pydump.go](../internal/cli/pydump.go),
+which *are* compared byte for byte, and the difference is what the output is for: a dump
+exists to be `diff`ed against borg's, so textual noise would defeat it; a profile exists to
+be loaded by `pstats`, which never sees the bytes.
+
+Two smaller things the format forces, both tested against borg rather than against what I
+expected Python to do:
+
+- A msgpack array becomes a **tuple**, not a list, because borg unpacks with
+  `use_list=False`. Here that is not a nicety: a profile's keys are
+  `(filename, lineno, funcname)` triples, and a list is unhashable, so lists would make the
+  dict unbuildable rather than merely different.
+- A str that is not valid UTF-8 has to go out as Python would write it. `TYPE_UNICODE` is
+  read back with the `surrogatepass` handler, and borg's unpacker decodes with
+  `surrogateescape`, so the byte `0xff` has to become the three-byte encoding of U+DCFF —
+  which `utf8.EncodeRune` refuses to produce, since it is not a legal scalar value. Writing
+  the raw byte instead makes `marshal.load` raise, which is how the test caught it. It is
+  the same convention pydump.go renders as `\udcXX`; here it goes out as bytes.
+
+What borge refuses, borg refuses too: a file that is not msgpack, and one holding a msgpack
+timestamp — which Python's unpacker turns into a `Timestamp` object that `marshal.dump`
+has no code for. `TestConvertProfileRejectsBadInput` asserts both tools fail on the same
+three inputs, because a script that checks the exit code learns something untrue otherwise.
+
+**Found while closing this: `borge debug --help` was an error.** The three command groups
+build no `FlagSet`, so nothing in them had ever seen an option — the same gap
+`takeParentLogJSON` was written for. borg's groups are argparse parsers and print the
+group's usage; borge answered `unknown debug command "--help"` on stderr and exited 2. It
+surfaced because `command-coverage.sh` now has to ask borge for its subcommand list the way
+it asks borg, and the obvious way to ask was the one spelling that did not work.
 
 ## 15. No tcsh completions
 

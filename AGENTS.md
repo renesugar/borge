@@ -122,6 +122,13 @@ exists because a stage was declared complete against a hand-maintained list of r
 work while five commands were missing. It asks `borg --help` what commands exist. It caught
 a bug in itself on its first run, which is the same failure in miniature.
 
+**Ask it at every level.** That gate compared top-level names only, so `debug` matched
+`debug` and thirteen subcommands were never compared; the option gate did compare them, but
+enumerated them from *borge*, so a subcommand borge lacked was not on the list. Each gate
+was right about what it looked at and `debug convert-profile` fell between them for eight
+stages. When two gates split a comparison, ask which side each enumerates from - a gap that
+belongs to neither is invisible to both.
+
 **Verify a claim before documenting it.** A help topic describing placeholder substitution
 was written from borg's behaviour and was false for borge, which had none. It was caught by
 running the command. `TestHelpPlaceholdersTopicIsTrue` now checks the claim against the

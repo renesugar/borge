@@ -66,6 +66,7 @@ func debugCommands() []command {
 		{"id-hash", "compute the chunk id of a file's contents", cmdDebugIDHash},
 		{"parse-obj", "split an object file into its metadata and its plaintext", cmdDebugParseObj},
 		{"format-obj", "build an object file from metadata and a plaintext", cmdDebugFormatObj},
+		{"convert-profile", "convert a borg profile to a Python pstats profile", cmdDebugConvertProfile},
 	}
 }
 
@@ -73,7 +74,7 @@ func cmdDebug(e *Env, args []string) int {
 	// --log-json may be given to the group as well as to the subcommand; borg
 	// accepts it in both places. See takeParentLogJSON.
 	args = e.takeParentLogJSON("debug", args)
-	if len(args) == 0 {
+	if len(args) == 0 || groupHelpRequested(args[0]) {
 		printDebugUsage(e.Stdout)
 		return ExitOK
 	}
@@ -970,6 +971,50 @@ func objTypeFromJSON(b []byte) (string, error) {
 		return "", fmt.Errorf("%q is not a concrete object type", *doc.Type)
 	}
 	return *doc.Type, nil
+}
+
+// cmdDebugConvertProfile turns a borg profile into a file pstats can open.
+//
+// BORG_DEBUG_PROFILE=<file> makes borg write cProfile's statistics as msgpack rather than
+// as marshal, so that a profile can be sent to somebody without asking them to load a
+// CPython-only format. This is the step back: msgpack in, marshal out, nothing else.
+//
+// It never touches a repository, so it takes no -r, as "debug info" does not. borg's does
+// accept one - every debug subcommand inherits it from the common parser - and ignores it.
+//
+// It is also the one debug command whose input borge does not produce: borge has no
+// profiler that writes borg's format, and Go's pprof is not something pstats can read. It
+// converts borg's files, which is what makes it worth having in a port that replaces borg.
+func cmdDebugConvertProfile(e *Env, args []string) int {
+	fs := newFlagSet(e, "debug convert-profile")
+	if err := fs.Parse(args); err != nil {
+		return ExitError
+	}
+	if fs.NArg() != 2 {
+		e.errorf("debug convert-profile needs a borg profile to read and a file to write")
+		return ExitError
+	}
+	data, err := os.ReadFile(fs.Arg(0))
+	if err != nil {
+		return e.fail(err)
+	}
+	profile, err := msgpackx.Unmarshal(data)
+	if err != nil {
+		return e.fail(fmt.Errorf("%s is not a borg profile: %w", fs.Arg(0), err))
+	}
+
+	out, err := os.Create(fs.Arg(1))
+	if err != nil {
+		return e.fail(err)
+	}
+	if err := pyMarshal(out, profile); err != nil {
+		out.Close()
+		return e.fail(err)
+	}
+	if err := out.Close(); err != nil {
+		return e.fail(err)
+	}
+	return ExitOK
 }
 
 // ---------------------------------------------------------------- helpers

@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -244,5 +245,53 @@ func TestHelpCommandAnswersUsefully(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "patterns") {
 		t.Errorf("the error does not list the topics:\n%s", errOut.String())
+	}
+}
+
+// TestCommandGroupsAnswerHelp: "borge debug --help" has to print the group's usage on
+// stdout and exit 0, as borg's argparse groups do.
+//
+// It answered 'unknown debug command "--help"' on stderr with exit 2 until 2026-08-20, and
+// no gate could see it: option-coverage.sh reads the same invocation with 2>&1 and greps,
+// so the error line above the usage made no difference to it. A gate that captures both
+// streams is not a test of which stream something went to.
+//
+// The subcommand list is checked here too, because command-coverage.sh parses it to compare
+// against borg's - a group whose usage stopped naming its subcommands would leave that
+// comparison empty rather than wrong.
+func TestCommandGroupsAnswerHelp(t *testing.T) {
+	groups := map[string][]command{
+		"debug":     debugCommands(),
+		"key":       keyCommands(),
+		"benchmark": benchmarkCommands(),
+	}
+	for name, subs := range groups {
+		for _, spelling := range []string{"-h", "-help", "--help"} {
+			t.Run(name+" "+spelling, func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				e := &Env{
+					Stdout: &stdout, Stderr: &stderr,
+					Getenv: func(string) (string, bool) { return "", false },
+				}
+				if code := Run(e, []string{name, spelling}); code != ExitOK {
+					t.Fatalf("borge %s %s exited %d\nstderr: %s", name, spelling, code, stderr.String())
+				}
+				if stderr.Len() != 0 {
+					t.Errorf("borge %s %s wrote to stderr: %s", name, spelling, stderr.String())
+				}
+				out := stdout.String()
+				if !strings.Contains(out, "usage: borge "+name) {
+					t.Fatalf("borge %s %s printed no usage:\n%s", name, spelling, out)
+				}
+				if len(subs) == 0 {
+					t.Fatalf("%s has no subcommands, so this check is vacuous", name)
+				}
+				for _, c := range subs {
+					if !strings.Contains(out, c.name) {
+						t.Errorf("borge %s %s does not list %q:\n%s", name, spelling, c.name, out)
+					}
+				}
+			})
+		}
 	}
 }

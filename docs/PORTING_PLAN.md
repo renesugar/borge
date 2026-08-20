@@ -1613,8 +1613,8 @@ Everything needed for feature parity, once correctness is established.
 >
 > Twelve subcommands: `info`, `dump-archive-items`, `dump-archive`, `dump-manifest`,
 > `dump-repo-objs`, `search-repo-objs`, `get-obj`, `put-obj`, `delete-obj`, `id-hash`,
-> `parse-obj`, `format-obj`. borg's thirteenth, `convert-profile`, writes a CPython
-> `marshal` file and is recorded as DIVERGENCES #14 rather than ported.
+> `parse-obj`, `format-obj`. borg's thirteenth, `convert-profile`, followed on
+> **2026-08-20** (`internal/cli/pymarshal.go`), which makes all thirteen present.
 >
 > **These are the port's own debugging tools**, which is why they were worth the effort of
 > matching borg exactly. When `borge list` and `borg list` disagree about an archive, the
@@ -1697,7 +1697,15 @@ Everything needed for feature parity, once correctness is established.
 > and `repo-compress` is thirteen characters against borge's twelve-wide column, so the
 > gate reported a command borge *has* as missing.
 >
-> Current state (2026-08-18): 31 implemented, 5 absent with a recorded reason, 0
+> **It asked only about top-level commands until 2026-08-20**, which is the same failure a
+> third time: `debug`, `key` and `benchmark` carry their real commands one level down, so
+> "debug" matched "debug" and thirteen subcommands went uncompared. `option-coverage.sh` did
+> compare them, but enumerated them from *borge* - so between the two gates, a subcommand
+> borg has and borge lacks was nobody's business. That is how `debug convert-profile` stayed
+> missing through eight stages. The gate now descends into the three groups and asks borg
+> for each list, which took the comparison from 36 commands to 53.
+>
+> Current state (2026-08-20): 53 implemented, 5 absent with a recorded reason, 0
 > unexplained. Of the five, three are non-goals (`mount`, `umount`, `webdav`, §0.6); the
 > other two are `serve` and `transfer`, and `transfer` is **decided as of 2026-08-18**: it
 > is in scope for borg 2 to borg 2. The table below is the whole of what stage 8 still
@@ -1727,7 +1735,7 @@ a table at all.
 | 11 | ~~`--reverse` and `--deleted` decided per command~~ | §11.4c | **done 2026-08-19**, removing both from twelve commands. `--first`, `--last` and `--sort-by` on `prune` are the same leakage and are *not* decided — they change what prune deletes, so they want their own evidence |
 | 12 | ~~`--format` on `check` and `diff`~~ | §11.3 | **done 2026-08-19.** `check` formats with the archive key set and now announces each archive as borg does; `diff` needed the third key set, and matching borg's renderings turned its whole text output into borg's |
 | 13 | ~~Progress output on stderr, where borg puts it~~ | measured 2026-08-19 | **done.** `check`, `compact`, `repo-compress`, `break-lock`, `recreate`, `repo-create` and `extract --list` moved; `analyze`, `repo-space`, `repo-info`, `list` and `info` were already right, because their output *is* the data |
-| 14 | `debug convert-profile` | DIVERGENCES #14 | the only `debug` subcommand not ported |
+| 14 | ~~`debug convert-profile`~~ | DIVERGENCES #14 | **done 2026-08-20.** msgpack in, CPython `marshal` out; compared against borg as loaded objects, since borg's bytes record CPython's refcounts. Neither gate could see it was missing — that is fixed too |
 | 15 | **Stage 8 evidence bundle** | §11 | last, and only once rows 1–14 are closed |
 
 Closed since this section was first written, kept here because how each was *found* is
@@ -1777,7 +1785,16 @@ described as outstanding until this table was built.
   xattrs, and borge archives all of them (DIVERGENCES #39, table row 8b). That rule reads
   exactly the two fields this row was about, so it could not have been found — or fixed —
   before this landed.
-- **`debug convert-profile`** (DIVERGENCES #14), the only `debug` subcommand not ported.
+- ~~**`debug convert-profile`**~~ (DIVERGENCES #14). **Done 2026-08-20**,
+  `internal/cli/pymarshal.go`. The entry recording it as unportable was wrong on both of
+  its reasons — marshal serialises data, not bytecode, and the input is borg's file rather
+  than one borge writes. What it cost was not the command, which is small, but eight stages
+  of not knowing it was missing: `command-coverage.sh` compared top-level names, where
+  `debug` matched, and `option-coverage.sh` enumerated the group subcommands from *borge*,
+  so a subcommand borge lacked was never on the list it compared. The command gate now
+  descends into `debug`, `key` and `benchmark` and asks borg for the list — 53 commands
+  compared where there were 36 — and `borge debug --help`, which had been an error, now
+  prints the group's usage as borg's does.
 - **`transfer`** between two borg 2 repositories — **in scope, decided 2026-08-18.** With
   it, `repo-create --other-repo` and a `BORGE_OTHER_PASSPHRASE` variable, which it cannot
   work without. Design and the accuracy notes behind the decision are in §11.1.
@@ -2817,7 +2834,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands. Fifteen numbered items remain, tabled in §11 under "What stage 8 still owes": `serve` and the remote backends, `transfer` (§11.1), 35 per-command options (§11.2), four JSON schemas and `--log-json` (§11.4b), `bsdflags` and `xattrs` (DIVERGENCES #8), and `debug convert-profile` | not yet bundled, and not to be bundled until that table is empty but for its last row |
+| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands. Fifteen numbered items remain, tabled in §11 under "What stage 8 still owes": `serve` and the remote backends, `transfer` (§11.1), 35 per-command options (§11.2), four JSON schemas and `--log-json` (§11.4b), `bsdflags` and `xattrs` (DIVERGENCES #8), and `debug convert-profile` — of which rows 5-14 are now closed | not yet bundled, and not to be bundled until that table is empty but for its last row |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
@@ -2828,8 +2845,9 @@ not a real defect — the first was `/tmp` filling, the second an edit landing m
 anywhere, and it predates the borg pin drift of §0.1 by 66 minutes.
 
 **What "in progress" means for stage 8.** The command list is gated by
-`tests/evidence/command-coverage.sh`, which reports 31 implemented, 5 absent with a recorded
-reason, 0 unexplained. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
+`tests/evidence/command-coverage.sh`, which reports 53 implemented, 5 absent with a recorded
+reason, 0 unexplained - 53 rather than 31 since 2026-08-20, when it started descending into
+`debug`, `key` and `benchmark` instead of comparing the three group names. Three of the five are §0.6 non-goals (`mount`, `umount`, `webdav`);
 the other two are `serve` and `transfer`. `transfer` was the one open *question* rather than
 open work, and it is now answered: borg 2 to borg 2 is in scope, borg 1.x is not, and §11.1
 holds the design. Of the path and argument defects,
