@@ -1723,7 +1723,7 @@ a table at all.
 | --- | --- | --- | --- |
 | 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | §11 | not started; the largest single item |
 | 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
-| 3 | 26 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. `list` and `diff` reached zero 2026-08-20 (DIVERGENCES #48), `export-tar` and `import-tar` the same day (#49). Largest now: `create` 5, `prune` 4, `recreate` 4, `extract` 3, `repo-create` 3 |
+| 3 | 22 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. On 2026-08-20: `list` and `diff` (DIVERGENCES #48), `export-tar` and `import-tar` (#49), `prune` (#50) all reached zero. Largest now: `create` 5, `recreate` 4 (row 4), `extract` 3, `repo-create` 3 (row 2) |
 | 4 | `recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter` | §11.2 | part of row 3, listed apart because it is one feature over four options and needs the item-stream walk rather than the filesystem one |
 | 5 | ~~JSON API: `repo-info`, `info`, `version`, `analyze` schemas~~ | §11.4b | **done 2026-08-19.** All eight of borg's `--json` commands now match, held by `TestJSONSchemaMatchesBorg` |
 | 6 | ~~`--log-json`~~ | §11.4b | **done 2026-08-19.** Registered on every command through `newFlagSet`, borge's equivalent of borg's common parser. All of stderr becomes JSON, not only the messages borge thought to convert |
@@ -1732,7 +1732,7 @@ a table at all.
 | 8b | ~~Attribute-based exclusion: nodump, and the two backup-exclusion xattrs~~ | DIVERGENCES #39 | **done 2026-08-19**, the same day it was found. Checked before content is read, and an excluded directory ends the walk into its subtree |
 | 9 | ~~Option gate: the reverse direction, and subcommands~~ | §11.4 work 1–2 | **done 2026-08-19.** Both directions, group subcommands included, and the common-option comparison fixed — it had been reporting `-r` and `-h` as absent when borge has both |
 | 10 | ~~Every borge-only option documented as borge-only in its help text~~ | §11.4 work 3 | **done 2026-08-19.** Two markers, because there are two cases: "(borge only)" where borg has no such option anywhere, "(borge only on this command)" where borg has it elsewhere. The gate now fails on an unmarked one |
-| 11 | ~~`--reverse` and `--deleted` decided per command~~ | §11.4c | **done 2026-08-19**, removing both from twelve commands. `--first`, `--last` and `--sort-by` on `prune` are the same leakage and are *not* decided — they change what prune deletes, so they want their own evidence |
+| 11 | ~~`--reverse` and `--deleted` decided per command~~ | §11.4c | **done 2026-08-19**, removing both from twelve commands. `--first`, `--last` and `--sort-by` on `prune` were the same leakage and were **decided 2026-08-20**: removed, with the rest of prune's borg-1 interface (DIVERGENCES #50) |
 | 12 | ~~`--format` on `check` and `diff`~~ | §11.3 | **done 2026-08-19.** `check` formats with the archive key set and now announces each archive as borg does; `diff` needed the third key set, and matching borg's renderings turned its whole text output into borg's |
 | 13 | ~~Progress output on stderr, where borg puts it~~ | measured 2026-08-19 | **done.** `check`, `compact`, `repo-compress`, `break-lock`, `recreate`, `repo-create` and `extract --list` moved; `analyze`, `repo-space`, `repo-info`, `list` and `info` were already right, because their output *is* the data |
 | 14 | ~~`debug convert-profile`~~ | DIVERGENCES #14 | **done 2026-08-20.** msgpack in, CPython `marshal` out; compared against borg as loaded objects, since borg's bytes record CPython's refcounts. Neither gate could see it was missing — that is fixed too |
@@ -2001,13 +2001,16 @@ Confirmed by running them, not by reading help text:
 | --- | --- | --- |
 | `extract -C DIR` | extract into DIR | no equivalent; borg extracts into the working directory |
 | `version --long` | the Go version and platform as well | not present |
-| `prune --keep-within`, `--keep-last`, `--keep-oldest` | retention rules | borg 2 has `--keep KEEP` instead, plus `--keep-13weekly` and `--keep-3monthly` |
+| ~~`prune --keep-within`, `--keep-last`, `--keep-oldest`~~ | retention rules | **Removed 2026-08-20** (DIVERGENCES #50): borg 2's `--keep KEEP` is the first two, and it keeps the oldest automatically |
 | `--reverse` | flip the listing order | **borg has no `--reverse` anywhere** |
 | `delete --force` | act on a selector matching several archives | borg needs no such thing; it never refuses |
 
 None of these is wrong. All of them are undocumented *as extensions*, which is the problem:
-a user reading `borge prune -help` cannot tell that `--keep-within` will not work under
-borg, and a script written against borge will fail on a machine that has the other tool.
+a user reading `borge extract -help` cannot tell that `-C` will not work under borg, and a
+script written against borge will fail on a machine that has the other tool. (The `prune`
+row was the exception to "none of these is wrong": those three were not extensions but borg
+**1**'s interface, and a policy written against them meant something different in the two
+tools. They are gone.)
 **Every borge-only option needs to say so in its help text**, in the same breath as what it
 does.
 

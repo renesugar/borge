@@ -1115,15 +1115,13 @@ the same silence as #31, in the command that removes history: "one archive would
 retention policy that quietly stops matching is a backup that quietly stops being kept.
 `PORTING_PLAN.md` §2.3.
 
-**Where borg has no label, borge keeps its own reason.** `--keep-within`, the `@PROT` tag
-and `--keep-oldest` on its own are not one of borg's counted rules, so there is no
-`daily #1` to print and the reason borge already had is used instead.
-
-**`--keep-oldest` is borge's own option** — borg 2 has no such thing, which is worth
-recording twice over: once because the label above has to cope with it, and once because
-the option gate cannot see it. That gate reports borg options borge lacks and not the
-reverse, so borge may carry others nobody has written down. Recorded in `PORTING_PLAN.md`
-§11.2 as work on the gate.
+*(Updated 2026-08-20.)* This entry used to record `--keep-within`, `--keep-last` and
+`--keep-oldest` as borge's own retention rules, and to explain how the listing label coped
+with them. All three are gone: borg 2's `--keep` covers the first two and it keeps the
+oldest archive automatically. See #50. What remains borge's is the summary line above, and
+`borge prune -v` now also prints borg's own three lines. The paragraph about the option gate
+seeing only one direction is also out of date — it has reported borge's additions since
+2026-08-19, which is how the six stale entries for this command were caught.)*
 
 ## 35. `--json` where borg has none — **fixed 2026-08-18**
 
@@ -1879,3 +1877,93 @@ borge in name order, and borg reports a directory *after* its contents where bor
 it before (#23, whose description of borg's order was wrong until this work corrected it).
 So that test compares sets and says so. `import-tar --list` **is** compared as a sequence —
 its order comes from the tar file, not from a directory walk.
+
+---
+
+## 50. prune's retention policy was borg 1's — **fixed 2026-08-20**
+
+**Stage 8 · `internal/manifest/prune.go`, `internal/cli/prune.go`**
+**· found by reading borg's option list**
+
+`prune` is the command that deletes history, and borge implemented a **different interface
+from a different major version of borg**. borg 1 had `--keep-within` and `--keep-last`;
+borg 2 has neither, and has `--keep`, `--from`, two quarterly rules, and a *value* on every
+rule that may be a count or an interval. borge had borg 1's set plus two of its own.
+
+| what borge had | what borg 2 has |
+|---|---|
+| `--keep-last N` | `--keep N` — every archive its own group, so a count keeps the newest N |
+| `--keep-within 7d` | `--keep 7d` — the same rule with an interval |
+| `--keep-oldest` (opt-in flag) | automatic, for the last rule given |
+| `--keep-daily N` (count only) | `--keep-daily N` **or** `--keep-daily 30d` |
+| — | `--keep`, `--from`, `--keep-13weekly`, `--keep-3monthly` |
+| `--first`, `--last`, `--sort-by` | none of them |
+
+### The one that mattered
+
+**borge deleted the oldest archive where borg keeps it.** borg's last active rule also
+keeps the oldest archive if that rule still has room — `keep_oldest=(rule ==
+active_rules[-1][0])` — so a policy whose coarsest rule is satisfied by recent archives
+still keeps the start of the history. borge made that an opt-in flag, so the default
+behaviour of the two tools differed on *which archives survive*:
+
+```
+--keep-yearly 4, on archives spanning three years
+borg   … Keeping archive (rule: yearly[oldest] #4):   a-2024-01-01
+borge  … Would prune:                                 a-2024-01-01
+```
+
+"If that rule still has room" is the part that is easy to get wrong: with a *count*, the
+room is gone as soon as the rule has kept that many groups, so `--keep-daily 3` over five
+days keeps three archives and not four. The oldest is kept only when there were fewer
+groups than the count allowed.
+
+Two more places where "which rule is last" is decided by something invisible:
+
+- **A rule given as zero is still a rule.** `--keep-daily 3 --keep-yearly 0` makes *yearly*
+  the last active rule; it keeps nothing, so nothing keeps the oldest archive either. A Go
+  `int` holding 0 cannot tell "given 0" from "not given", which is why the option type
+  tracks whether it was set.
+- **`--from` is not a rule.** Archives at or after its timestamp are held back before any
+  rule runs, so they cannot occupy a retention period that an older archive would otherwise
+  have filled. They appear in the listing under the rule name `skip`.
+
+### The options that went
+
+`--keep-last`, `--keep-within` and `--keep-oldest` are removed rather than kept as aliases:
+each is a spelling of something borg 2 already has, and three ways to write one policy is
+how a retention rule gets misread. `--first`, `--last` and `--sort-by` are removed too,
+which closes the question left open on 2026-08-19 (`PORTING_PLAN` table row 11): borg has
+none of the three on `prune`, and each changes what prune *deletes* rather than what it
+shows — `--first`/`--last` hide archives from the rules, and `--sort-by` reorders the walk
+the rules are defined against.
+
+### Smaller things measured on the way
+
+- **Protected archives are not considered at all.** borg drops `@PROT` archives before
+  anything happens, so they are absent from the listing and from the JSON, and are not
+  counted in "Applying rules to the matching N archives". borge reported
+  `Keeping archive (rule: protected by @PROT)`, which is friendlier and is not what a
+  frontend reading borg's output gets.
+- **`--keep-13weekly` and `--keep-3monthly` are mutually exclusive** — two answers to "what
+  is a quarter", and borg's parser refuses both at once.
+- **"all" is in both halves of the validation.** borg rejects a policy where a finer rule
+  reaches at least as far as a coarser one, checking counts and intervals separately —
+  and `-1` is *both* a count and an infinity, so `--keep-daily all --keep-monthly 5` is
+  rejected while `--keep-daily 30 --keep-monthly all` is accepted. Putting `-1` in one
+  group only let the first of those through.
+- **The error messages name rules, not options.** borg builds them from a dict keyed by
+  `rule.key`, so `--keep-13weekly` appears as `quarterly_13weekly`, and an interval appears
+  as Python's `str(timedelta)`: `7 days, 0:00:00`. Both are reproduced, because the messages
+  are compared against borg's.
+- **`prune -v` now prints borg's three lines** ("Repository contains N archives." and the
+  two after it). They are `logger.info` in borg, so a plain run still shows nothing from
+  borg and borge's own summary line from borge (#34).
+
+### What the tests compare
+
+A timeline of fourteen archives at fixed offsets from now — deliberately not round, so an
+archive cannot land on either side of `--keep 7d` depending on which second each tool
+started — run through twenty-seven policies, comparing the decision lines. Plus the JSON
+form, `--from`, the protected case, and every refusal. The matrix is guarded against
+vacuity by requiring `--keep all` and `--keep 1` to disagree.

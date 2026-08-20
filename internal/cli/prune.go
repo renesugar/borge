@@ -11,7 +11,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/manifest"
@@ -28,28 +27,32 @@ func cmdPrune(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	common.registerJSON(fs, "print the decisions as JSON; unlike the text form it lists every archive without --list")
-	// borg's prune has no archive-filter group, so --first, --last and --sort-by are
-	// borge's here and say so. They are also the ones that most deserve care: each
-	// changes which archives prune considers, and --sort-by changes the order the keep
-	// rules walk, so all three can change what is deleted.
-	sel.register(fs, selectorExtras{rangeIsBorgeOnly: true})
+	// No --first, --last or --sort-by here: borg has none of the three on prune, and each
+	// changes what prune deletes rather than what it shows. See selectorExtras.omitRange.
+	sel.register(fs, selectorExtras{omitRange: true})
 
-	counts := map[manifest.RuleKind]*int{}
-	for _, kind := range []manifest.RuleKind{
-		manifest.RuleLast, manifest.RuleSecondly, manifest.RuleMinutely, manifest.RuleHourly,
-		manifest.RuleDaily, manifest.RuleWeekly, manifest.RuleMonthly, manifest.RuleYearly,
-	} {
-		help := fmt.Sprintf("keep one archive from each of the last N %s periods (-1 for all)", kind)
-		if kind == manifest.RuleLast {
-			// borg has every other keep-* rule and not this one: "keep the newest N
-			// archives, whenever they were made".
-			help = "keep the newest N archives regardless of when they were made (borge only)"
+	// Every --keep-* option borg has, in borg's order, each taking a count or an interval.
+	//
+	// borge used to offer borg 1's shape instead: --keep-last, --keep-within and
+	// --keep-oldest, none of which borg 2 has. All three are now spellings of borg's
+	// --keep - "--keep N" is --keep-last, "--keep 7d" is --keep-within - and keeping the
+	// oldest archive is no longer a flag at all, because borg does it automatically for
+	// the last rule given. See DIVERGENCES.md #50.
+	keeps := map[manifest.RuleKind]*keepFlag{}
+	for _, spec := range keepSpellings {
+		flag := &keepFlag{}
+		keeps[spec.rule] = flag
+		help := fmt.Sprintf("number or time interval of %s to keep", spec.noun)
+		fs.Var(flag, spec.long, help)
+		if spec.short != "" {
+			fs.Var(flag, spec.short, help)
 		}
-		counts[kind] = fs.Int("keep-"+string(kind), 0, help)
 	}
-	within := fs.String("keep-within", "", "keep every archive newer than this, e.g. 48h or 7d (borge only)")
-	keepOldest := fs.Bool("keep-oldest", false, "always keep the oldest archive (borge only)")
+	var from timestampFlag
+	fs.Var(&from, "from", "only consider archives older than this for pruning")
+
 	dryRun := fs.Bool("dry-run", false, "say what would be pruned, prune nothing")
+	fs.BoolVar(dryRun, "n", false, "say what would be pruned, prune nothing")
 	list := fs.Bool("list", false, "print every archive and the rule that kept it")
 	listKept := fs.Bool("list-kept", false, "print only the archives that are kept")
 	listPruned := fs.Bool("list-pruned", false, "print only the archives that are pruned")
@@ -59,27 +62,36 @@ func cmdPrune(e *Env, args []string) int {
 		return ExitError
 	}
 
-	policy := manifest.PrunePolicy{Counts: map[manifest.RuleKind]int{}, KeepOldest: *keepOldest}
-	for kind, n := range counts {
-		if *n != 0 {
-			policy.Counts[kind] = *n
+	policy := manifest.PrunePolicy{Keep: map[manifest.RuleKind]manifest.KeepValue{}, From: from.value()}
+	for _, spec := range keepSpellings {
+		if f := keeps[spec.rule]; f.set {
+			policy.Keep[spec.rule] = f.value
 		}
-	}
-	if *within != "" {
-		d, err := parseKeepWithin(*within)
-		if err != nil {
-			return e.fail(err)
-		}
-		policy.Within = d
 	}
 
-	// An empty policy would delete every archive in the repository. That is almost never
-	// what somebody meant to type, and it is not recoverable once a compaction runs, so it
-	// is refused rather than confirmed.
+	// borg's two checks, in borg's words. They are separate because they are different
+	// mistakes: giving no rule at all, and giving rules that all keep nothing. Either one
+	// applied to a repository deletes every archive in it.
 	if policy.Empty() {
-		e.errorf("prune needs at least one --keep-* rule; " +
-			"with none, every archive would be pruned")
+		e.errorf("At least one of the %s settings must be specified.", keepOptionNames())
 		return ExitError
+	}
+	if policy.AllZero() {
+		e.errorf("None of the %s settings have a positive value. At least one must be non-zero.",
+			keepOptionNames())
+		return ExitError
+	}
+	// The two quarterly rules are a mutually exclusive group in borg's parser, and the
+	// reason is in their names: they are two answers to "what is a quarter", 13 ISO weeks
+	// or 3 calendar months. Giving both would keep two overlapping sets of quarters.
+	_, has13 := policy.Keep[manifest.RuleQuarterly13Weekly]
+	_, has3m := policy.Keep[manifest.RuleQuarterly3Monthly]
+	if has13 && has3m {
+		e.errorf("argument --keep-3monthly: not allowed with argument --keep-13weekly")
+		return ExitError
+	}
+	if err := validateKeepCombination(policy); err != nil {
+		return e.fail(err)
 	}
 
 	path, err := e.resolveRepo(common.repo)
@@ -139,6 +151,26 @@ func cmdPrune(e *Env, args []string) int {
 	}
 
 	decisions := manifest.Prune(infos, policy)
+
+	// borg's three lines, at its level: they are logger.info, so "-v" shows them and a
+	// plain run shows nothing. The counts are of the archives actually considered, which
+	// excludes the protected ones - manifest.Prune drops those, as borg does.
+	if common.verbose && !common.json {
+		keptCount := 0
+		for _, d := range decisions {
+			if d.Keep {
+				keptCount++
+			}
+		}
+		count, err := o.manifest.Archives.Count()
+		if err != nil {
+			return e.fail(err)
+		}
+		fmt.Fprintf(e.Stderr, "Repository contains %d archives.\n", count)
+		fmt.Fprintf(e.Stderr, "Applying rules to the matching %d archives...\n", len(decisions))
+		fmt.Fprintf(e.Stderr, "Keeping %d archives, pruning %d archives.\n",
+			keptCount, len(decisions)-keptCount)
+	}
 
 	total := 0
 	for _, d := range decisions {
@@ -247,40 +279,68 @@ func cmdPrune(e *Env, args []string) int {
 	return ExitOK
 }
 
-// parseKeepWithin reads a --keep-within duration.
+// validateKeepCombination is borg's lo/hi mismatch check.
 //
-// Go's ParseDuration knows hours but not days, weeks, months or years, which are the units
-// a retention policy is actually written in. The extra suffixes are borg's.
-func parseKeepWithin(s string) (time.Duration, error) {
-	if s == "" {
-		return 0, nil
+// Two settings of the same *kind* where the finer rule reaches at least as far back as the
+// coarser one make the coarser one useless: every archive it could keep has already been
+// kept. borg refuses that rather than silently doing nothing with an option somebody typed
+// on purpose, and it checks the two kinds separately because they are not comparable -
+// "--keep-daily 30" and "--keep-monthly 7d" limit different things.
+//
+// "all" (-1) counts as infinite: it is bigger than every interval, and a finer rule set to
+// it makes every coarser rule useless.
+func validateKeepCombination(policy manifest.PrunePolicy) error {
+	active := policy.Active()
+
+	// The names are the RULE names, not the option names: borg builds its message from a
+	// dict keyed by rule.key, so "--keep-13weekly" appears there as "quarterly_13weekly".
+	mismatch := func(lo manifest.RuleKind, loV manifest.KeepValue, hi manifest.RuleKind, hiV manifest.KeepValue) error {
+		return fmt.Errorf("The combination of \"%s='%s'\" and \"%s='%s'\" is invalid. It is "+
+			"effectively useless since every archive matched by %s would have already been "+
+			"matched by %s.", lo, loV, hi, hiV, hi, lo)
 	}
-	unit := s[len(s)-1]
-	var mult time.Duration
-	switch unit {
-	case 'd':
-		mult = 24 * time.Hour
-	case 'w':
-		mult = 7 * 24 * time.Hour
-	case 'm':
-		// A calendar month is not a fixed length; borg uses 31 days here so that
-		// "--keep-within 1m" never expires an archive early.
-		mult = 31 * 24 * time.Hour
-	case 'y':
-		mult = 365 * 24 * time.Hour
-	default:
-		d, err := time.ParseDuration(s)
-		if err != nil {
-			return 0, fmt.Errorf("--keep-within %q: use a Go duration (48h) or a count with "+
-				"d, w, m or y (7d, 2w, 6m, 1y)", s)
+
+	// "all" is in BOTH groups, which is not tidiness but borg's behaviour: its filters are
+	// "isinstance(val, timedelta) or val == -1" and "isinstance(val, int)", and -1 is an
+	// int. So "--keep-daily all --keep-monthly 5" is rejected through the count group,
+	// while "--keep-daily 30 --keep-monthly all" is accepted - infinity is bigger than
+	// any count, so the coarser rule still has work to do. Putting -1 in one group only
+	// let the first of those through.
+	var intervals []manifest.RuleKind
+	var counts []manifest.RuleKind
+	for _, kind := range active {
+		v := policy.Keep[kind]
+		if v.IsInterval() || v.IsAll() {
+			intervals = append(intervals, kind)
 		}
-		return d, nil
+		if !v.IsInterval() {
+			counts = append(counts, kind)
+		}
 	}
-	var n int
-	if _, err := fmt.Sscanf(s[:len(s)-1], "%d", &n); err != nil || n < 0 {
-		return 0, fmt.Errorf("--keep-within %q: %q is not a count", s, s[:len(s)-1])
+
+	for i := 0; i < len(intervals); i++ {
+		for j := i + 1; j < len(intervals); j++ {
+			lo, hi := intervals[i], intervals[j]
+			loV, hiV := policy.Keep[lo], policy.Keep[hi]
+			if hiV.IsAll() {
+				// Infinity is always bigger, so the coarser rule still has work to do.
+				continue
+			}
+			if loV.IsAll() || loV.Interval() >= hiV.Interval() {
+				return mismatch(lo, loV, hi, hiV)
+			}
+		}
 	}
-	return time.Duration(n) * mult, nil
+	for i := 0; i < len(counts); i++ {
+		for j := i + 1; j < len(counts); j++ {
+			lo, hi := counts[i], counts[j]
+			loV, hiV := policy.Keep[lo], policy.Keep[hi]
+			if loV.IsAll() {
+				return mismatch(lo, loV, hi, hiV)
+			}
+		}
+	}
+	return nil
 }
 
 // keepRuleLabel is borg's description of why an archive survived: the rule's name, a

@@ -30,9 +30,10 @@ import (
 // coincide; the distinction is kept because the port's rule is to match borg's arithmetic
 // rather than to match it where it currently shows.
 //
-// Note this is *not* borg's interval() - the one behind "prune --keep-within" - which
-// approximates a month as 31 days and a year as 365. Same-looking strings, different
-// meanings, and conflating them would quietly shift retention boundaries.
+// Note this is *not* borg's interval() - the one behind prune's --keep-* values, ported in
+// internal/cli/interval.go - which approximates a month as 31 days and a year as 365.
+// Same-looking strings, different meanings, and conflating them would quietly shift
+// retention boundaries.
 type Timespan struct {
 	n    int
 	unit byte

@@ -534,11 +534,20 @@ var matchArchivesExamples = map[string]exampleCheck{
 			if !strings.Contains(stderr, "pruned") {
 				t.Errorf("prune said nothing about what it pruned:\n%s", stderr)
 			}
-			// Every archive in the fixture was made on this host, in the same second,
-			// so one daily period holds all of them and --keep-daily 7 keeps one.
+			// Every archive in the fixture was made on this host, in the same second, so
+			// one daily period holds all of them: the daily rule keeps the newest of that
+			// period, and - since it is the only rule given and its quota of 7 is nowhere
+			// near spent - it also keeps the OLDEST archive, which is borg's behaviour for
+			// the last active rule (DIVERGENCES.md #50). Two survive, not one.
+			//
+			// Verified against borg on three archives sharing a timestamp:
+			//   Keeping archive (rule: daily #1):            two
+			//   Would prune:                                 three
+			//   Keeping archive (rule: daily[oldest] #2):    one
 			names := f.archiveNames()
-			if len(names) != 1 {
-				t.Errorf("expected one archive to survive --keep-daily 7, got %v", names)
+			if len(names) != 2 {
+				t.Errorf("expected two archives to survive --keep-daily 7 - the newest of "+
+					"the day and the oldest of all - got %v", names)
 			}
 		},
 	},

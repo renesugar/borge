@@ -83,7 +83,9 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # check and diff; down to 30 on 2026-08-20, when list and diff both reached zero - the two
 # --sort-by options, list's --depth and diff's --same-chunker-params; down to 26 the same
 # day, when export-tar and import-tar reached zero - --tar-filter on both and --filter on
-# import-tar and create.
+# import-tar and create; down to 22 when prune reached zero - --keep, --from and the two
+# quarterly rules - which also took the alias gap from 17 to 11, prune having six short
+# spellings borge did not have.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -103,7 +105,7 @@ declare -A budget=(
     [info]=0
     [key]=0
     [list]=0
-    [prune]=4
+    [prune]=0
     [recreate]=4
     [rename]=0
     [repo-compress]=0
@@ -152,15 +154,12 @@ declare -A budget=(
 #
 # The reasons, by group rather than by line:
 #
-#   deleted, reverse, first, last, sort-by
+#   deleted, reverse
 #       Shared-group leakage. borge registers its archive-filter group whole, where borg's
 #       define_archive_filters_group takes a "deleted" parameter and enables it per
 #       command. Deciding these per command is PORTING_PLAN section 11.4c; until then they
-#       reach commands borg does not put them on.
-#   prune keep-within, keep-last, keep-oldest
-#       borge's own retention rules. keep-within is borg 1.x's spelling, kept because a
-#       policy written for borg 1 is a policy people still have; keep-oldest is borge's
-#       and is recorded in DIVERGENCES.md #34.
+#       reach commands borg does not put them on. (first, last and sort-by were the same
+#       leakage and are gone from prune, which is where they could change what is deleted.)
 #   analyze hotspots
 #       How many busy directories to report. borg's analyze computes the same thing and
 #       fixes the count.
@@ -182,19 +181,18 @@ declare -A borge_only=(
     [extract]="C"
     [find]="deleted reverse short"
     [info]="deleted reverse"
-    [prune]="first keep-last keep-oldest keep-within last sort-by"
     [repo-compress]="dry-run"
     [repo-list]="reverse"
     [version]="long"
 )
 
-# Still leaking, and not in the decision above: prune's --first, --last and --sort-by.
-# borg's prune takes no archive-filter group at all, so these three are borge's on that
-# command - and unlike --reverse they were left in place rather than removed, because the
-# question they raise is bigger than tidiness. All three change which archives prune
-# *considers*, and therefore which it deletes; --sort-by changes the order the keep rules
-# walk, which changes the decisions themselves. That deserves deciding on its own evidence
-# rather than being swept along with row 11. Recorded in PORTING_PLAN table row 11.
+# prune's --first, --last and --sort-by were the last of that leakage and were decided on
+# 2026-08-20: removed. All three change which archives prune *considers*, and therefore
+# which it deletes; --sort-by changes the order the keep rules walk, which changes the
+# decisions themselves. borg has none of them there, and what they were reachable for -
+# "the newest N", "everything since X" - is what borg's --keep and --from are. borge's own
+# --keep-last, --keep-within and --keep-oldest went the same day and for the same reason:
+# all three are spellings of things borg 2 already has. See DIVERGENCES.md #50.
 
 # borg_options prints one *option* per line for a command - not one name per line. An
 # option is a group of spellings: "-n, --dry-run" is one option with two names, and

@@ -213,6 +213,9 @@ THE PROTECTED TAG
 An archive tagged @PROT is never pruned and never counts against a retention rule's
 quota. Tag one with "borge tag --add @PROT ARCHIVE".
 
+It does not appear in prune's listing either: it is set aside before the rules run, so
+"--list" shows only the archives the policy actually decided about.
+
 EXAMPLES
 
   borge repo-list -a 'sh:daily-*' --last 7

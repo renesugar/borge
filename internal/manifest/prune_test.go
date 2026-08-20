@@ -20,6 +20,15 @@ func at(id int, t time.Time, tags ...string) Info {
 	}
 }
 
+// policyOf builds a policy from alternating rule/value pairs, in the order given.
+func policyOf(now time.Time, pairs ...any) PrunePolicy {
+	p := PrunePolicy{Keep: map[RuleKind]KeepValue{}, Now: now}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		p.Keep[pairs[i].(RuleKind)] = pairs[i+1].(KeepValue)
+	}
+	return p
+}
+
 // keptNames returns the names of the kept archives, newest first.
 func keptNames(decisions []PruneDecision) []string {
 	var out []string
@@ -56,14 +65,17 @@ func TestPruneDailyKeepsOnePerDay(t *testing.T) {
 		}
 	}
 
-	decisions := Prune(archives, PrunePolicy{Counts: map[RuleKind]int{RuleDaily: 3}, Now: base})
+	decisions := Prune(archives, policyOf(base, RuleDaily, KeepCount(3)))
 	kept := keptNames(decisions)
+	// Three, and not four: the daily rule is also the last rule, so it would keep the
+	// oldest archive as well - but only if it still had room, and a count of three against
+	// five days' worth of groups is spent by the third.
 	if len(kept) != 3 {
 		t.Fatalf("kept %d archives (%v), want 3 - one per day", len(kept), kept)
 	}
-	// And each kept archive is the *newest* of its day: hour 2, not hour 0.
+	// And each archive kept by the rule itself is the *newest* of its day: hour 2, not 0.
 	for _, d := range decisions {
-		if d.Keep && d.Info.Time.Hour() != 14 {
+		if d.Keep && !d.Oldest && d.Info.Time.Hour() != 14 {
 			t.Errorf("%s kept from hour %d; the newest of each day is the one to keep",
 				d.Info.Name, d.Info.Time.Hour())
 		}
@@ -86,10 +98,7 @@ func TestPruneRulesDoNotShareQuota(t *testing.T) {
 		archives = append(archives, at(id, base.AddDate(0, 0, -day)))
 	}
 
-	decisions := Prune(archives, PrunePolicy{
-		Counts: map[RuleKind]int{RuleDaily: 7, RuleMonthly: 6},
-		Now:    base,
-	})
+	decisions := Prune(archives, policyOf(base, RuleDaily, KeepCount(7), RuleMonthly, KeepCount(6)))
 	kept := keptNames(decisions)
 
 	// Seven daily, plus monthly archives for the months the daily rule did not already
@@ -115,23 +124,21 @@ func TestPruneRulesDoNotShareQuota(t *testing.T) {
 	}
 }
 
-// TestPruneWithin keeps everything newer than the duration, whatever the counts say.
-func TestPruneWithin(t *testing.T) {
+// TestPruneKeepInterval: "--keep 48h" keeps everything newer than the interval, which is
+// what borg 1's --keep-within meant. Every archive is its own group under RuleKeep, so the
+// interval is the only thing limiting it.
+func TestPruneKeepInterval(t *testing.T) {
 	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
 	var archives []Info
 	for i := 0; i < 20; i++ {
 		archives = append(archives, at(i+1, base.Add(-time.Duration(i)*6*time.Hour)))
 	}
 
-	decisions := Prune(archives, PrunePolicy{
-		Within: 48 * time.Hour,
-		Counts: map[RuleKind]int{RuleDaily: 1},
-		Now:    base,
-	})
+	decisions := Prune(archives, policyOf(base, RuleKeep, KeepInterval(48*time.Hour)))
 	for _, d := range decisions {
 		age := base.Sub(d.Info.Time)
 		if age <= 48*time.Hour && !d.Keep {
-			t.Errorf("%s is %v old and was pruned despite --keep-within 48h", d.Info.Name, age)
+			t.Errorf("%s is %v old and was pruned despite --keep 48h", d.Info.Name, age)
 		}
 	}
 	kept := keptNames(decisions)
@@ -153,25 +160,27 @@ func TestPruneNeverTouchesProtected(t *testing.T) {
 		archives = append(archives, at(i+1, base.AddDate(0, 0, -i), tags...))
 	}
 
-	decisions := Prune(archives, PrunePolicy{Counts: map[RuleKind]int{RuleDaily: 2}, Now: base})
-	var protectedKept bool
+	decisions := Prune(archives, policyOf(base, RuleDaily, KeepCount(2)))
+
+	// borg removes protected archives before anything else happens, so they appear in no
+	// decision at all: not kept with a reason, not pruned, not counted. borge used to
+	// report them as "Keeping archive (rule: protected by @PROT)", which is friendlier and
+	// is not what a frontend reading borg's output sees.
 	for _, d := range decisions {
 		for _, tag := range d.Info.Tags {
 			if tag == ProtectedTag {
-				protectedKept = d.Keep
-				if !strings.Contains(d.Reason, ProtectedTag) {
-					t.Errorf("the protected archive was kept for the wrong reason: %q", d.Reason)
-				}
+				t.Errorf("the protected archive appears in the decisions as %+v; borg does "+
+					"not consider it at all", d)
 			}
 		}
 	}
-	if !protectedKept {
-		t.Error("a protected archive was pruned")
+	if len(decisions) != 9 {
+		t.Errorf("%d decisions for ten archives one of which is protected, want 9", len(decisions))
 	}
 	// And it did not consume the daily rule's quota.
 	var daily int
 	for _, d := range decisions {
-		if strings.HasPrefix(d.Reason, "daily") {
+		if d.Rule == RuleDaily && !d.Oldest {
 			daily++
 		}
 	}
@@ -195,26 +204,29 @@ func TestPruneWeeklyUsesISOWeeks(t *testing.T) {
 	}
 
 	archives := []Info{at(1, jan1), at(2, dec31)}
-	decisions := Prune(archives, PrunePolicy{Counts: map[RuleKind]int{RuleWeekly: 1}, Now: jan1})
+	decisions := Prune(archives, policyOf(jan1, RuleWeekly, KeepCount(1)))
+	// One by the rule; the other is the oldest, which the last rule keeps if it can - and
+	// with a quota of one already spent it cannot, so exactly one survives.
 	if len(keptNames(decisions)) != 1 {
 		t.Errorf("--keep-weekly=1 kept %v across a year boundary, want one", keptNames(decisions))
 	}
 }
 
-// TestPruneKeepLast is the count-based rule, which is the one that does mean "the last N
-// archives".
-func TestPruneKeepLast(t *testing.T) {
+// TestPruneKeepCount is borg's --keep N, the rule that does mean "the last N archives" -
+// borg 1 spelled it --keep-last.
+func TestPruneKeepCount(t *testing.T) {
 	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
 	var archives []Info
 	for i := 0; i < 10; i++ {
 		archives = append(archives, at(i+1, base.Add(-time.Duration(i)*time.Minute)))
 	}
-	decisions := Prune(archives, PrunePolicy{Counts: map[RuleKind]int{RuleLast: 3}, Now: base})
+	decisions := Prune(archives, policyOf(base, RuleKeep, KeepCount(3)))
 	kept := keptNames(decisions)
 	if len(kept) != 3 {
-		t.Fatalf("--keep-last=3 kept %d archives (%v)", len(kept), kept)
+		t.Fatalf("--keep 3 kept %d archives (%v)", len(kept), kept)
 	}
-	// The three newest, and in newest-first order.
+	// The three newest, and in newest-first order. The oldest is not added: the quota is
+	// spent.
 	if kept[0] != "a001" || kept[1] != "a002" || kept[2] != "a003" {
 		t.Errorf("kept %v, want the three newest", kept)
 	}
@@ -226,7 +238,7 @@ func TestPruneEmptyPolicyKeepsNothing(t *testing.T) {
 	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
 	archives := []Info{at(1, base), at(2, base.AddDate(0, 0, -1))}
 
-	policy := PrunePolicy{Counts: map[RuleKind]int{}}
+	policy := PrunePolicy{Keep: map[RuleKind]KeepValue{}}
 	if !policy.Empty() {
 		t.Fatal("a policy with no rules does not report itself empty")
 	}
@@ -236,30 +248,120 @@ func TestPruneEmptyPolicyKeepsNothing(t *testing.T) {
 	}
 }
 
+// TestPruneKeepOldest: the last rule given keeps the oldest archive, if it has room.
+//
+// It is not an option in borg 2 and was one in borge (--keep-oldest), which meant borge
+// DELETED the start of the history where borg keeps it. Three properties, because the rule
+// is easy to implement in a way that passes one of them and fails the others.
 func TestPruneKeepOldest(t *testing.T) {
 	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
 	var archives []Info
 	for i := 0; i < 10; i++ {
 		archives = append(archives, at(i+1, base.AddDate(0, 0, -i)))
 	}
-	decisions := Prune(archives, PrunePolicy{
-		Counts:     map[RuleKind]int{RuleDaily: 2},
-		KeepOldest: true,
-		Now:        base,
-	})
+
+	// Ten daily archives fall into one yearly group, so "--keep-yearly 4" keeps one and
+	// has room to spare: the oldest is kept too, and marked.
+	decisions := Prune(archives, policyOf(base, RuleYearly, KeepCount(4)))
 	last := decisions[len(decisions)-1]
-	if !last.Keep || last.Reason != "oldest" {
-		t.Errorf("the oldest archive was not kept: %+v", last)
+	if !last.Keep || !last.Oldest {
+		t.Errorf("the oldest archive was not kept by the last rule: %+v", last)
+	}
+	if last.Rule != RuleYearly {
+		t.Errorf("the oldest archive is attributed to %q, want the last rule", last.Rule)
+	}
+
+	// With the quota exactly spent it is not kept: can_retain is false, and borg lets the
+	// start of the history go rather than exceed the count it was given. That is why the
+	// count has to be checked against the number of *groups*, not against the archives.
+	decisions = Prune(archives, policyOf(base, RuleYearly, KeepCount(1)))
+	last = decisions[len(decisions)-1]
+	if last.Keep {
+		t.Errorf("the oldest archive was kept although the rule's quota was spent: %+v", last)
+	}
+
+	// Only the LAST rule does it. With daily and yearly both given, the oldest belongs to
+	// yearly - and never to daily.
+	decisions = Prune(archives, policyOf(base, RuleDaily, KeepCount(2), RuleYearly, KeepCount(4)))
+	oldestSeen := false
+	for _, d := range decisions {
+		if !d.Oldest {
+			continue
+		}
+		oldestSeen = true
+		if d.Rule != RuleYearly {
+			t.Errorf("the oldest archive was kept by %q; only the last rule does that", d.Rule)
+		}
+	}
+	if !oldestSeen {
+		t.Error("no archive was kept as the oldest, though the last rule had room")
+	}
+}
+
+// TestPruneZeroRuleIsStillTheLastRule: a rule given as zero keeps nothing AND takes the
+// keep-oldest job with it, because borg picks the last rule that was *given*.
+func TestPruneZeroRuleIsStillTheLastRule(t *testing.T) {
+	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
+	var archives []Info
+	for i := 0; i < 10; i++ {
+		archives = append(archives, at(i+1, base.AddDate(0, 0, -i)))
+	}
+	decisions := Prune(archives, policyOf(base, RuleDaily, KeepCount(4), RuleYearly, KeepCount(0)))
+	for _, d := range decisions {
+		if d.Oldest {
+			t.Errorf("%s was kept as the oldest; the last rule given was yearly=0, which "+
+				"keeps nothing at all", d.Info.Name)
+		}
+	}
+	if n := len(keptNames(decisions)); n != 4 {
+		t.Errorf("kept %d archives, want the four daily ones and no oldest", n)
+	}
+}
+
+// TestPruneFrom: --from holds back everything at or after it, and those archives do not
+// occupy a retention period.
+func TestPruneFrom(t *testing.T) {
+	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
+	var archives []Info
+	for i := 0; i < 10; i++ {
+		archives = append(archives, at(i+1, base.AddDate(0, 0, -i)))
+	}
+	from := base.AddDate(0, 0, -2) // the newest three are held back
+
+	policy := policyOf(base, RuleDaily, KeepCount(2))
+	policy.From = from
+	decisions := Prune(archives, policy)
+
+	var held, daily int
+	for _, d := range decisions {
+		switch {
+		case d.Rule == RuleFrom:
+			held++
+			if !d.Keep {
+				t.Errorf("%s is newer than --from and was pruned", d.Info.Name)
+			}
+		case d.Rule == RuleDaily:
+			daily++
+		}
+	}
+	if held != 3 {
+		t.Errorf("%d archives held back by --from, want 3", held)
+	}
+	// The daily rule still keeps two of its own, from the archives --from left it.
+	if daily != 2 {
+		t.Errorf("%d archives kept by the daily rule, want 2 - the held-back ones must not "+
+			"occupy its periods", daily)
 	}
 }
 
 func TestDescribePolicy(t *testing.T) {
-	p := PrunePolicy{
-		Within: 48 * time.Hour,
-		Counts: map[RuleKind]int{RuleDaily: 7, RuleMonthly: -1},
-	}
+	p := PrunePolicy{Keep: map[RuleKind]KeepValue{
+		RuleKeep:    KeepInterval(48 * time.Hour),
+		RuleDaily:   KeepCount(7),
+		RuleMonthly: KeepCount(-1),
+	}}
 	got := DescribePolicy(p)
-	for _, want := range []string{"within 48h", "daily=7", "monthly=all"} {
+	for _, want := range []string{"keep=48h", "daily=7", "monthly=all"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("DescribePolicy is %q, missing %q", got, want)
 		}

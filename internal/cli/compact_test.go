@@ -341,9 +341,7 @@ func TestPruneMatchesBorg(t *testing.T) {
 		{"daily=7 monthly=3", []string{"--keep-daily=7", "--keep-monthly=3"},
 			[]string{"-keep-daily", "7", "-keep-monthly", "3"}},
 		{"weekly=4", []string{"--keep-weekly=4"}, []string{"-keep-weekly", "4"}},
-		// borg spells this one "--keep"; borge spells it "--keep-last", because "keep"
-		// alone reads like the whole policy rather than one rule of it.
-		{"last=5", []string{"--keep=5"}, []string{"-keep-last", "5"}},
+		{"keep=5", []string{"--keep=5"}, []string{"-keep", "5"}},
 		{"hourly=4 daily=2", []string{"--keep-hourly=4", "--keep-daily=2"},
 			[]string{"-keep-hourly", "4", "-keep-daily", "2"}},
 	}

@@ -105,10 +105,17 @@ func (t *timespanFlag) Set(v string) error {
 type selectorExtras struct {
 	deleted bool
 	reverse bool
-	// rangeIsBorgeOnly marks --first, --last and --sort-by as borge's on this command.
-	// borg's prune takes no archive-filter group at all, so there they are borge's; on
-	// info, find and the rest they are borg's own and must not be marked.
-	rangeIsBorgeOnly bool
+	// omitRange leaves out --first, --last and --sort-by entirely.
+	//
+	// Set only on prune, and it is the answer to a question left open on 2026-08-19: borg
+	// has none of the three there, and each one changes what prune *deletes* rather than
+	// what it shows. --first and --last hide archives from the rules, so a rule keeps one
+	// archive from a period it can no longer see; --sort-by changes the order the rules
+	// walk, and the rules are defined newest-first. An option that quietly alters a
+	// retention decision is worse than no option, and the uses they were reachable for -
+	// "the newest N", "everything in the last week" - are what borg's --keep and --from
+	// are for. See DIVERGENCES.md #50.
+	omitRange bool
 }
 
 // register adds the archive-filter group. The two options borg does not give every command
@@ -116,14 +123,12 @@ type selectorExtras struct {
 func (s *listSelectors) register(fs *flagSet, extras selectorExtras) {
 	fs.StringVar(&s.match, "a", "", "select archives (name, sh:, re:, aid:, tags:, user:, host:)")
 	fs.StringVar(&s.match, "match-archives", "", "select archives")
-	rangeMark := ""
-	if extras.rangeIsBorgeOnly {
-		rangeMark = " (borge only on this command)"
+	if !extras.omitRange {
+		fs.IntVar(&s.first, "first", 0, "keep only the first N archives")
+		fs.IntVar(&s.last, "last", 0, "keep only the last N archives")
+		fs.StringVar(&s.sortBy, "sort-by", "",
+			"comma-separated sort keys (timestamp, name, id, host, user, tags)")
 	}
-	fs.IntVar(&s.first, "first", 0, "keep only the first N archives"+rangeMark)
-	fs.IntVar(&s.last, "last", 0, "keep only the last N archives"+rangeMark)
-	fs.StringVar(&s.sortBy, "sort-by", "",
-		"comma-separated sort keys (timestamp, name, id, host, user, tags)"+rangeMark)
 	if extras.reverse {
 		fs.BoolVar(&s.reverse, "reverse", false, "reverse the order (borge only)")
 	}
