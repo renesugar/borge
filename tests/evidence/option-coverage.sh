@@ -89,7 +89,12 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # and --stats, the last of which needed the store to start counting what it does; down to 14
 # when create reached zero - --sparse, --tags, --files-changed, --read-special-timeout and
 # --exclude-dataless, of which --files-changed was a missing safety feature rather than a
-# missing flag.
+# missing flag; down to 11 when help and "key remove" reached zero, which also took the
+# ALIAS gap to zero - every short spelling borg offers, borge now offers.
+#
+# The eleven that remain are not a backlog of small work. Four belong to other rows
+# (recreate to row 4, repo-create to row 2) and four are blocked on something borge does not
+# have or does not want: see DIVERGENCES.md #53.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -104,7 +109,7 @@ declare -A budget=(
     [export-tar]=0
     [extract]=0
     [find]=0
-    [help]=2
+    [help]=0
     [import-tar]=0
     [info]=0
     [key]=0
@@ -147,7 +152,7 @@ declare -A budget=(
     [key change-location]=0
     [key add]=0
     [key list]=0
-    [key remove]=1
+    [key remove]=0
     [benchmark crud]=0
     [benchmark cpu]=0
 )

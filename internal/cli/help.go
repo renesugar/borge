@@ -12,6 +12,7 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"sort"
@@ -52,6 +53,11 @@ func helpTopics() []helpTopic {
 
 func cmdHelp(e *Env, args []string) int {
 	fs := newFlagSet(e, "help")
+	// borg's two, which select one part of what "help TOPIC" prints. For a help *topic*
+	// there is only one part - the text - and borg prints it under either option, so both
+	// are no-ops there rather than errors.
+	usageOnly := fs.Bool("usage-only", false, "print only the command's usage")
+	epilogOnly := fs.Bool("epilog-only", false, "print only the command's description")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -77,6 +83,25 @@ func cmdHelp(e *Env, args []string) int {
 	// rather than "unknown topic".
 	for _, c := range commands() {
 		if c.name == name {
+			switch {
+			case *usageOnly:
+				// borg prints its argparse usage block. borge's equivalent is the option
+				// list Go's flag package builds from the FlagSet the command registered -
+				// the same information in a different shape, and the only "usage" borge
+				// has.
+				//
+				// Printed by capturing the command's FlagSet rather than by running it
+				// with "-help": that path ends in flag.ErrHelp and exit 2, and asking for
+				// help is not an error. completion.go captures the same way.
+				return printCommandUsage(e, c)
+			case *epilogOnly:
+				// borg's epilog is the long description under the option list. borge has
+				// one line of description per command - the summary in the dispatch table
+				// - so that is what this prints. Recorded in DIVERGENCES.md #53 rather
+				// than left to be discovered by a reader expecting borg's prose.
+				fmt.Fprintf(e.Stdout, "%s\n", c.summary)
+				return ExitOK
+			}
 			fmt.Fprintf(e.Stdout, "%s: %s\n\nRun \"borge %s -help\" for its options.\n",
 				c.name, c.summary, c.name)
 			return ExitOK
@@ -408,4 +433,33 @@ func helpEnvVarNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// printCommandUsage writes a command's option list to stdout.
+//
+// The command is run with "-help" against a throwaway Env whose captureFlags hook keeps the
+// FlagSet it builds; nothing else of that run is used. The output goes to the real Env, so
+// "borge help create --usage-only > file" writes what the reader asked for and the
+// throwaway run's own output is discarded.
+func printCommandUsage(e *Env, c command) int {
+	var sets []*flag.FlagSet
+	probe := &Env{
+		Stdout:       io.Discard,
+		Stderr:       io.Discard,
+		Getenv:       e.Getenv,
+		captureFlags: func(fs *flag.FlagSet) { sets = append(sets, fs) },
+	}
+	c.run(probe, []string{"-help"})
+	if len(sets) == 0 {
+		// A command that builds no FlagSet has no options to print - the three command
+		// groups are like that. Its summary is the whole of what there is to say.
+		fmt.Fprintf(e.Stdout, "%s: %s\n", c.name, c.summary)
+		return ExitOK
+	}
+	fmt.Fprintf(e.Stdout, "Usage of borge %s:\n", c.name)
+	for _, fs := range sets {
+		fs.SetOutput(e.Stdout)
+		fs.PrintDefaults()
+	}
+	return ExitOK
 }

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // create's last five options, and the three defects implementing them found.
@@ -232,6 +231,49 @@ func blocksOf(t *testing.T, path string) int64 {
 	return blocks
 }
 
+// churnFile keeps a file's timestamps moving until the returned stop is called.
+//
+// A tight loop writing ONE BYTE, with no sleep and on a handle that stays open. The first
+// version of this rewrote the whole 8 MB file and then slept a millisecond, and it was
+// flaky: an 8 MB read from the page cache takes a few milliseconds, so a read could fit
+// entirely between two writes and see no change at all. That is exactly what happened in
+// the suite - three retries, then a clean read, and the file was reported "A".
+//
+// One byte per iteration updates ctime and mtime thousands of times a second, so a read
+// taking longer than a microsecond cannot escape it. The detection needs *every* one of
+// borg's ten attempts to collide before it reports "C", so "usually collides" is not
+// enough.
+func churnFile(t *testing.T, path string) (stop func()) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer f.Close()
+		var n byte
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			n++
+			if _, err := f.WriteAt([]byte{n}, 0); err != nil {
+				return
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
 // TestCreateFilesChangedDetectsATornFile is the reason this cluster matters.
 //
 // A file written while it is being read is stored as a mix of before and after: not the old
@@ -240,13 +282,14 @@ func blocksOf(t *testing.T, path string) int64 {
 // important - does not memorize the file in the files cache, so the next run reads it again.
 //
 // Driven in-process with a writer goroutine, because that is the only way to make the race
-// happen on purpose: an external writer either finishes too early or has to be timed.
+// happen on purpose: an external writer either finishes too early or has to be timed. It
+// takes about fifteen seconds, which is borg's retry schedule run to its end.
 func TestCreateFilesChangedDetectsATornFile(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 	src := t.TempDir()
 	churn := filepath.Join(src, "churn.bin")
 
-	// Big enough that one read takes long enough for the writer to land inside it.
+	// Big enough that reading it takes long enough for the writer to land inside.
 	body := make([]byte, 8<<20)
 	for i := range body {
 		body[i] = byte(i)
@@ -255,28 +298,9 @@ func TestCreateFilesChangedDetectsATornFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var wg sync.WaitGroup
-	stop := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			// Rewriting the file keeps changing both its mtime and its ctime.
-			if err := os.WriteFile(churn, body, 0o644); err != nil {
-				return
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}()
-
+	stop := churnFile(t, churn)
 	stdout, stderr, code := r.borge(t, "create", "--list", "-r", r.path, "churned", src)
-	close(stop)
-	wg.Wait()
+	stop()
 	if code != ExitOK && code != ExitWarning {
 		t.Fatalf("borge create exited %d\n%s%s", code, stdout, stderr)
 	}
@@ -285,7 +309,8 @@ func TestCreateFilesChangedDetectsATornFile(t *testing.T) {
 		t.Fatalf("borge did not notice a file being rewritten under it:\n%s", stderr)
 	}
 	if !strings.Contains(stderr, "C "+churn) {
-		t.Errorf("the churning file was not reported as C:\n%s", stderr)
+		t.Fatalf("the churning file was not reported as C, so some attempt read it cleanly - "+
+			"the writer is not keeping up with the reader:\n%s", stderr)
 	}
 
 	// The C file must not be in the files cache: the next run has to read it again,
@@ -310,25 +335,10 @@ func TestCreateFilesChangedDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var wg sync.WaitGroup
-	stop := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			_ = os.WriteFile(churn, body, 0o644)
-			time.Sleep(time.Millisecond)
-		}
-	}()
+	stop := churnFile(t, churn)
 	_, stderr, code := r.borge(t, "create", "--list", "--files-changed", "disabled",
 		"-r", r.path, "unchecked", src)
-	close(stop)
-	wg.Wait()
+	stop()
 
 	if code != ExitOK && code != ExitWarning {
 		t.Fatalf("borge create exited %d\n%s", code, stderr)

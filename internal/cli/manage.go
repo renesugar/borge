@@ -35,6 +35,7 @@ func cmdDelete(e *Env, args []string) int {
 	sel.register(fs, selectorExtras{})
 	dryRun := fs.Bool("dry-run", false,
 		"say what would be deleted, delete nothing (with --list, say which)")
+	fs.BoolVar(dryRun, "n", false, "say what would be deleted, delete nothing")
 	list := fs.Bool("list", false, "print each archive as it is deleted")
 	force := fs.Bool("force", false,
 		"delete without requiring a selector to match exactly one archive (borge only on this command)")
@@ -157,6 +158,7 @@ func cmdUndelete(e *Env, args []string) int {
 	sel.register(fs, selectorExtras{})
 	dryRun := fs.Bool("dry-run", false,
 		"say what would be restored, restore nothing (with --list, say which)")
+	fs.BoolVar(dryRun, "n", false, "say what would be restored, restore nothing")
 	list := fs.Bool("list", false, "print each archive as it is restored")
 	if err := fs.Parse(args); err != nil {
 		return ExitError

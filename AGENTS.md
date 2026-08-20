@@ -122,6 +122,14 @@ exists because a stage was declared complete against a hand-maintained list of r
 work while five commands were missing. It asks `borg --help` what commands exist. It caught
 a bug in itself on its first run, which is the same failure in miniature.
 
+**A race a test needs must be forced, not hoped for.** `TestCreateFilesChangedDetectsATornFile`
+needs a file to change during *every one* of ten read attempts. Its writer first rewrote an
+8 MB file and slept a millisecond between rewrites - which usually collided, passed locally,
+and failed in the suite when one read fitted between two writes. A test that needs a race
+has to make it certain: the writer now writes one byte in a tight loop, moving the timestamp
+thousands of times a second. If the certainty cannot be arranged, assert the part that is
+deterministic and say what is not being asserted.
+
 **A test that normalises away a difference cannot see that difference come back.** Every
 diff test sorted both sides before comparing, with a comment saying the order was "a
 difference real and separate from what this test is about" - so when borge's diff turned out

@@ -53,6 +53,7 @@ func cmdImportTar(e *Env, args []string) int {
 	list := fs.Bool("list", false, "print each item as it is imported")
 	statusFilter := fs.String("filter", "", "only list items whose status is one of these characters")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	fs.BoolVar(stats, "s", false, "print statistics when finished")
 	var timestamp timestampFlag
 	timestamp.register(fs)
 	if err := fs.Parse(args); err != nil {

@@ -41,7 +41,9 @@ func cmdCompact(e *Env, args []string) int {
 	threshold := fs.Int("threshold", repository.DefaultCompactThreshold,
 		"rewrite a pack when this percentage of it is reclaimable")
 	dryRun := fs.Bool("dry-run", false, "say what would be reclaimed, change nothing")
+	fs.BoolVar(dryRun, "n", false, "say what would be reclaimed, change nothing")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	fs.BoolVar(stats, "s", false, "print statistics when finished")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

@@ -41,6 +41,7 @@ func cmdRepoCompress(e *Env, args []string) int {
 	fs.StringVar(compression, "compression", "lz4", "recompress everything to this spec")
 	dryRun := fs.Bool("dry-run", false, "report what would be recompressed, change nothing (borge only on this command)")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	fs.BoolVar(stats, "s", false, "print statistics when finished")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

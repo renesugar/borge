@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,11 +43,16 @@ func TestCompletionSeesEveryCommandsFlags(t *testing.T) {
 	// subcommand. "completion" takes a shell and nothing else. Everything else has at
 	// least the repository flags, so an empty list means the probe stopped seeing them.
 	groups := map[string]bool{"debug": true, "benchmark": true, "key": true}
-	// "completion" takes a shell and "help" a topic, so neither has options of its own -
-	// but both still carry --log-json, which every command registers because borg puts it
-	// on every command. Spelled out rather than left as "no options" so that a future
-	// option arriving on either is a failure rather than a silent pass.
-	onlyLogJSON := map[string]bool{"completion": true, "help": true}
+	// "completion" takes a shell and "help" a topic, so neither has much of its own - but
+	// both carry --log-json, which every command registers because borg puts it on every
+	// command, and "help" carries borg's two part-selectors as well. The exact set is
+	// spelled out rather than left as "no options" so that an option arriving on either is
+	// a failure rather than a silent pass - which is what caught --usage-only and
+	// --epilog-only landing on "help" (DIVERGENCES.md #53).
+	fixedFlags := map[string][]string{
+		"completion": {"--log-json"},
+		"help":       {"--epilog-only", "--log-json", "--usage-only"},
+	}
 	for _, c := range spec {
 		switch {
 		case groups[c.Name]:
@@ -63,9 +69,9 @@ func TestCompletionSeesEveryCommandsFlags(t *testing.T) {
 						"the subcommand's flags", c.Name, sub.Name)
 				}
 			}
-		case onlyLogJSON[c.Name]:
-			if len(c.Flags) != 1 || c.Flags[0] != "--log-json" {
-				t.Errorf("%s should register --log-json and nothing else, got %v", c.Name, c.Flags)
+		case fixedFlags[c.Name] != nil:
+			if !reflect.DeepEqual(c.Flags, fixedFlags[c.Name]) {
+				t.Errorf("%s should register exactly %v, got %v", c.Name, fixedFlags[c.Name], c.Flags)
 			}
 		case len(c.Flags) == 0:
 			t.Errorf("%s registered no options at all; either it really has none, or it "+

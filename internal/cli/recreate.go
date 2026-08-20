@@ -41,8 +41,10 @@ func cmdRecreate(e *Env, args []string) int {
 	fs.StringVar(compression, "compression", "", "recompress with this spec")
 	chunkerParams := fs.String("chunker-params", "", "re-chunk with these parameters")
 	dryRun := fs.Bool("dry-run", false, "say what would happen, change nothing")
+	fs.BoolVar(dryRun, "n", false, "say what would happen, change nothing")
 	list := fs.Bool("list", false, "print each item as it is processed")
 	stats := fs.Bool("stats", false, "print statistics when finished")
+	fs.BoolVar(stats, "s", false, "print statistics when finished")
 	var timestamp timestampFlag
 	timestamp.register(fs)
 	if err := fs.Parse(args); err != nil {

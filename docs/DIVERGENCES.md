@@ -2081,6 +2081,14 @@ misses both:
   re-read a fifo, and the second read found the writer gone and the data lost. Measured,
   having written the check without the exemption first.
 
+**The test for it was flaky first, and the flake is worth recording.** The writer goroutine
+rewrote the whole 8 MB file and slept a millisecond between rewrites; an 8 MB read from the
+page cache takes a few milliseconds, so a read could fit entirely between two writes and see
+nothing. It passed locally and failed in the suite - three retries, then a clean read, and
+the file reported "A". The detection needs **every one of borg's ten attempts** to collide
+before it reports "C", so "usually collides" is not enough. The writer now writes *one byte*
+in a tight loop on an open handle, which moves the timestamps thousands of times a second.
+
 ### Two more differences the same work uncovered
 
 **Every fifo, character device and block device was reported as `i`.** borg has a letter for
@@ -2146,3 +2154,52 @@ on Linux sets that flag, so the option excludes nothing here. It is implemented 
 flag word borge already stores, so it will mean the same thing when borge is built for
 macOS — an option that did nothing on the platform it was written for would be worse than
 one that does nothing on this one.
+
+---
+
+## 53. The rest of row 3, and why four options are still missing — **2026-08-20**
+
+**Stage 8 · `option-coverage.sh` · the alias gap is now zero**
+
+`help --usage-only`, `help --epilog-only`, `key remove --passphrase` and the eight short
+spellings borg offers that borge did not (`-n` on `compact`, `delete`, `undelete` and
+`recreate`; `-s` on `compact`, `import-tar`, `recreate` and `repo-compress`). With those,
+**every option spelling borg has, borge has**, and eleven options remain missing — four of
+which belong to other rows.
+
+### What `help --usage-only` and `--epilog-only` can mean here
+
+borg's help for a command has two parts: an argparse usage block and an epilog of prose.
+borge has neither in that form. Its usage is the option list Go's `flag` package builds from
+the FlagSet the command registered, and its "epilog" is the one-line summary in the dispatch
+table. Those are what the two options print, so a script asking for either gets the nearest
+thing borge has rather than an error.
+
+For a help *topic* — `patterns`, `placeholders` — borg prints the topic text under either
+option, because a topic has no usage block to separate out. borge does the same.
+
+One detail worth its comment: printing the usage cannot be done by running the command with
+`-help`, which is how `completion.go` enumerates options. That path ends in `flag.ErrHelp`
+and **exit 2**, and asking for help is not an error. The FlagSet is captured instead and its
+defaults printed.
+
+### The four that are not coming, and why
+
+**`check --max-age` and `--max-duration`** configure a **pack-level integrity check borge
+does not have**. borg 2 verifies packs and index objects by re-hashing the store object and
+comparing with its name, records the results in `cache/checked-packs`, and then either
+reuses recent records (`--max-age`) or bounds a partial run (`--max-duration`). borge's
+repository check walks the *chunk index* and reads every chunk instead. The options are
+meaningless without the record they filter, so they wait on that check being ported.
+
+**`repo-delete --keep-security-info`** keeps the per-repository **security directory**,
+which borge does not keep at all — already noted in `repo-info`'s JSON, which omits
+`security_dir` for the same reason. borg stores there the manifest and nonce it last saw and
+uses them to notice a repository that has been replaced or moved. An option to preserve a
+directory that does not exist would be an option that does nothing.
+
+**`repo-list --from-borg1`** reads a **borg 1.x** repository, a §0.6 non-goal for 1.0.
+`repo-create --from-borg1` is the same decision from the other side and belongs to row 2.
+
+The first two are gaps with a shape: each names a subsystem borge has not ported. The third
+is a decision already taken. None of them is a flag somebody forgot.

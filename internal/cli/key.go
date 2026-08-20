@@ -528,19 +528,34 @@ func cmdKeyRemove(e *Env, args []string) int {
 	common.register(fs)
 	label := fs.String("label", "", "remove the key with this label")
 	keyID := fs.String("key", "", "remove the key with this id prefix")
+	byPassphrase := fs.Bool("passphrase", false,
+		"remove the key that the passphrase in use unlocks - the one this repository was opened with")
 	if err := fs.Parse(args); err != nil {
+		return ExitError
+	}
+	// borg puts the three in a mutually exclusive group, and the reason is that they are
+	// three answers to one question: which key. Two selectors that disagree have no
+	// sensible resolution, and one that silently wins is how the wrong key gets deleted.
+	given := 0
+	for _, set := range []bool{*label != "", *keyID != "", *byPassphrase} {
+		if set {
+			given++
+		}
+	}
+	if given > 1 {
+		e.errorf("key remove takes one of --label, --key and --passphrase, not several")
 		return ExitError
 	}
 	selector := *label
 	if selector == "" {
 		selector = *keyID
 	}
-	if selector == "" && fs.NArg() == 1 {
+	if selector == "" && !*byPassphrase && fs.NArg() == 1 {
 		selector = fs.Arg(0)
 	}
-	if selector == "" {
-		e.errorf("key remove needs --label or --key: removing an unnamed key is not " +
-			"something to do by default")
+	if selector == "" && !*byPassphrase {
+		e.errorf("key remove needs --label, --key or --passphrase: removing an unnamed key " +
+			"is not something to do by default")
 		return ExitError
 	}
 
@@ -553,6 +568,17 @@ func cmdKeyRemove(e *Env, args []string) int {
 		return e.fail(err)
 	}
 	defer repo.Close()
+
+	if *byPassphrase {
+		// The key the passphrase opens is found by opening it: there is no other way to
+		// know which of several keys a passphrase belongs to, which is the whole point of
+		// the option. Its id then selects it by prefix like any other.
+		unlocked, err := e.unlockOrFail(mgr, path)
+		if err != nil {
+			return e.fail(err)
+		}
+		selector = unlocked.Blob.ID
+	}
 
 	blob, err := mgr.RemoveKey(selector)
 	if err != nil {
