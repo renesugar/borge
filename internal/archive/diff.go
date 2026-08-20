@@ -54,6 +54,13 @@ type Change struct {
 	Added, Removed int64
 	// From and To are the old and new values, for the metadata changes.
 	From, To string
+	// ItemKind is borg's name for the kind of thing that appeared or disappeared, set
+	// only for a presence change: "link", "directory", "blkdev", "chrdev" or "fifo", and
+	// empty for a regular file. borg files those under a key of their own rather than
+	// under "content" - "borg diff --format '{directory}'" reports a directory that came
+	// or went and nothing else - so the kind has to survive as more than prose in the
+	// description. See DIVERGENCES.md #47.
+	ItemKind string
 	// FromJSON and ToJSON are those same values in the form borg's --json-lines carries,
 	// where it differs from the text one: a timestamp is ISO-8601 rather than borg's
 	// human layout, and an owner change is a two-element array rather than "user:group".
@@ -148,10 +155,12 @@ func diffItems(path string, a, b *item.Item, opts DiffOptions) Diff {
 	case a == nil && b == nil:
 		return d
 	case a == nil:
-		add(Change{Kind: ChangeAdded, Description: "added " + describeKind(b), Added: contentSize(b)})
+		add(Change{Kind: ChangeAdded, Description: "added " + describeKind(b),
+			Added: contentSize(b), ItemKind: borgItemKind(b)})
 		return d
 	case b == nil:
-		add(Change{Kind: ChangeRemoved, Description: "removed " + describeKind(a), Removed: contentSize(a)})
+		add(Change{Kind: ChangeRemoved, Description: "removed " + describeKind(a),
+			Removed: contentSize(a), ItemKind: borgItemKind(a)})
 		return d
 	}
 
@@ -347,4 +356,31 @@ func ownerPair(it *item.Item, numeric bool) []any {
 		return []any{derefInt(it.UID), derefInt(it.GID)}
 	}
 	return []any{derefStr(it.User), derefStr(it.Group)}
+}
+
+// borgItemKind is borg's name for an item's type, as its diff uses it for a presence
+// change. A regular file has no name here: borg reports it under "content" with sizes,
+// where the others get a key each.
+//
+// Block and character devices are separate names, unlike borge's own describeKind which
+// calls both "device": borg's format keys are {blkdev} and {chrdev}, so the distinction
+// has to be kept even though nothing else in borge needs it.
+func borgItemKind(it *item.Item) string {
+	switch {
+	case it == nil:
+		return ""
+	case it.IsSymlink():
+		return "link"
+	case it.IsDir():
+		return "directory"
+	case it.IsFIFO():
+		return "fifo"
+	case it.IsDevice():
+		if it.ModeOr(0)&item.SIFMT == item.SIFBLK {
+			return "blkdev"
+		}
+		return "chrdev"
+	default:
+		return ""
+	}
 }

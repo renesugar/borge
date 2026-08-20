@@ -1570,3 +1570,67 @@ copying a mistake:
 
 `TestReportingCommandsWriteToStderr` holds the rule for six commands and fails if fewer
 than four of them say anything, so it cannot pass by testing silence.
+
+## 47. `--format` on `check` and `diff`, and borg's third key set — **fixed 2026-08-19**
+
+borg has three format key sets, not two, and borge had two.
+
+**`check`** formats with the *archive* set — the one `repo-list`, `prune` and `info`
+already share — so the option itself was small. What was missing was the thing it formats:
+borg announces every archive before checking it, and borge announced none.
+
+```
+Analyzing archive v2 Wed, 2026-08-19 17:45:39 -0700 157482e4…8937 (1/1)
+```
+
+The count is part of the line rather than of the format, as in borg. The default is
+`{archive} {time} {id}`.
+
+**And the format is validated before any work starts, which took a second attempt.** The
+first version called `formatter.Keys`, which parses a template without checking that its
+keys exist — the error only surfaced when something was rendered, and the line is rendered
+only under `-v`. So `borge check --format '{nosuchkey}'` ran a whole repository check and
+exited 0, where borg fails immediately with exit 4. `checkArchiveFormat` now renders an
+empty archive up front, the way `checkItemFormat` has always done for the item keys. A
+check of a large repository is a long time to wait to be told the output format was wrong.
+
+The same latent gap exists in `repo-list` and `prune`, which also call `formatter.Keys` and
+rely on rendering to catch a bad key. There it is harmless, because both always render, so
+the user sees the error either way — just after the repository has been opened rather than
+before.
+
+**`diff`** needed the third set: seventeen keys whose records are *changes* rather than
+paths or archives — `change`, `content`, `mode`, `type`, `owner`, `user`, `group`, `link`,
+`directory`, `blkdev`, `chrdev`, `fifo`, `mtime`, `ctime`, `isomtime`, `isoctime`, `path`.
+
+Implementing it turned out to be most of the work, because the renderings are the format:
+
+- `{content}` is a padded field — `added: %20s`, `removed: %18s`, `modified: %8s %8s` with
+  signed sizes at one decimal — and `{link}` and its relatives are padded to 27, which
+  borg's source explains as "the length of the content change". Get a width wrong and every
+  line of a long diff is ragged.
+- A presence change is filed by the **kind** of thing that appeared: a directory that came
+  or went is reported under `{directory}`, not `{content}`, and only a regular file goes to
+  `{content}` with a size. borge had that kind folded into a description string, so
+  `Change` now carries it as data.
+- `{owner}` reports both halves, while `{user}` and `{group}` report only the half that
+  actually differs.
+- `{change}` is every key concatenated in borg's own order — the insertion order of its
+  `call_keys` dict, not alphabetical — with the empty ones dropped and the ISO forms
+  excluded, so a default listing does not print each timestamp twice.
+
+**So this closed a difference nobody had recorded.** borge's `diff` text output matched
+borg's in none of its parts: `changed mtime: X -> Y` against `[mtime: X -> Y]`,
+`+15 B -5 B` against `modified:    +15 B     -5 B`, `changed link: keep.txt -> dir` against
+a padded `changed link`. Routing the text through the same formatter made the whole output
+borg's, byte for byte, which is what `TestDiffFormatMatchesBorg` now checks across six
+format strings.
+
+**One difference remains and is not this row's:** borge sorts its diff output and borg does
+not, so the two agree line by line but not in order. borg has `--sort-by` for that and
+borge does not — one of the two options `diff` is still missing (table row 3). The tests
+compare sorted output and say so.
+
+**`borge diff --format '{content}'` also gained `BORG_UNITS` for free**, because the size
+rendering now goes through the same `formatBytesIn` the rest of borge uses. borg's
+`format_file_size` honours that variable everywhere too.

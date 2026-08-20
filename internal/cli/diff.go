@@ -13,9 +13,9 @@ import (
 	"io"
 	"reflect"
 	"sort"
-	"strings"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/manifest"
 )
 
@@ -29,8 +29,19 @@ func cmdDiff(e *Env, args []string) int {
 	jsonLines := fs.Bool("json-lines", false, "print one JSON object per changed path")
 	contentOnly := fs.Bool("content-only", false, "report only content changes, not metadata")
 	numericIDs := fs.Bool("numeric-ids", false, "compare numeric uid/gid rather than names")
+	format := fs.String("format", "", "output format, e.g. '{change} {path}{NL}'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
+	}
+	// borg's default, and its key set is a third one: not the archive keys repo-list uses
+	// nor the item keys list uses, but the changes between two versions of a path. See
+	// diffformat.go.
+	template := *format
+	if template == "" {
+		template = "{change} {path}{NL}"
+	}
+	if _, err := formatter.Keys(template); err != nil {
+		return e.fail(err)
 	}
 	if fs.NArg() < 2 {
 		e.errorf("diff needs two archives")
@@ -83,15 +94,11 @@ func cmdDiff(e *Env, args []string) int {
 		if *jsonLines {
 			return writeDiffJSON(e.Stdout, d)
 		}
-		var parts []string
-		for _, c := range d.Changes {
-			if c.From != "" || c.To != "" {
-				parts = append(parts, fmt.Sprintf("%s: %s -> %s", c.Description, c.From, c.To))
-			} else {
-				parts = append(parts, c.Description)
-			}
+		line, err := formatter.Format(template, diffValues(d, e.sizeUnits()))
+		if err != nil {
+			return err
 		}
-		_, err := fmt.Fprintf(e.Stdout, "%s %s\n", strings.Join(parts, " "), d.Path)
+		_, err = fmt.Fprint(e.Stdout, line)
 		return err
 	})
 	if err != nil {

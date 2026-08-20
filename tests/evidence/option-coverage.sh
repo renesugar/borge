@@ -75,18 +75,19 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # taking the filter group at all, 63 when repo-list gained --format, 61 when list and find did, 58 when create gained the tag-based exclusions, 55 when --timestamp landed on three commands, 54 with create --dry-run, 51 with the timestamp-storage options, 48 when --list reached delete, undelete and export-tar, 44 with the --paths-from-* group, 39 with the stdin-content group, 35 when prune gained borg's listing.
 # It went UP to 36 on 2026-08-19, without borge losing anything: the gate started comparing
 # the group subcommands and found "key remove --passphrase". A number that only ever falls
-# is a number that has stopped measuring.
+# is a number that has stopped measuring. Down to 34 the same day, when --format reached
+# check and diff.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
     [break-lock]=0
-    [check]=3
+    [check]=2
     [compact]=0
     [completion]=0
     [create]=6
     [debug]=0
     [delete]=0
-    [diff]=3
+    [diff]=2
     [export-tar]=1
     [extract]=3
     [find]=0

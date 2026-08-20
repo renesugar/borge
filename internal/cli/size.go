@@ -93,9 +93,20 @@ func (e *Env) sizeUnits() string {
 // fmtBytes renders a size the way this environment asked for, via BORG_UNITS.
 func (e *Env) fmtBytes(n int64) string { return formatBytesIn(n, e.sizeUnits()) }
 
-// formatBytesIn renders a size in the named unit family.
+// formatBytesIn renders a size in the named unit family, with borg's usual two decimals.
 func formatBytesIn(n int64, units string) string {
+	return formatBytesPrec(n, units, 2, false)
+}
+
+// formatBytesPrec is formatBytesIn with borg's other two knobs: how many decimals a scaled
+// value gets, and whether a positive number is written with a leading "+". Both are used by
+// "diff --format", where a content change reads "modified:    +15 B     -5 B" - one decimal
+// and an explicit sign, so that added and removed line up and read as a delta.
+func formatBytesPrec(n int64, units string, precision int, sign bool) string {
 	if units == "raw" {
+		if sign && n > 0 {
+			return fmt.Sprintf("+%d B", n)
+		}
 		return fmt.Sprintf("%d B", n)
 	}
 	power := 1000.0
@@ -111,16 +122,22 @@ func formatBytesIn(n int64, units string) string {
 	for i, name := range names[:len(names)-1] {
 		// Rounded before the comparison, as borg does: 999.996 bytes must print as "1.00
 		// kB" rather than "1000.00 B", which is a unit the loop has already left behind.
-		if math.Abs(round(v, 2)) < power {
+		if math.Abs(round(v, precision)) < power {
 			unit = name
 			if i > 0 {
-				prec = 2
+				prec = precision
 			}
 			break
 		}
 		v /= power
 	}
-	return fmt.Sprintf("%.*f %sB", prec, v, unit)
+	// borg writes the "+" itself and only for a positive value; a negative one already
+	// carries its sign from the number.
+	lead := ""
+	if sign && v > 0 {
+		lead = "+"
+	}
+	return fmt.Sprintf("%s%.*f %sB", lead, prec, v, unit)
 }
 
 func round(v float64, places int) float64 {

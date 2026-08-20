@@ -234,6 +234,22 @@ func archiveValues(info manifest.Info) map[string]any {
 	}
 }
 
+// checkArchiveFormat rejects a template naming a key the archive key set does not have.
+//
+// Rendering an empty archive is how the item side does it too (checkItemFormat): the
+// formatter is the authority on which keys exist, so asking it is the one way that cannot
+// drift from what the commands actually accept.
+//
+// Called before any work starts, because borg validates there: "borg check --format
+// '{nosuchkey}'" fails immediately with exit 4, where borge ran the whole repository check
+// and exited 0 - the format was only rendered under -v, so without it the bad key was
+// never noticed. A check of a large repository is a long time to wait to be told the
+// output format was wrong.
+func checkArchiveFormat(template string) error {
+	_, err := formatter.Format(template, archiveValues(manifest.Info{}))
+	return err
+}
+
 func shortID(id []byte) string {
 	s := hex.EncodeToString(id)
 	if len(s) > 8 {

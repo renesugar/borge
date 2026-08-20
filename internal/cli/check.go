@@ -15,6 +15,7 @@ import (
 	"sort"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/hashindex"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
@@ -60,6 +61,7 @@ func cmdCheck(e *Env, args []string) int {
 	findLost := fs.Bool("find-lost-archives", false,
 		"scan every object for archives whose directory entry is missing")
 	dryRun := fs.Bool("dry-run", false, "with --repair, report what would be changed and change nothing (borge only on this command)")
+	format := fs.String("format", "", "how to name each archive, e.g. '{archive} [{id:.8}]'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -78,9 +80,19 @@ func cmdCheck(e *Env, args []string) int {
 	}
 	defer o.Close()
 
+	// borg's default names the archive, its time and its full id. Validated before any
+	// work starts: a bad key found after the repository check has run would waste it.
+	archiveFormat := *format
+	if archiveFormat == "" {
+		archiveFormat = "{archive} {time} {id}"
+	}
+	if err := checkArchiveFormat(archiveFormat); err != nil {
+		return e.fail(err)
+	}
+
 	c := &checker{
 		env: e, opened: o, verifyData: *verifyData, verbose: common.verbose,
-		repair: *repair, dryRun: *dryRun,
+		repair: *repair, dryRun: *dryRun, archiveFormat: archiveFormat,
 	}
 
 	if *repair && !*dryRun {
@@ -138,6 +150,11 @@ func cmdCheck(e *Env, args []string) int {
 }
 
 type checker struct {
+	// archiveFormat is --format: how each archive is named in the "Analyzing archive"
+	// line. borg's default is "{archive} {time} {id}", and it uses the archive key set -
+	// the same one repo-list and prune format with, not a set of its own.
+	archiveFormat string
+
 	env        *Env
 	opened     *opened
 	verifyData bool
@@ -219,8 +236,18 @@ func (c *checker) checkArchives(opts manifest.ListOptions) error {
 		return err
 	}
 
-	for _, info := range infos {
+	for i, info := range infos {
 		c.archives++
+		// borg announces every archive before checking it, and --format controls how it
+		// is named: "Analyzing archive {archive} {time} {id} (1/3)". The count is part of
+		// the line rather than of the format, as in borg.
+		if c.verbose {
+			line, err := formatter.Format(c.archiveFormat, archiveValues(info))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.env.Stderr, "Analyzing archive %s (%d/%d)\n", line, i+1, len(infos))
+		}
 		if !info.Exists {
 			c.problem("archive %s: %s", hex.EncodeToString(info.ID)[:8], info.Problem)
 			if c.repair && !c.dryRun {
