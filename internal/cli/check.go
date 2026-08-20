@@ -52,14 +52,14 @@ func cmdCheck(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
-	sel.register(fs)
+	sel.register(fs, selectorExtras{reverse: true})
 	verifyData := fs.Bool("verify-data", false, "re-hash every chunk and compare against its id")
 	repositoryOnly := fs.Bool("repository-only", false, "check the repository, not the archives")
 	archivesOnly := fs.Bool("archives-only", false, "check the archives, not the repository")
 	repair := fs.Bool("repair", false, "write corrections into the repository")
 	findLost := fs.Bool("find-lost-archives", false,
 		"scan every object for archives whose directory entry is missing")
-	dryRun := fs.Bool("dry-run", false, "with --repair, report what would be changed and change nothing")
+	dryRun := fs.Bool("dry-run", false, "with --repair, report what would be changed and change nothing (borge only on this command)")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

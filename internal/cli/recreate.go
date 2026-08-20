@@ -33,7 +33,7 @@ func cmdRecreate(e *Env, args []string) int {
 	var sel listSelectors
 	var pf patternFlags
 	common.register(fs)
-	sel.register(fs)
+	sel.register(fs, selectorExtras{})
 	pf.register(fs)
 	target := fs.String("target", "", "write to this archive name instead of replacing the original")
 	comment := fs.String("comment", "", "replace the archive's comment")

@@ -1475,3 +1475,57 @@ What the two share is the question, not the answer.
 So `diff` now writes through `pydump.go`'s encoder, and everything else through `putText`.
 `TestNonUnicodePathsMatchBorg` checks both forms, decodes the base64 back to the original
 bytes, and fails first if borg's own output stops exercising the case.
+
+## 44. `--reverse` and `--deleted`, decided per command — **2026-08-19**
+
+Both reached every command that took borge's archive-filter group, because borge registered
+the group whole where borg's `define_archive_filters_group` takes a `deleted` parameter.
+That was inheritance rather than a decision, and this is the decision.
+
+**The rule:** an option stays where it changes what the command *does or shows*, and goes
+where it only reorders work whose result does not depend on the order.
+
+**`--deleted`** now appears on `repo-list`, `info` and `find`. borg has it on `repo-list`
+alone — measured, not assumed: `deleted=True` is passed once in the whole archiver, and not
+even to `undelete`, which does not need it because undeleting is what it does. borge's
+`undelete` behaves the same, verified. It is kept on `info` and `find` as borge's own,
+because looking inside a soft-deleted archive is how somebody decides whether to undelete
+it, and borg offers no way to do that at all. Removed from `analyze`, `check`, `delete`,
+`prune`, `recreate`, `tag` and `undelete`.
+
+**`--reverse`** is borge's everywhere: borg has no such option on any command. It stays
+where the output is a listing in archive order — `repo-list`, `info`, `find`, `analyze`,
+`check` — and is removed from the mutating commands.
+
+It is removed from `prune` for a stronger reason than tidiness. prune's rules walk the
+archives newest-first, so reversing the input would change **which archives are kept**. An
+option that quietly alters a retention decision is worse than no option.
+
+**Not decided, and left in place: `prune --first`, `--last` and `--sort-by`.** borg's prune
+takes no archive-filter group at all, so all three are borge's there too. They are marked
+as such in the help but not removed, because each changes which archives prune *considers*
+and therefore which it deletes — `--sort-by` changes the order the keep rules walk, so it
+changes the decisions themselves. That is a bigger question than the one this entry
+answers, and it deserves its own evidence rather than being swept along.
+
+## 45. borge-only options now say so — **2026-08-19**
+
+Every option borge has that borg does not is marked in its own help text. There are two
+markers because there are two cases, and calling them the same thing would have been
+inaccurate:
+
+- **`(borge only)`** — borg has no such option on any command: `prune --keep-within`,
+  `--keep-last`, `--keep-oldest`, `analyze --hotspots`, `version --long`, `--reverse`.
+- **`(borge only on this command)`** — borg has the option elsewhere but not here:
+  `check --dry-run`, `repo-compress --dry-run`, `delete --force`, `find --short`,
+  `info`/`find` `--deleted`, `prune --first`/`--last`/`--sort-by`.
+
+`extract -C` gets a longer note, because it is the one that can mislead rather than merely
+surprise: borg's `-C` is `--compression` on five commands, and borge's `extract -C` is the
+destination directory. borg's own `extract` has no `-C`, so nothing is shadowed — but a
+borg habit typing `-C zstd,3` here would name a directory rather than a compression, and
+the help now says so.
+
+The option-coverage gate fails on a borge-only option whose help does not carry a marker,
+so this cannot rot: recording a reason in the gate's table and telling the user are two
+different things, and only the second is visible to somebody reading `--help`.

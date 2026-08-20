@@ -30,7 +30,7 @@ import (
 func cmdVersion(e *Env, args []string) int {
 	fs := newFlagSet(e, "version")
 	asJSON := fs.Bool("json", false, "print JSON instead of text")
-	long := fs.Bool("long", false, "also print the build and interoperability details")
+	long := fs.Bool("long", false, "also print the build and interoperability details (borge only)")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

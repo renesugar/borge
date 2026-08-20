@@ -32,11 +32,12 @@ func cmdDelete(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
-	sel.register(fs)
+	sel.register(fs, selectorExtras{})
 	dryRun := fs.Bool("dry-run", false,
 		"say what would be deleted, delete nothing (with --list, say which)")
 	list := fs.Bool("list", false, "print each archive as it is deleted")
-	force := fs.Bool("force", false, "delete without requiring a selector to match exactly one archive")
+	force := fs.Bool("force", false,
+		"delete without requiring a selector to match exactly one archive (borge only on this command)")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -153,7 +154,7 @@ func cmdUndelete(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
-	sel.register(fs)
+	sel.register(fs, selectorExtras{})
 	dryRun := fs.Bool("dry-run", false,
 		"say what would be restored, restore nothing (with --list, say which)")
 	list := fs.Bool("list", false, "print each archive as it is restored")
@@ -256,7 +257,7 @@ func cmdTag(e *Env, args []string) int {
 	var common commonFlags
 	var sel listSelectors
 	common.register(fs)
-	sel.register(fs)
+	sel.register(fs, selectorExtras{})
 	var add, remove multiFlag
 	fs.Var(&add, "add", "add a tag (repeatable)")
 	fs.Var(&remove, "remove", "remove a tag (repeatable)")

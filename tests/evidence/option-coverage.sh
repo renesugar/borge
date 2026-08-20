@@ -167,20 +167,25 @@ declare -A budget=(
 #       The build and interoperability details. It is where the four keys that used to be
 #       in "version --json" live now; see DIVERGENCES.md #42.
 declare -A borge_only=(
-    [analyze]="deleted hotspots reverse"
-    [check]="deleted dry-run reverse"
-    [delete]="deleted force reverse"
+    [analyze]="hotspots reverse"
+    [check]="dry-run reverse"
+    [delete]="force"
     [extract]="C"
     [find]="deleted reverse short"
     [info]="deleted reverse"
-    [prune]="deleted first keep-last keep-oldest keep-within last reverse sort-by"
-    [recreate]="deleted reverse"
+    [prune]="first keep-last keep-oldest keep-within last sort-by"
     [repo-compress]="dry-run"
     [repo-list]="reverse"
-    [tag]="deleted reverse"
-    [undelete]="deleted reverse"
     [version]="long"
 )
+
+# Still leaking, and not in the decision above: prune's --first, --last and --sort-by.
+# borg's prune takes no archive-filter group at all, so these three are borge's on that
+# command - and unlike --reverse they were left in place rather than removed, because the
+# question they raise is bigger than tidiness. All three change which archives prune
+# *considers*, and therefore which it deletes; --sort-by changes the order the keep rules
+# walk, which changes the decisions themselves. That deserves deciding on its own evidence
+# rather than being swept along with row 11. Recorded in PORTING_PLAN table row 11.
 
 # borg_options prints one *option* per line for a command - not one name per line. An
 # option is a group of spellings: "-n, --dry-run" is one option with two names, and
@@ -436,6 +441,30 @@ for c in "${!borge_only[@]}"; do
 done
 if [ "$unrecorded" -gt 0 ]; then
     echo "  $unrecorded option(s) borge adds without a recorded reason"
+fi
+
+# Recorded here is not the same as told to the user. An option borge adds has to say so in
+# its own help, or somebody reading "borge prune --help" cannot tell which of those rules
+# their borg documentation covers. The marker is the phrase "borge only", which also covers
+# "borge only on this command" for an option borg has elsewhere.
+undocumented=0
+for c in "${!borge_only[@]}"; do
+    # shellcheck disable=SC2086
+    help_text=$("$BORGE" $c -help 2>&1 || true)
+    for o in ${borge_only[$c]}; do
+        # The option line plus the indented help line that follows it.
+        entry=$(printf '%s\n' "$help_text" | grep -A1 -E "^  -$o( |$)" || true)
+        case "$entry" in
+            *"borge only"*) ;;
+            "") ;;  # option gone: already reported as stale above
+            *) printf '  %-24s %s   <- NOT MARKED "borge only" in its help\n' "$c" "$o"
+               undocumented=$((undocumented + 1))
+               status=1 ;;
+        esac
+    done
+done
+if [ "$undocumented" -gt 0 ]; then
+    echo "  $undocumented borge-only option(s) whose help does not say so"
 fi
 echo
 

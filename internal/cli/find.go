@@ -43,9 +43,9 @@ func cmdFind(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	pf.register(fs)
-	sel.register(fs)
+	sel.register(fs, selectorExtras{deleted: true, reverse: true})
 	jsonLines := fs.Bool("json-lines", false, "print one JSON object per match")
-	short := fs.Bool("short", false, "print only archive id and path")
+	short := fs.Bool("short", false, "print only archive id and path (borge only on this command)")
 	format := fs.String("format", "", "output format, e.g. '{archivename} {path}{NL}'")
 	if err := fs.Parse(args); err != nil {
 		return ExitError

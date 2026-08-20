@@ -28,18 +28,27 @@ func cmdPrune(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	common.registerJSON(fs, "print the decisions as JSON; unlike the text form it lists every archive without --list")
-	sel.register(fs)
+	// borg's prune has no archive-filter group, so --first, --last and --sort-by are
+	// borge's here and say so. They are also the ones that most deserve care: each
+	// changes which archives prune considers, and --sort-by changes the order the keep
+	// rules walk, so all three can change what is deleted.
+	sel.register(fs, selectorExtras{rangeIsBorgeOnly: true})
 
 	counts := map[manifest.RuleKind]*int{}
 	for _, kind := range []manifest.RuleKind{
 		manifest.RuleLast, manifest.RuleSecondly, manifest.RuleMinutely, manifest.RuleHourly,
 		manifest.RuleDaily, manifest.RuleWeekly, manifest.RuleMonthly, manifest.RuleYearly,
 	} {
-		counts[kind] = fs.Int("keep-"+string(kind), 0,
-			fmt.Sprintf("keep one archive from each of the last N %s periods (-1 for all)", kind))
+		help := fmt.Sprintf("keep one archive from each of the last N %s periods (-1 for all)", kind)
+		if kind == manifest.RuleLast {
+			// borg has every other keep-* rule and not this one: "keep the newest N
+			// archives, whenever they were made".
+			help = "keep the newest N archives regardless of when they were made (borge only)"
+		}
+		counts[kind] = fs.Int("keep-"+string(kind), 0, help)
 	}
-	within := fs.String("keep-within", "", "keep every archive newer than this, e.g. 48h or 7d")
-	keepOldest := fs.Bool("keep-oldest", false, "always keep the oldest archive")
+	within := fs.String("keep-within", "", "keep every archive newer than this, e.g. 48h or 7d (borge only)")
+	keepOldest := fs.Bool("keep-oldest", false, "always keep the oldest archive (borge only)")
 	dryRun := fs.Bool("dry-run", false, "say what would be pruned, prune nothing")
 	list := fs.Bool("list", false, "print every archive and the rule that kept it")
 	listKept := fs.Bool("list-kept", false, "print only the archives that are kept")

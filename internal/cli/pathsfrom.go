@@ -53,7 +53,24 @@ func (p *pathsFromFlags) register(fs *flagSet) {
 // be reported rather than silently ignored.
 type delimiterValue struct{ p *pathsFromFlags }
 
-func (d delimiterValue) String() string { return d.p.delimiter }
+// String tolerates a zero value, which is not a hypothetical: flag.PrintDefaults builds a
+// zero of every Value type by reflection and calls String() on it, to decide whether the
+// current value is worth printing as a default. delimiterValue is a struct holding a
+// pointer, so its zero has a nil one, and dereferencing it made "borge create --help"
+// print this in the middle of its own option list:
+//
+//	panic calling String method on zero cli.delimiterValue for flag paths-delimiter:
+//	runtime error: invalid memory address or nil pointer dereference
+//
+// The flag package recovers, so nothing crashed and no test failed - the line just sat in
+// the help of the most-used command. The option-coverage gate did not see it either: it
+// only reads lines that start with two spaces and a dash.
+func (d delimiterValue) String() string {
+	if d.p == nil {
+		return ""
+	}
+	return d.p.delimiter
+}
 
 func (d delimiterValue) Set(v string) error {
 	d.p.delimiter, d.p.delimiterSet = v, true

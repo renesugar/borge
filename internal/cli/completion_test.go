@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -327,5 +328,51 @@ func TestCompletionRejectsWhatItCannotGenerate(t *testing.T) {
 	errOut.Reset()
 	if code := Run(e, []string{"completion"}); code != ExitError {
 		t.Errorf("completion with no shell exited %d, want ExitError", code)
+	}
+}
+
+// TestHelpTextIsWellFormed: no command's help contains a rendering failure.
+//
+// flag.PrintDefaults builds a zero value of every Value type by reflection and calls
+// String() on it; a Value that cannot survive that has its panic *recovered* and reported
+// as a line of the help text. Nothing crashes, no test fails, and the line sits in the
+// output of a command people run every day - "borge create --help" carried one until
+// 2026-08-19, and the option gate could not see it because it only reads lines beginning
+// with two spaces and a dash.
+func TestHelpTextIsWellFormed(t *testing.T) {
+	spec := describeCLI(completionEnv())
+	if len(spec) < 20 {
+		t.Fatalf("only %d commands; the probe is not reaching them", len(spec))
+	}
+	var checked int
+	var check func(name string, args []string)
+	check = func(name string, args []string) {
+		var stdout, stderr bytes.Buffer
+		e := &Env{Stdout: &stdout, Stderr: &stderr, Getenv: func(string) (string, bool) { return "", false }}
+		Run(e, append(args, "--help"))
+		text := stdout.String() + stderr.String()
+		checked++
+		if strings.TrimSpace(text) == "" {
+			t.Errorf("%s printed no help at all", name)
+			return
+		}
+		for _, bad := range []string{"panic", "%!", "<nil>"} {
+			if strings.Contains(text, bad) {
+				for _, line := range strings.Split(text, "\n") {
+					if strings.Contains(line, bad) {
+						t.Errorf("%s --help contains %q:\n  %s", name, bad, line)
+					}
+				}
+			}
+		}
+	}
+	for _, c := range spec {
+		check(c.Name, []string{c.Name})
+		for _, sub := range c.Sub {
+			check(c.Name+" "+sub.Name, []string{c.Name, sub.Name})
+		}
+	}
+	if checked < 40 {
+		t.Errorf("checked only %d help texts; commands and subcommands together are more", checked)
 	}
 }

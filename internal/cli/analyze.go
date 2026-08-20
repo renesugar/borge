@@ -60,9 +60,9 @@ func cmdAnalyze(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	common.registerJSON(fs, "")
-	sel.register(fs)
+	sel.register(fs, selectorExtras{reverse: true})
 	byName := fs.Bool("by-name", false, "decompose the whole repository by archive name")
-	hotspots := fs.Int("hotspots", 20, "show this many busiest directories (0 for none)")
+	hotspots := fs.Int("hotspots", 20, "show this many busiest directories (0 for none) (borge only)")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

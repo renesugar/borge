@@ -320,7 +320,7 @@ func cmdInfo(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	common.registerJSON(fs, "")
-	sel.register(fs)
+	sel.register(fs, selectorExtras{deleted: true, reverse: true})
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -419,7 +419,13 @@ func cmdExtract(e *Env, args []string) int {
 	var pf patternFlags
 	common.register(fs)
 	pf.register(fs)
-	dest := fs.String("C", "", "extract into this directory (default: the working directory)")
+	// Named -C to match tar and rsync, and it is worth knowing that borg spells its own
+	// -C differently: on create, import-tar, recreate, repo-compress and transfer, borg's
+	// -C is --compression. borg's extract has no -C at all, so nothing is shadowed, but a
+	// borg habit typing "-C zstd,3" here would name a destination directory rather than a
+	// compression. The help says so rather than leaving it to be discovered.
+	dest := fs.String("C", "",
+		"extract into this directory (borge only; borg's -C elsewhere means --compression)")
 	dryRun := fs.Bool("dry-run", false, "read and verify, but write nothing")
 	sparse := fs.Bool("sparse", false, "write all-zero chunks as holes")
 	numericIDs := fs.Bool("numeric-ids", false, "restore numeric uid/gid, ignoring names")

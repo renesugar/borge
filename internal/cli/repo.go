@@ -85,14 +85,52 @@ func (t *timespanFlag) Set(v string) error {
 	return nil
 }
 
-func (s *listSelectors) register(fs *flagSet) {
+// selectorExtras are the two options in this group that borg does not put on every command
+// taking it, and that borge therefore has to decide about per command rather than inherit.
+//
+// The rule applied, and it is worth stating because "keep everything" was the old answer:
+// an option stays where it changes what the command *does or shows*, and goes where it only
+// reorders work whose result does not depend on the order.
+//
+//   - deleted stays on info and find, the two commands that let somebody look at a
+//     soft-deleted archive before deciding whether to undelete it. borg has it on repo-list
+//     alone (define_archive_filters_group(..., deleted=True)) - not even on undelete, which
+//     does not need it because undeleting is what it does.
+//   - reverse stays where the output is a listing in archive order. It goes from prune for
+//     a stronger reason than tidiness: prune's rules walk the archives newest-first, so
+//     reversing the input would change which archives are kept. An option that quietly
+//     alters a retention decision is worse than no option.
+//
+// See PORTING_PLAN.md table row 11 and section 11.4c.
+type selectorExtras struct {
+	deleted bool
+	reverse bool
+	// rangeIsBorgeOnly marks --first, --last and --sort-by as borge's on this command.
+	// borg's prune takes no archive-filter group at all, so there they are borge's; on
+	// info, find and the rest they are borg's own and must not be marked.
+	rangeIsBorgeOnly bool
+}
+
+// register adds the archive-filter group. The two options borg does not give every command
+// are opt-in; see selectorExtras.
+func (s *listSelectors) register(fs *flagSet, extras selectorExtras) {
 	fs.StringVar(&s.match, "a", "", "select archives (name, sh:, re:, aid:, tags:, user:, host:)")
 	fs.StringVar(&s.match, "match-archives", "", "select archives")
-	fs.IntVar(&s.first, "first", 0, "keep only the first N archives")
-	fs.IntVar(&s.last, "last", 0, "keep only the last N archives")
-	fs.StringVar(&s.sortBy, "sort-by", "", "comma-separated sort keys (timestamp, name, id, host, user, tags)")
-	fs.BoolVar(&s.reverse, "reverse", false, "reverse the order")
-	fs.BoolVar(&s.deleted, "deleted", false, "list soft-deleted archives instead")
+	rangeMark := ""
+	if extras.rangeIsBorgeOnly {
+		rangeMark = " (borge only on this command)"
+	}
+	fs.IntVar(&s.first, "first", 0, "keep only the first N archives"+rangeMark)
+	fs.IntVar(&s.last, "last", 0, "keep only the last N archives"+rangeMark)
+	fs.StringVar(&s.sortBy, "sort-by", "",
+		"comma-separated sort keys (timestamp, name, id, host, user, tags)"+rangeMark)
+	if extras.reverse {
+		fs.BoolVar(&s.reverse, "reverse", false, "reverse the order (borge only)")
+	}
+	if extras.deleted {
+		fs.BoolVar(&s.deleted, "deleted", false,
+			"act on soft-deleted archives instead (borge only on this command)")
+	}
 	fs.Var(&s.older, "older", "only archives older than now minus this span, e.g. 7d or 12m")
 	fs.Var(&s.newer, "newer", "only archives newer than now minus this span, e.g. 7d or 12m")
 	fs.Var(&s.oldest, "oldest", "only archives within this span of the oldest one, e.g. 7d")
@@ -211,7 +249,7 @@ func cmdRepoList(e *Env, args []string) int {
 	var sel listSelectors
 	common.register(fs)
 	common.registerJSON(fs, "")
-	sel.register(fs)
+	sel.register(fs, selectorExtras{deleted: true, reverse: true})
 	// borg's --short prints the archive *ids*, not the names: an id is what uniquely
 	// selects an archive, and names are not unique. Printing names here would look
 	// friendlier and would be wrong.
