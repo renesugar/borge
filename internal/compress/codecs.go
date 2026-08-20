@@ -358,3 +358,49 @@ func lzmaDictCap(level int) int {
 		return 64 * 1024 * 1024
 	}
 }
+
+// ------------------------------------------------------------------ zstd, as a stream
+
+// The repository never stores a zstd *stream*: every stored object is compressed whole,
+// which is what lets a chunk be decompressed without reading anything before it. A tarball
+// is the opposite - one stream from beginning to end - and "export-tar backup.tar.zst"
+// needs exactly that.
+//
+// It lives here rather than in the command layer because this is where the zstd dependency
+// and the level mapping already are, and because a second import of the same library
+// somewhere else would be a second place to keep those decisions.
+
+// ZstdStreamLevel is borg's ZSTD_TAR_LEVEL: the zstd command line tool's own default,
+// which borg uses for a tarball rather than the compression level chosen for the archive.
+const ZstdStreamLevel = 3
+
+// NewZstdStreamWriter wraps w in a zstd encoder.
+//
+// workers is how many compression threads to use; zero or less means one per CPU, which is
+// this library's default. borg exposes the same choice as BORG_ZSTD_MT_WORKERS, and
+// multithreaded zstd changes only the speed, never the bytes a decompressor sees.
+func NewZstdStreamWriter(w io.Writer, workers int) (io.WriteCloser, error) {
+	opts := []zstd.EOption{zstd.WithEncoderLevel(zstdLevel(ZstdStreamLevel))}
+	if workers > 0 {
+		opts = append(opts, zstd.WithEncoderConcurrency(workers))
+	}
+	enc, err := zstd.NewWriter(w, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("compress: zstd stream: %w", err)
+	}
+	return enc, nil
+}
+
+// NewZstdStreamReader wraps r in a zstd decoder.
+//
+// The returned Closer releases the decoder's goroutines; it does not close r, which is the
+// caller's. A zstd stream that ends early reports an error on Read rather than being taken
+// for a complete one, which is what makes a truncated tarball an error and not a short
+// archive.
+func NewZstdStreamReader(r io.Reader) (io.ReadCloser, error) {
+	dec, err := zstd.NewReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("compress: zstd stream: %w", err)
+	}
+	return dec.IOReadCloser(), nil
+}

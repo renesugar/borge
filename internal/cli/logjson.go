@@ -145,8 +145,20 @@ func (e *Env) enableJSONLog(command string) {
 	e.Stderr = e.logger
 }
 
+// setStatusFilter records --filter STATUSCHARS: only these statuses are listed.
+//
+// borg keeps it on the archiver object as output_filter and checks it in one place, which
+// is why the option costs nothing on the commands that have it. borge does the same rather
+// than threading a predicate through each command's options.
+func (e *Env) setStatusFilter(chars string) { e.statusFilter = chars }
+
 // logFileStatus reports one item the way --list does, in whichever form is in force.
 func (e *Env) logFileStatus(status byte, path string) {
+	// borg's condition is "output_list and status is not None and (output_filter is None
+	// or status in output_filter)". The caller has already decided about --list.
+	if e.statusFilter != "" && !strings.ContainsRune(e.statusFilter, rune(status)) {
+		return
+	}
 	if e.logger != nil {
 		// The path goes through borg's text_to_json here as everywhere else: a name that
 		// is not valid unicode gets an approximation plus path_b64. borg does this for

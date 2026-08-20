@@ -65,6 +65,9 @@ type Env struct {
 	// logger is set by --log-json, and is also the Stderr this Env writes to once it is.
 	// Nil means the ordinary text form.
 	logger *jsonLogger
+
+	// statusFilter is --filter: which status characters --list prints. Empty means all.
+	statusFilter string
 }
 
 func (e *Env) lookup(name string) (string, bool) {

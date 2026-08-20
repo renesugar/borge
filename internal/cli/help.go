@@ -354,6 +354,9 @@ BEHAVIOUR
   BORGE_PRUNE_FORMAT         the default --format for "prune", when it is not given
   BORGE_REPO_LIST_FORMAT     the default --format for "repo-list", when it is not given
   BORGE_UNITS                si (default), iec or raw, for how sizes are printed
+  BORGE_ZSTD_MT_WORKERS      how many threads compress a .tar.zst tarball. Unset means
+                             one per CPU, where borg's default is one thread; the bytes
+                             a decompressor sees are the same either way
   BORGE_HOST_ID              this machine's lock identity, when the derived one is wrong
   BORGE_DELETE_I_KNOW_WHAT_I_AM_DOING
                              set to YES to answer repo-delete's confirmation

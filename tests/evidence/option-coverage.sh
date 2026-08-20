@@ -81,7 +81,9 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # the group subcommands and found "key remove --passphrase". A number that only ever falls
 # is a number that has stopped measuring. Down to 34 the same day, when --format reached
 # check and diff; down to 30 on 2026-08-20, when list and diff both reached zero - the two
-# --sort-by options, list's --depth and diff's --same-chunker-params.
+# --sort-by options, list's --depth and diff's --same-chunker-params; down to 26 the same
+# day, when export-tar and import-tar reached zero - --tar-filter on both and --filter on
+# import-tar and create.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -89,15 +91,15 @@ declare -A budget=(
     [check]=2
     [compact]=0
     [completion]=0
-    [create]=6
+    [create]=5
     [debug]=0
     [delete]=0
     [diff]=0
-    [export-tar]=1
+    [export-tar]=0
     [extract]=3
     [find]=0
     [help]=2
-    [import-tar]=2
+    [import-tar]=0
     [info]=0
     [key]=0
     [list]=0

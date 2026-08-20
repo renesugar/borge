@@ -716,27 +716,50 @@ is what borg does and what shows the resolution is not a search.
 
 **Stage 6 · `internal/archive/create_linux.go` · deliberate**
 
-borge sorts each directory's entries before walking into them. borg archives them in
-`readdir` order, which is whatever the filesystem returns — not defined, and different
-between filesystems and between runs on the same one.
+borge sorts each directory's entries **by name** before walking into them. borg sorts them
+**by inode number** — `scandir_inorder` in `helpers/fs.py`, falling back to the entry's name
+for a dirent it cannot stat.
 
-The same tree therefore produces the same archive twice with borge and need not with borg:
+*(Corrected 2026-08-20. This entry used to say borg archives in "`readdir` order, which is
+whatever the filesystem returns — not defined, and different between filesystems and between
+runs on the same one". borg does sort; just not by name. The error flattered borge's side of
+the trade-off, which is the one direction a divergence entry must never be wrong in. Found
+by measuring `create --list` while adding `--filter`.)*
+
+Measured on a tree where `f1.txt` has a higher inode than `sub`:
 
 ```
-borg      root, root/sub, root/sub/deep.txt, root/notes.txt
-borge     root, root/notes.txt, root/sub, root/sub/deep.txt
+borg   tsrc, tsrc/sub, tsrc/sub/deep, tsrc/sub/deep/f3.txt, tsrc/sub/f2.txt, tsrc/f1.txt
+borge  tsrc, tsrc/f1.txt, tsrc/sub, tsrc/sub/deep, tsrc/sub/deep/f3.txt, tsrc/sub/f2.txt
 ```
+
+**What each order is for.** Inode order is chosen for read locality: on a spinning disk, and
+on many filesystems without one, reading files in inode order beats reading them in name
+order — and a backup reads every file it stores. That is a real cost borge pays and does not
+measure; one for stage 9's list. Name order buys the opposite property: it is the same on
+every machine and every filesystem, so the same tree gives the same archive after a copy, a
+restore, or a move to different hardware. Both are deterministic for an unchanged tree on
+unchanged hardware; borge's survives the hardware changing.
 
 Both archives hold the same items, and every command in both tools reads either order, so
-this costs no interoperability. What it buys is that two archives of an unchanged tree are
-comparable — which is how several of the differential tests in this port are able to assert
-anything at all.
+this costs no interoperability. What borge's order buys is that two archives of an unchanged
+tree are comparable — which is how several of the differential tests in this port are able
+to assert anything at all.
 
 **It is a trap for tests, and it caught one.** `TestExcludeAfterPositionalsMatchesBorg`
 first compared the two tools' `list` output as a sequence and failed, having archived
 exactly the same four paths. A differential test that cares *which* items were stored has
 to sort both sides; one that compares sequences is asserting this divergence rather than
 whatever it meant to check.
+
+**It reaches `create --list` as well**, measured again on 2026-08-20: the listing follows
+the walk, so the two tools print the same lines in different orders. borg also prints a
+*directory* after its contents where borge prints it before — the same fact from the other
+end, since borg finishes a subtree before reporting the directory that held it. A test of
+`create --list` therefore compares sets, and says so.
+
+It does **not** reach `import-tar --list`, whose order comes from the tar file rather than
+from a directory walk. That one is compared as a sequence.
 
 ## 24. The rsync slashdot hack — **implemented 2026-08-18**
 
@@ -1778,3 +1801,81 @@ Two behaviours are worth naming because they are not what a fresh implementation
 - **borge's own "N path(s) differ" line was on stdout.** borg has no equivalent, and diff's
   stdout is the data: a script reading `borge diff -v` into a parser found a count at the
   end of it. Moved to stderr, which is where #46 put every other report.
+
+---
+
+## 49. `--tar-filter`, and the compressed name that held a plain tar — **fixed 2026-08-20**
+
+**Stage 8 · `internal/cli/tarfilter.go` · found by asking what borge did without the option**
+
+Four options: `--tar-filter` on `export-tar` and `import-tar`, and `--filter STATUSCHARS` on
+`import-tar` and `create`. Both tar commands are now at zero missing.
+
+### The file name decides the compression, and borge decided differently
+
+borge had no `--tar-filter` and compressed a `.gz` name with `compress/gzip`. Measured
+against borg, one row per suffix:
+
+| file name | borg writes | borge wrote |
+|---|---|---|
+| `.tar.gz`, `.tgz` | gzip | gzip ✓ |
+| `.tar.bz2`, `.tbz` | bzip2 | **plain tar** |
+| `.tar.xz`, `.txz` | xz | **plain tar** |
+| `.tar.lz4` | lz4 | **plain tar** |
+| `.tar.zst`, `.tar.zstd`, `.tzst` | zstd | **plain tar** |
+| `foo.gz` | plain tar | **gzip** |
+
+The first four rows are the bad ones: `borge export-tar arch backup.tar.xz` produced a file
+that no `xz` can open, named as though it could, and **exited 0**. The last row is the same
+mistake from the other side — borg's suffixes are `.tar.gz` and `.tgz`, not any `.gz`, so a
+`dump.gz` that borg leaves alone was gzipped by borge.
+
+Nothing caught it because the tar tests round-tripped borge against itself for compression
+and against borg only for `.tar` — two halves that were each true.
+
+### Filter programs, not libraries
+
+borg pipes the tarball through an external program and its source says why: a compressor
+in-process competes with borg for CPU, a library limits which formats are possible, and a
+system may ship something better than the built-in — `pigz`, `pxz`. borge inherits the
+decision rather than re-deciding it, because the decision is **visible**: `--tar-filter
+'pigz -9'` has to mean the same thing in both tools, and a borge that quietly compressed
+in-process would ignore what it was told.
+
+zstd is borg's one exception — in-process, since libzstd's threading runs outside the GIL
+and there is no better external tool — and borge follows that too, through
+`compress.NewZstdStreamWriter`. It is the one format that needs no program installed.
+
+`--tar-filter` is split the way borg splits it, with Python's `shlex` in POSIX mode and no
+shell — borg's own comment is "Sorry pal, shell mode is a no-no". `splitCommandLine` is
+checked against CPython's `shlex.split` case by case, including both of its error messages
+("No closing quotation", "No escaped character").
+
+**One difference on Ctrl-C.** borg's filter ignores SIGINT so that borg gets it first and
+kills the filter itself; Go cannot run code between fork and exec, so borge's filter dies
+first and borge then fails writing to a closed pipe. Both tools leave a truncated output
+file. Only the message differs.
+
+**And one on threads.** borg compresses a `.tar.zst` on one thread unless
+`BORG_ZSTD_MT_WORKERS` says otherwise; borge's zstd library defaults to one worker per CPU.
+`BORGE_ZSTD_MT_WORKERS` sets it explicitly in borge too. The bytes a decompressor sees are
+the same either way — this is speed, not format.
+
+### `--filter`, and the stream `import-tar --list` was writing to
+
+`--filter STATUSCHARS` prints only the statuses named, and in borg it is one condition in
+one place (`print_file_status`), which is why it costs nothing on the commands that have it.
+borge now keeps it on the `Env` the same way.
+
+Wiring it up found that **`import-tar --list` wrote to stdout**, where borg writes to stderr
+— and with its own `Fprintf` rather than through `logFileStatus`, so it was not JSON under
+`--log-json` either. That is DIVERGENCES #46 again, missed by that sweep because this call
+site did not go through the shared printer. `create` had been fixed; its sibling had not.
+
+### What the `--filter` comparison could not assert
+
+`create --list` cannot be compared as a sequence: borg walks a directory in inode order and
+borge in name order, and borg reports a directory *after* its contents where borge reports
+it before (#23, whose description of borg's order was wrong until this work corrected it).
+So that test compares sets and says so. `import-tar --list` **is** compared as a sequence —
+its order comes from the tar file, not from a directory walk.

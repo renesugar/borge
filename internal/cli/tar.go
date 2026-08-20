@@ -11,7 +11,6 @@ package cli
 
 import (
 	"bufio"
-	"compress/gzip"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -49,7 +48,10 @@ func cmdImportTar(e *Env, args []string) int {
 	chunkerParams := fs.String("chunker-params", "", "chunker parameters, e.g. fastcdc,19,23,21,2")
 	ignoreZeros := fs.Bool("ignore-zeros", false,
 		"keep reading past the end-of-archive marker, for concatenated tars")
+	tarFilter := fs.String("tar-filter", "auto",
+		"program to pipe the input through; 'auto' picks one from the file name")
 	list := fs.Bool("list", false, "print each item as it is imported")
+	statusFilter := fs.String("filter", "", "only list items whose status is one of these characters")
 	stats := fs.Bool("stats", false, "print statistics when finished")
 	var timestamp timestampFlag
 	timestamp.register(fs)
@@ -60,6 +62,7 @@ func cmdImportTar(e *Env, args []string) int {
 	if common.json {
 		*stats = true
 	}
+	e.setStatusFilter(*statusFilter)
 	if fs.NArg() < 2 {
 		e.errorf("import-tar needs an archive name and an input file (or - for stdin)")
 		return ExitError
@@ -101,14 +104,20 @@ func cmdImportTar(e *Env, args []string) int {
 		in = file
 	}
 	in = bufio.NewReaderSize(in, 1<<20)
-	if strings.HasSuffix(source, ".gz") || strings.HasSuffix(source, ".tgz") {
-		gz, err := gzip.NewReader(in)
-		if err != nil {
-			return e.fail(err)
-		}
-		defer gz.Close()
-		in = gz
+
+	// The decompressor, chosen from the name unless --tar-filter says otherwise. Closed
+	// below rather than deferred: a filter that reports corruption has to fail the import,
+	// and a deferred close cannot change the exit code.
+	filterCmd := *tarFilter
+	if filterCmd == "auto" {
+		filterCmd = tarFilterFor(source, true)
 	}
+	filtered, err := e.tarReadFilter(filterCmd, in)
+	if err != nil {
+		return e.fail(err)
+	}
+	defer filtered.Close()
+	in = filtered
 
 	path, err := e.resolveRepo(common.repo)
 	if err != nil {
@@ -153,8 +162,13 @@ func cmdImportTar(e *Env, args []string) int {
 		CommandLine:   "borge import-tar " + strings.Join(args, " "),
 		CWD:           cwd,
 		OnItem: func(s byte, p string) {
+			// On stderr and through the same printer create uses, which is what borg does:
+			// import-tar's listing is log output, not data. borge wrote it to stdout with
+			// its own Fprintf, so it was neither on borg's stream nor JSON under
+			// --log-json - the same defect create had (DIVERGENCES #46), missed because
+			// this call site did not go through logFileStatus.
 			if *list {
-				fmt.Fprintf(e.Stdout, "%c %s\n", s, p)
+				e.logFileStatus(s, p)
 			}
 		},
 		OnWarning: func(p, reason string) {
@@ -204,6 +218,8 @@ func cmdExportTar(e *Env, args []string) int {
 		"PAX (xattrs, ACLs, sub-second times), BORG (PAX plus the whole item) or GNU")
 	strip := fs.Int("strip-components", 0, "remove this many leading path components")
 	list := fs.Bool("list", false, "print each item as it is exported")
+	tarFilter := fs.String("tar-filter", "auto",
+		"program to pipe the output through; 'auto' picks one from the file name")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}
@@ -260,13 +276,14 @@ func cmdExportTar(e *Env, args []string) int {
 	}
 	buffered := bufio.NewWriterSize(sink, 1<<20)
 
-	var out io.Writer = buffered
-	var gz *gzip.Writer
-	// A ".gz" name means the user wants it compressed. Deciding from the name rather than
-	// a flag is what every other tar tool does.
-	if strings.HasSuffix(target, ".gz") || strings.HasSuffix(target, ".tgz") {
-		gz = gzip.NewWriter(buffered)
-		out = gz
+	// The compressor, chosen from the name unless --tar-filter says otherwise.
+	filterCmd := *tarFilter
+	if filterCmd == "auto" {
+		filterCmd = tarFilterFor(target, false)
+	}
+	out, err := e.tarWriteFilter(filterCmd, buffered)
+	if err != nil {
+		return e.fail(err)
 	}
 
 	status := ExitOK
@@ -292,12 +309,12 @@ func cmdExportTar(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
-	// Closed innermost first: gzip's trailer has to reach the buffer before the buffer is
-	// flushed, or the output is a truncated stream that looks complete.
-	if gz != nil {
-		if err := gz.Close(); err != nil {
-			return e.fail(err)
-		}
+	// Closed innermost first: the compressor's trailer has to reach the buffer before the
+	// buffer is flushed, or the output is a truncated stream that looks complete. For an
+	// external filter this is also where it is waited for, so a compressor that failed is
+	// reported instead of leaving a half-written file behind with exit status 0.
+	if err := out.Close(); err != nil {
+		return e.fail(err)
 	}
 	if err := buffered.Flush(); err != nil {
 		return e.fail(err)

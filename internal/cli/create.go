@@ -210,6 +210,7 @@ func cmdCreate(e *Env, args []string) int {
 	fs.BoolVar(dryRun, "n", false, "say what would be archived, archive nothing")
 	filesCache := fs.String("files-cache", "", "files cache mode, e.g. ctime,size,inode or disabled")
 	list := fs.Bool("list", false, "print each item as it is archived")
+	statusFilter := fs.String("filter", "", "only list items whose status is one of these characters")
 	stats := fs.Bool("stats", false, "print statistics when finished")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
@@ -220,6 +221,7 @@ func cmdCreate(e *Env, args []string) int {
 	if common.json {
 		*stats = true
 	}
+	e.setStatusFilter(*statusFilter)
 	// "R PATH" lines in a patterns file are paths to back up, so they count towards
 	// having something to do: borg accepts a create whose only root came from a patterns
 	// file, and borge used to refuse it (docs/DIVERGENCES.md #25).
