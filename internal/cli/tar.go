@@ -189,7 +189,13 @@ func cmdImportTar(e *Env, args []string) int {
 			return e.fail(err)
 		}
 		doc := archiveCreatedJSON(repo, k, m, path, cacheDir, st.Meta, id,
-			createStatsJSON(int64(st.Files), st.OriginalSize, st.FileStatus))
+			createStatsJSON(int64(st.Files), st.OriginalSize, st.FileStatus, st.Timings,
+				// Empty, as borg's is. borg fills store_stats in create_cmd.py and nowhere
+				// else, so "borg import-tar --json" carries "store_stats": {} however much
+				// work the import did. It reads like an oversight in borg rather than a
+				// decision - the numbers are just as available here - but a frontend
+				// reading the key sees {} from borg, and this is borg's API.
+				map[string]any{}))
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "    ")
 		if err := enc.Encode(doc); err != nil {

@@ -1967,3 +1967,80 @@ archive cannot land on either side of `--keep 7d` depending on which second each
 started — run through twenty-seven policies, comparing the decision lines. Plus the JSON
 form, `--from`, the protected case, and every refusal. The matrix is guarded against
 vacuity by requiring `--keep all` and `--keep 1` to disagree.
+
+---
+
+## 51. The numbers borge did not measure — **fixed 2026-08-20**
+
+**Stage 8 · `internal/store/stats.go`, `internal/cli/storestats.go`**
+**· found by implementing an option**
+
+`extract --stdout`, `--continue` and `--stats`, which take `extract` to zero missing. The
+third is the interesting one: **borg's `extract --stats` is not about the archive**. It
+prints what the *repository* did — thirty-one lines of call counts, times, volumes and
+throughputs — and borge's store counted none of it.
+
+### Sending nothing was right; measuring is better
+
+`create --json` carried three of borg's six `stats` keys. `chunking_time`, `hashing_time`
+and `store_stats` were omitted deliberately, and the reason was sound:
+
+> Sending them as zeros would be worse than omitting them: a frontend charting
+> `hashing_time` would draw a flat line and believe it, where a missing key is a question
+> it can answer. — `PORTING_PLAN` §11.4
+
+That argument is an argument for measuring, not for omitting forever, and `extract --stats`
+forced the issue. `internal/store` now counts what it is asked to do — per method: calls,
+time, and for load and store the volume — and the builder times the chunker and the id
+hash. The JSON schema test's omission list is gone with them; it had a guard that failed if
+borg ever *stopped* sending the keys, and that guard is what would have caught a stale
+exemption.
+
+### Three groups of counters, and what they mean apart
+
+- The **per-method** counters are what the caller asked the store to do.
+- The **backend** counters are what reached storage, so `backend_load_calls` below
+  `load_calls` is a cache doing its job.
+- The **cache** counters are that job from the other side.
+
+With no cache configured the first two are equal and the third is zeroes — which is not a
+fabrication but the truth about a store that has no cache. **`cache_disabled` is `True` in
+borge where borg prints `False`**, and that difference is real: borgstore always has a cache
+object for a local repository and leaves it unused, while borge's extract path configures
+none at all.
+
+### `import-tar --json` sends an empty `store_stats`, in both tools
+
+borg fills `store_stats` in `create_cmd.py` and nowhere else, so `borg import-tar --json`
+reports `"store_stats": {}` however much work the import did. It reads like an oversight
+rather than a decision — the numbers are just as available there — but it is what a frontend
+reading borg's API gets, so borge sends `{}` too. Found by removing the omission list: the
+schema comparison failed on `import-tar` alone, with borge sending thirty-one keys where
+borg sent none.
+
+### `--continue`, and how not to test it
+
+`--continue` skips an item whose extracted copy is already there and already right: borg's
+`same_item` compares the type, the whole mode, the size and the mtime, and borg's own
+comment bounds the claim — "good enough for the intended use case: continuing an extraction
+of same archive that initially started in an empty directory".
+
+The first attempt to test it counted store loads before and after, and showed borg's
+`--continue` doing **nothing at all**: borgstore reports one load per pack range, so
+skipping a file need not change the count. The test now compares outcomes instead — a file
+zeroed but left at its original size and mtime is *skipped* by both tools, re-extracted by
+both without the option, and re-extracted by both when truncated.
+
+### Still open, and now written down
+
+**`create --stats` prints seventeen lines in borg and seven in borge**, sharing five labels.
+borg has `Repository`, `Time (nominal)`, `Time (start)`, `Time (end)`, `Duration`, `Time
+spent in hashing`, `Time spent in chunking`, `Added files`, `Unchanged files`, `Modified
+files`, `Error files`, `Files changed while reading`; borge has `Chunks` and `Files cache`,
+which borg does not, and formats its sizes as bare byte counts where borg writes `632 B`.
+
+Everything borg reports there is now measured — the timings landed with this entry, the
+file counts are in `files_stats`, the times are in the archive metadata — so this is
+formatting work rather than missing information. It is one command's summary and it is not
+in the option gate's sight, which is exactly why it is recorded here rather than left to be
+noticed.

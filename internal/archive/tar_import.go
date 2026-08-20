@@ -110,6 +110,9 @@ type ImportTarStats struct {
 	// the tar, where this also carries the item pointers and the archive object. See
 	// Builder.AddChunk and docs/DIVERGENCES.md #36.
 	OriginalSize int64
+	// Timings carries the builder's hashing and chunking times, which "import-tar --json"
+	// reports exactly as create does.
+	Timings Stats
 }
 
 // ImportTar reads a tar stream and writes it as a new archive.
@@ -169,6 +172,7 @@ func ImportTar(m *manifest.Manifest, r io.Reader, opts ImportTarOptions) (*Impor
 	}
 	stats.Meta = meta
 	stats.OriginalSize = b.Stats().OriginalSize
+	stats.Timings = b.Stats()
 	return stats, id, nil
 }
 

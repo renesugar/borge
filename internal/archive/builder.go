@@ -53,6 +53,17 @@ type Stats struct {
 	// Chunks and NewChunks count chunk references and first-time stores.
 	Chunks    int64
 	NewChunks int64
+
+	// HashingTime and ChunkingTime are borg's two timings, reported by "create --stats"
+	// and carried in "create --json".
+	//
+	// They were the reason two keys were missing from borge's JSON: sending zeroes would
+	// have been worse than sending nothing, "because a frontend charting hashing_time
+	// would draw a flat line and believe it" (PORTING_PLAN §11.4). Measuring is the way
+	// out of that, and this is the measurement. Each covers what borg's covers: hashing
+	// is the chunk id computation, chunking is the chunker producing a chunk.
+	HashingTime  time.Duration
+	ChunkingTime time.Duration
 }
 
 // BuilderOptions configure a new archive.
@@ -215,7 +226,9 @@ func (b *Builder) ChunkerParams() chunker.Params { return b.chunkerParams }
 //
 // So borge matches the behaviour, not the comment. See docs/DIVERGENCES.md #36.
 func (b *Builder) AddChunk(data []byte, roType string) (item.ChunkListEntry, error) {
+	startedHashing := time.Now()
 	id := b.manifest.Key().IDHash(data)
+	b.stats.HashingTime += time.Since(startedHashing)
 	size := int64(len(data))
 
 	b.stats.Chunks++
@@ -258,7 +271,12 @@ func (b *Builder) ChunkFile(r io.Reader) ([]item.ChunkListEntry, error) {
 	}
 	var out []item.ChunkListEntry
 	for {
+		// Timed around Next alone: what follows it is hashing and storing, which are
+		// counted separately, and a timer around the whole loop would report the sum
+		// three times over.
+		startedChunking := time.Now()
 		c, err := ch.Next()
+		b.stats.ChunkingTime += time.Since(startedChunking)
 		if err == io.EOF {
 			break
 		}
@@ -396,9 +414,13 @@ func (s *itemStream) flush(final bool) error {
 	if err != nil {
 		return err
 	}
+	// The item stream is chunked too, and borg counts that in the same total: its
+	// chunking_time comes from the chunker object, not from the caller.
 	var pieces [][]byte
 	for {
+		startedChunking := time.Now()
 		c, err := ch.Next()
+		s.builder.stats.ChunkingTime += time.Since(startedChunking)
 		if err == io.EOF {
 			break
 		}

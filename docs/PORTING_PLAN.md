@@ -1723,7 +1723,7 @@ a table at all.
 | --- | --- | --- | --- |
 | 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | §11 | not started; the largest single item |
 | 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
-| 3 | 22 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. On 2026-08-20: `list` and `diff` (DIVERGENCES #48), `export-tar` and `import-tar` (#49), `prune` (#50) all reached zero. Largest now: `create` 5, `recreate` 4 (row 4), `extract` 3, `repo-create` 3 (row 2) |
+| 3 | 19 missing per-command options | §11.2, `option-coverage.sh` | measured, down from 111. On 2026-08-20: `list` and `diff` (DIVERGENCES #48), `export-tar` and `import-tar` (#49), `prune` (#50) and `extract` (#51) all reached zero. Largest now: `create` 5, `recreate` 4 (row 4), `repo-create` 3 (row 2) |
 | 4 | `recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter` | §11.2 | part of row 3, listed apart because it is one feature over four options and needs the item-stream walk rather than the filesystem one |
 | 5 | ~~JSON API: `repo-info`, `info`, `version`, `analyze` schemas~~ | §11.4b | **done 2026-08-19.** All eight of borg's `--json` commands now match, held by `TestJSONSchemaMatchesBorg` |
 | 6 | ~~`--log-json`~~ | §11.4b | **done 2026-08-19.** Registered on every command through `newFlagSet`, borge's equivalent of borg's common parser. All of stderr becomes JSON, not only the messages borge thought to convert |
@@ -2080,13 +2080,15 @@ that did emit JSON emitted a document of borge's own shape.
 | `version` | four keys borg does not have (`borg_commit`, `borg_series`, `repository_version`, `revision`) | open |
 | `analyze` | unrelated shapes on both sides | open |
 
-**Three keys borge does not send, deliberately.** borg's `create`/`import-tar` stats block
-has six keys; borge sends three. `chunking_time` and `hashing_time` are instrumentation
-borge does not collect, and `store_stats` is a per-backend call/volume/latency report from
-borg's Store layer. Sending them as zeros would be worse than omitting them: a frontend
-charting `hashing_time` would draw a flat line and believe it, where a missing key is a
-question it can answer. Same reasoning keeps `command_line` out of the archive-level JSON
-until borge reads it back from the metadata.
+~~**Three keys borge does not send, deliberately.**~~ **Sent since 2026-08-20** (DIVERGENCES
+#51). borge's `create` stats block sent three of borg's six keys: `chunking_time` and
+`hashing_time` were instrumentation borge did not collect, and `store_stats` a
+call/volume/latency report from a Store layer that counted nothing. The reason for omitting
+rather than zeroing was right — "a frontend charting `hashing_time` would draw a flat line
+and believe it, where a missing key is a question it can answer" — and it is an argument for
+*measuring*, which `extract --stats` forced. The store counts its own work now and the
+builder times the chunker and the hash. The same reasoning still keeps `command_line` out of
+the archive-level JSON until borge reads it back from the metadata.
 
 **The rule that made `repo-list` and `prune` agree**, and that the remaining four need: the
 archive-level key set is *not* fixed. borg builds it from the effective `--format` — "the

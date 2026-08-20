@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/repoobj"
@@ -61,6 +62,18 @@ type ExtractOptions struct {
 	// DryRun reads and verifies everything but writes nothing.
 	DryRun bool
 
+	// Stdout, when set, sends every extracted file's contents there instead of writing
+	// anything to the filesystem. borg treats it as a kind of dry run - "if dry_run or
+	// stdout" - and so does this: no directories are made, no attributes are applied, and
+	// a hard link is not linked. What comes out is the concatenation of the matched
+	// files' contents, in archive order, which is what makes "borge extract --stdout
+	// ARCHIVE some/file | less" work and what makes it meaningless for a whole tree.
+	Stdout io.Writer
+
+	// Continue skips an item whose extracted copy is already there and already right,
+	// so an interrupted extraction can be resumed without reading everything again.
+	Continue bool
+
 	// Filter selects which items to extract. Nil extracts everything.
 	Filter func(*item.Item) bool
 
@@ -87,6 +100,8 @@ type ExtractStats struct {
 	Errors     int
 	Unmatched  int
 	SkippedACL int
+	// Skipped counts items --continue found already extracted and correct.
+	Skipped int
 }
 
 // Extract writes the archive's items into opts.Dest.
@@ -106,7 +121,10 @@ func (a *Archive) Extract(opts ExtractOptions) (*ExtractStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !opts.DryRun {
+	// Neither a dry run nor --stdout touches the destination, so neither creates it: a
+	// "borge extract --stdout" that made an empty directory as a side effect would be a
+	// surprise, and borg makes none.
+	if !opts.DryRun && opts.Stdout == nil {
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			return nil, fmt.Errorf("archive: %w", err)
 		}
@@ -191,8 +209,8 @@ func (x *extractor) item(it *item.Item) error {
 		x.opts.OnProgress(it)
 	}
 
-	if x.opts.DryRun {
-		return x.dryRun(it)
+	if x.opts.DryRun || x.opts.Stdout != nil {
+		return x.stream(it)
 	}
 
 	if err := x.checkSafeParent(archived); err != nil {
@@ -208,6 +226,13 @@ func (x *extractor) item(it *item.Item) error {
 	// Remove whatever is already there, except an existing directory where a directory is
 	// wanted - replacing that would destroy a btrfs subvolume (borg #4233).
 	if st, err := os.Lstat(path); err == nil {
+		if x.opts.Continue && sameAsExtracted(it, st) {
+			// Already extracted, by a run that was interrupted later. Skipping it is the
+			// whole point of --continue: the chunks are not fetched, which is where the
+			// time goes.
+			x.stats.Skipped++
+			return nil
+		}
 		switch {
 		case !st.IsDir():
 			_ = os.Remove(path)
@@ -324,20 +349,70 @@ func cloneWithPath(it *item.Item, path string) *item.Item {
 
 // dryRun reads an item's content without writing anything, which is what makes a dry run
 // worth doing: it proves the chunks are there and authenticate.
-func (x *extractor) dryRun(it *item.Item) error {
+// stream is the path shared by --dry-run and --stdout: read every chunk, count it, check
+// the recorded size, and - for --stdout - write it out.
+//
+// borg shares them the same way, and the shared shape is the point: a dry run that did not
+// read the chunks would not verify anything, and --stdout that did not check the size
+// would hand a truncated file to whatever is reading the pipe.
+func (x *extractor) stream(it *item.Item) error {
 	if !it.ChunksSet {
 		return nil
 	}
 	var total int64
 	err := x.fetchChunks(it, func(data []byte) error {
 		total += int64(len(data))
-		return nil
+		if x.opts.Stdout == nil {
+			return nil
+		}
+		_, werr := x.opts.Stdout.Write(data)
+		return werr
 	})
 	if err != nil {
 		return x.fail(it.Path, err)
 	}
 	x.stats.Bytes += total
 	return x.checkSize(it, total)
+}
+
+// sameAsExtracted is borg's same_item: is what is on disk already this archived item?
+//
+// borg's own comment says what the check is for and how far it can be trusted: "this is
+// good enough for the intended use case: continuing an extraction of same archive that
+// initially started in an empty directory", with a noted risk that a file interrupted
+// between its mtime and its flags keeps the wrong flags.
+//
+// Only regular files and directories are compared. borg says why: the others "are less
+// frequent and have no content extraction we could 'optimize away'" - skipping a symlink
+// saves nothing, so it is re-created rather than examined.
+func sameAsExtracted(it *item.Item, st os.FileInfo) bool {
+	mode := it.ModeOr(0)
+	isFile := st.Mode().IsRegular()
+	isDir := st.IsDir()
+	if !isFile && !isDir {
+		return false
+	}
+	// The whole mode, not just the type: extracting a file over one with different
+	// permissions is still work to do. The stat is read through syscall.Stat_t rather than
+	// os.FileMode, because Go's FileMode is a portable abstraction and what has to be
+	// compared here is the raw st_mode the item recorded.
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
+	if uint32(mode) != sys.Mode {
+		return false
+	}
+	if isFile && (it.Size == nil || *it.Size != st.Size()) {
+		// The size check is what catches a file whose extraction was interrupted part way.
+		return false
+	}
+	if it.MTime == nil || *it.MTime != st.ModTime().UnixNano() {
+		// borg notes that mtime is set late - after xattrs and ACLs, before flags - which
+		// is what makes it a reasonable marker for "this one finished".
+		return false
+	}
+	return true
 }
 
 // checkSize compares the item's recorded size against what its chunks actually held.

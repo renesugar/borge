@@ -478,6 +478,12 @@ func cmdExtract(e *Env, args []string) int {
 	dest := fs.String("C", "",
 		"extract into this directory (borge only; borg's -C elsewhere means --compression)")
 	dryRun := fs.Bool("dry-run", false, "read and verify, but write nothing")
+	fs.BoolVar(dryRun, "n", false, "read and verify, but write nothing")
+	toStdout := fs.Bool("stdout", false, "write every extracted file's contents to stdout")
+	keepGoing := fs.Bool("continue", false,
+		"skip items an interrupted extraction already wrote correctly")
+	stats := fs.Bool("stats", false, "print the repository's I/O statistics afterwards")
+	fs.BoolVar(stats, "s", false, "print the repository's I/O statistics afterwards")
 	sparse := fs.Bool("sparse", false, "write all-zero chunks as holes")
 	numericIDs := fs.Bool("numeric-ids", false, "restore numeric uid/gid, ignoring names")
 	noXAttrs := fs.Bool("noxattrs", false, "do not restore extended attributes")
@@ -529,6 +535,7 @@ func cmdExtract(e *Env, args []string) int {
 		NoACLs:          *noACLs,
 		NoFlags:         *noFlags,
 		DryRun:          *dryRun,
+		Continue:        *keepGoing,
 		StripComponents: *strip,
 		Filter:          func(it *item.Item) bool { return matcher.Match(it.Path) },
 		OnError: func(itemPath string, err error) error {
@@ -539,6 +546,12 @@ func cmdExtract(e *Env, args []string) int {
 			return nil
 		},
 	}
+	if *toStdout {
+		// The contents go to stdout and nothing goes to the filesystem, so the destination
+		// is not even looked at. borg treats this as a kind of dry run for everything
+		// except the bytes.
+		opts.Stdout = e.Stdout
+	}
 	if *list {
 		// On stderr, where borg puts it: "borg extract --list" writes its listing to
 		// stderr and leaves stdout for --stdout's file contents. borge wrote to stdout,
@@ -546,9 +559,15 @@ func cmdExtract(e *Env, args []string) int {
 		opts.OnProgress = func(it *item.Item) { fmt.Fprintln(e.Stderr, it.Path) }
 	}
 
-	stats, err := a.Extract(opts)
+	extracted, err := a.Extract(opts)
 	if err != nil {
 		return e.fail(err)
+	}
+	if *stats {
+		// borg's --stats on extract is not about the archive: it prints what the
+		// *repository* did - calls, time and volume per store method. It goes to stderr
+		// with every other report, and after the extraction rather than during it.
+		fmt.Fprint(e.Stderr, formatStoreStats(o.repo.Store().Stats(), e.sizeUnits()))
 	}
 	for _, p := range matcher.UnmatchedIncludePatterns() {
 		e.warnf("include pattern %q never matched anything", p.String())
@@ -557,10 +576,11 @@ func cmdExtract(e *Env, args []string) int {
 	if common.verbose {
 		fmt.Fprintf(e.Stderr,
 			"extracted %d items (%d files, %d dirs, %d symlinks, %d hard links, %d other), %d bytes\n",
-			stats.Items, stats.Files, stats.Dirs, stats.Symlinks, stats.Hardlinks, stats.Others, stats.Bytes)
+			extracted.Items, extracted.Files, extracted.Dirs, extracted.Symlinks,
+			extracted.Hardlinks, extracted.Others, extracted.Bytes)
 	}
-	if stats.SkippedACL > 0 {
-		e.warnf("%d ACL(s) could not be restored", stats.SkippedACL)
+	if extracted.SkippedACL > 0 {
+		e.warnf("%d ACL(s) could not be restored", extracted.SkippedACL)
 		status = ExitWarning
 	}
 	return status

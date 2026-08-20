@@ -85,7 +85,8 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # day, when export-tar and import-tar reached zero - --tar-filter on both and --filter on
 # import-tar and create; down to 22 when prune reached zero - --keep, --from and the two
 # quarterly rules - which also took the alias gap from 17 to 11, prune having six short
-# spellings borge did not have.
+# spellings borge did not have; down to 19 when extract reached zero - --stdout, --continue
+# and --stats, the last of which needed the store to start counting what it does.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -98,7 +99,7 @@ declare -A budget=(
     [delete]=0
     [diff]=0
     [export-tar]=0
-    [extract]=3
+    [extract]=0
     [find]=0
     [help]=2
     [import-tar]=0

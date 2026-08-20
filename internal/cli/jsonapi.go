@@ -157,7 +157,9 @@ func archiveJSONData(info manifest.Info, template string) (map[string]any, error
 // Sending them as zeros would be the worse choice by some distance: a frontend charting
 // hashing_time would draw a flat line and believe it, where a missing key is a question
 // it can answer by asking the version. See docs/PORTING_PLAN.md section 11.4.
-func createStatsJSON(nfiles, originalSize int64, fileStatus map[string]int64) map[string]any {
+func createStatsJSON(nfiles, originalSize int64, fileStatus map[string]int64,
+	timings archive.Stats, storeStats map[string]any) map[string]any {
+
 	// files_stats is always an object, never null: a backup that stored nothing has an
 	// empty count, and null would read as "not measured".
 	counts := map[string]int64{}
@@ -168,6 +170,12 @@ func createStatsJSON(nfiles, originalSize int64, fileStatus map[string]int64) ma
 		"nfiles":        nfiles,
 		"original_size": originalSize,
 		"files_stats":   counts,
+		// The three keys borge used to leave out because it measured nothing. It measures
+		// them now (DIVERGENCES #51), and they are seconds as floats, which is what borg
+		// sends - not a formatted duration, which is the text form's business.
+		"hashing_time":  timings.HashingTime.Seconds(),
+		"chunking_time": timings.ChunkingTime.Seconds(),
+		"store_stats":   storeStats,
 	}
 }
 

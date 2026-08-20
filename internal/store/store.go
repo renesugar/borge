@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // CacheMode selects how a namespace uses the local cache.
@@ -59,6 +60,9 @@ type Store struct {
 	namespaces []namespaceEntry
 
 	cache Backend
+
+	// stats counts what the store has been asked to do; see stats.go.
+	stats statsRecorder
 }
 
 type namespaceEntry struct {
@@ -201,6 +205,8 @@ func (s *Store) Find(name string, deleted bool) (string, error) {
 func (s *Store) Info(name string, deleted bool) (ItemInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.Info, started, 0) }()
 	nested, err := s.find(name, deleted)
 	if err != nil {
 		return ItemInfo{}, err
@@ -212,6 +218,10 @@ func (s *Store) Info(name string, deleted bool) (ItemInfo, error) {
 func (s *Store) Load(name string, offset, size int64, deleted bool) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	started := time.Now()
+	var loaded int64
+	defer func() { s.stats.observe(&s.stats.s.Load, started, loaded) }()
 
 	cfg, err := s.configFor(name)
 	if err != nil {
@@ -225,37 +235,63 @@ func (s *Store) Load(name string, offset, size int64, deleted bool) ([]byte, err
 	switch cfg.Cache {
 	case CacheWritethrough:
 		if s.cache != nil {
+			s.stats.add(&s.stats.s.CacheLoadCalls, 1)
 			if data, err := s.cache.Load(nested, offset, size); err == nil {
+				s.stats.add(&s.stats.s.CacheHits, 1)
+				s.stats.add(&s.stats.s.CacheLoadVolume, int64(len(data)))
+				loaded = int64(len(data))
 				return data, nil
 			}
 			// A cache miss, or a broken cache, is not an error: fall through to the
 			// primary backend. The whole object is fetched and cached, so the next
-			// range read of the same object is local.
+			// range read of the same object is local. Counted as a miss either way -
+			// borgstore counts errors separately only where it can tell them apart, and
+			// here the miss and the broken read arrive as the same failure.
+			s.stats.add(&s.stats.s.CacheMisses, 1)
 		}
-		full, err := s.backend.Load(nested, 0, -1)
+		full, err := s.loadFromBackend(nested, 0, -1)
 		if err != nil {
 			return nil, err
 		}
 		s.cacheStore(nested, full)
-		return sliceRange(full, offset, size), nil
+		out := sliceRange(full, offset, size)
+		loaded = int64(len(out))
+		return out, nil
 
 	case CacheMirror:
-		full, err := s.backend.Load(nested, 0, -1)
+		full, err := s.loadFromBackend(nested, 0, -1)
 		if err != nil {
 			return nil, err
 		}
 		s.cacheStore(nested, full)
-		return sliceRange(full, offset, size), nil
+		out := sliceRange(full, offset, size)
+		loaded = int64(len(out))
+		return out, nil
 
 	default:
-		return s.backend.Load(nested, offset, size)
+		data, err := s.loadFromBackend(nested, offset, size)
+		loaded = int64(len(data))
+		return data, err
 	}
+}
+
+// loadFromBackend is every read that actually reaches storage, which is what separates the
+// backend counters from the per-method ones.
+func (s *Store) loadFromBackend(nested string, offset, size int64) ([]byte, error) {
+	data, err := s.backend.Load(nested, offset, size)
+	s.stats.add(&s.stats.s.BackendLoadCalls, 1)
+	s.stats.add(&s.stats.s.BackendLoadVolume, int64(len(data)))
+	return data, err
 }
 
 // Store writes an object.
 func (s *Store) Store(name string, value []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	started := time.Now()
+	var stored int64
+	defer func() { s.stats.observe(&s.stats.s.Store, started, stored) }()
 
 	cfg, err := s.configFor(name)
 	if err != nil {
@@ -270,6 +306,9 @@ func (s *Store) Store(name string, value []byte) error {
 	if err := s.backend.Store(nested, value); err != nil {
 		return err
 	}
+	s.stats.add(&s.stats.s.BackendStoreCalls, 1)
+	s.stats.add(&s.stats.s.BackendStoreVolume, int64(len(value)))
+	stored = int64(len(value))
 	if cfg.Cache == CacheWritethrough || cfg.Cache == CacheMirror {
 		s.cacheStore(nested, value)
 	}
@@ -280,6 +319,9 @@ func (s *Store) Store(name string, value []byte) error {
 func (s *Store) Delete(name string, deleted bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.Delete, started, 0) }()
 
 	cfg, err := s.configFor(name)
 	if err != nil {
@@ -292,7 +334,9 @@ func (s *Store) Delete(name string, deleted bool) error {
 	if err := s.backend.Delete(nested); err != nil {
 		return err
 	}
+	s.stats.add(&s.stats.s.BackendDeleteCalls, 1)
 	if cfg.Cache == CacheWritethrough || cfg.Cache == CacheMirror {
+		s.stats.add(&s.stats.s.CacheDeleteCalls, 1)
 		_ = s.cache.Delete(nested) // best effort; a stale cache entry is corrected on the next store
 	}
 	return nil
@@ -305,6 +349,10 @@ func (s *Store) Delete(name string, deleted bool) error {
 func (s *Store) SoftDelete(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A move at the backend, and counted as one: borg's soft delete, undelete and
+	// re-nesting are all renames, and borgstore tallies them under move.
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.Move, started, 0) }()
 	nested, err := s.find(name, false)
 	if err != nil {
 		return err
@@ -316,6 +364,10 @@ func (s *Store) SoftDelete(name string) error {
 func (s *Store) Undelete(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A move at the backend, and counted as one: borg's soft delete, undelete and
+	// re-nesting are all renames, and borgstore tallies them under move.
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.Move, started, 0) }()
 	nested, err := s.find(name, true)
 	if err != nil {
 		return err
@@ -327,6 +379,8 @@ func (s *Store) Undelete(name string) error {
 func (s *Store) Move(name, newName string, deleted bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.Move, started, 0) }()
 	nested, err := s.find(name, deleted)
 	if err != nil {
 		return err
@@ -343,6 +397,10 @@ func (s *Store) Move(name, newName string, deleted bool) error {
 func (s *Store) ChangeLevel(name string, deleted bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A move at the backend, and counted as one: borg's soft delete, undelete and
+	// re-nesting are all renames, and borgstore tallies them under move.
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.Move, started, 0) }()
 	cfg, err := s.configFor(name)
 	if err != nil {
 		return err
@@ -390,6 +448,10 @@ func (s *Store) moveLocked(name, from, to string) error {
 func (s *Store) List(namespace string, deleted bool, fn func(ItemInfo) bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// One call, however many directories the nesting makes it read: borgstore counts the
+	// method the caller invoked, not the syscalls underneath it.
+	started := time.Now()
+	defer func() { s.stats.observe(&s.stats.s.List, started, 0) }()
 	_, err := s.listLocked(namespace, namespace, deleted, fn)
 	return err
 }
@@ -454,8 +516,15 @@ func (s *Store) cacheStore(nested string, value []byte) {
 		return
 	}
 	// A cache write failure is deliberately silent: the object is already in the
-	// primary backend, so the only consequence is a slower read later.
-	_ = s.cache.Store(nested, value)
+	// primary backend, so the only consequence is a slower read later. It is counted,
+	// though, because a cache that fails every write is a cache that is costing time and
+	// returning nothing, and the count is the only sign of it.
+	s.stats.add(&s.stats.s.CacheStoreCalls, 1)
+	if err := s.cache.Store(nested, value); err != nil {
+		s.stats.add(&s.stats.s.CacheErrors, 1)
+		return
+	}
+	s.stats.add(&s.stats.s.CacheStoreVolume, int64(len(value)))
 }
 
 // sliceRange applies an offset and size to an already-loaded object, matching what a

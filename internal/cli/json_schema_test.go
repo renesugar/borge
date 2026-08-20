@@ -156,55 +156,34 @@ func TestCreateJSONSchemaMatchesBorg(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 	r.makeArchives("seed")
 
-	// borg sends three stats keys borge does not; see PORTING_PLAN.md section 11.4.
-	omitted := map[string]bool{"chunking_time": true, "hashing_time": true, "store_stats": true}
-
-	// normalise removes the three keys borge does not send, and empties files_stats.
-	// files_stats is a *value* map keyed by status character, so shaping it would compare
-	// which characters the two runs happened to produce - and borg's import-tar sends it
-	// empty where borge fills it in (DIVERGENCES.md #37). Reports whether it found the
-	// omitted keys, so a stale omission list fails the test rather than weakening it.
-	normalise := func(doc any) bool {
+	// No omission list any more. borge used to send three of borg's six stats keys, and
+	// this test deleted chunking_time, hashing_time and store_stats from borg's document
+	// before comparing. borge measures all three since 2026-08-20 (DIVERGENCES #51), so
+	// the shapes are compared whole.
+	//
+	// normalise empties files_stats, which stays out of the shape comparison for a
+	// different reason: it is a *value* map keyed by status character, so comparing it
+	// would compare which characters the two runs happened to produce - and borg's
+	// import-tar sends it empty where borge fills it in (DIVERGENCES.md #37).
+	normalise := func(doc any) {
 		m, ok := doc.(map[string]any)
 		if !ok {
-			return false
+			return
 		}
 		arch, ok := m["archive"].(map[string]any)
 		if !ok {
-			return false
+			return
 		}
 		stats, ok := arch["stats"].(map[string]any)
 		if !ok {
-			return false
-		}
-		found := 0
-		for k := range omitted {
-			if _, ok := stats[k]; ok {
-				found++
-			}
-			delete(stats, k)
+			return
 		}
 		stats["files_stats"] = map[string]any{}
-		return found == len(omitted)
-	}
-
-	// borge's own document goes through the same emptying of files_stats, and nothing
-	// else: it never carries the three omitted keys.
-	normaliseBorge := func(doc any) {
-		if m, ok := doc.(map[string]any); ok {
-			if arch, ok := m["archive"].(map[string]any); ok {
-				if stats, ok := arch["stats"].(map[string]any); ok {
-					stats["files_stats"] = map[string]any{}
-				}
-			}
-		}
 	}
 
 	t.Run("create", func(t *testing.T) {
 		borgDoc := mustJSON(t, "borg create", r.mustRun("create", "-r", r.path, "by-borg", r.src, "--json"))
-		if !normalise(borgDoc) {
-			t.Fatal("borg's create document is missing one of the keys borge omits; the omission list is stale")
-		}
+		normalise(borgDoc)
 		want := shape(borgDoc)
 
 		stdout, stderr, code := r.borge(t, "create", "by-borge", r.src, "--json")
@@ -212,7 +191,7 @@ func TestCreateJSONSchemaMatchesBorg(t *testing.T) {
 			t.Fatalf("borge create --json exited %d\n%s", code, stderr)
 		}
 		borgeDoc := mustJSON(t, "borge create", stdout)
-		normaliseBorge(borgeDoc)
+		normalise(borgeDoc)
 		got := shape(borgeDoc)
 		if got != want {
 			t.Errorf("shapes differ\nborg : %s\nborge: %s", want, got)
@@ -244,9 +223,7 @@ func TestCreateJSONSchemaMatchesBorg(t *testing.T) {
 		}
 		borgDoc := mustJSON(t, "borg import-tar",
 			r.mustRun("import-tar", "-r", r.path, "tar-by-borg", tarPath, "--json"))
-		if !normalise(borgDoc) {
-			t.Fatal("borg's import-tar document is missing one of the keys borge omits; the omission list is stale")
-		}
+		normalise(borgDoc)
 		want := shape(borgDoc)
 
 		stdout, stderr, code := r.borge(t, "import-tar", "tar-by-borge", tarPath, "--json")
@@ -254,7 +231,7 @@ func TestCreateJSONSchemaMatchesBorg(t *testing.T) {
 			t.Fatalf("borge import-tar --json exited %d\n%s", code, stderr)
 		}
 		borgeDoc := mustJSON(t, "borge import-tar", stdout)
-		normaliseBorge(borgeDoc)
+		normalise(borgeDoc)
 		got := shape(borgeDoc)
 		if got != want {
 			t.Errorf("shapes differ\nborg : %s\nborge: %s", want, got)

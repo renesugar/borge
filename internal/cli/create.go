@@ -511,7 +511,8 @@ func cmdCreate(e *Env, args []string) int {
 			return e.fail(err)
 		}
 		doc := archiveCreatedJSON(repo, k, m, path, cacheDir, meta, id,
-			createStatsJSON(created.Stats.NFiles, created.Stats.OriginalSize, created.FileStatus))
+			createStatsJSON(created.Stats.NFiles, created.Stats.OriginalSize, created.FileStatus,
+				created.Stats, storeStatsJSON(repo.Store().Stats())))
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "    ")
 		if err := enc.Encode(doc); err != nil {
