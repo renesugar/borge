@@ -107,13 +107,33 @@ echo "mkbundle: running checks"
 { ./scripts/check-spdx.sh 2>&1 || echo "[check-spdx exited $?]"; }  > "$OUT/check-spdx.txt"
 { ./scripts/check-layering.sh 2>&1 || echo "[check-layering exited $?]"; } > "$OUT/check-layering.txt"
 
-echo "mkbundle: running tests"
-{ go test -timeout 60m ./... 2>&1 || echo "[go test exited $?]"; }  > "$OUT/go-test.txt"
-{ go test -timeout 60m -json ./... 2>&1 || true; }                  > "$OUT/go-test.json"
+# The coverage gates are stage 8's own gate (plan §11), so they belong *in* the bundle
+# rather than being remembered as having passed. They compare borge's command line against
+# borg's, so they need the built binary and the pinned venv - both of which the snapshot
+# carries.
+echo "mkbundle: running the coverage gates"
+{ make build >/dev/null 2>&1 || true; }
+{ tests/evidence/command-coverage.sh 2>&1 || echo "[command-coverage exited $?]"; } \
+    > "$OUT/command-coverage.txt"
+{ tests/evidence/option-coverage.sh 2>&1 || echo "[option-coverage exited $?]"; } \
+    > "$OUT/option-coverage.txt"
+
+# A per-package timeout, and 60m was not enough by stage 8: internal/cli alone ran for
+# 3586 seconds in the run before this line changed, and 3971 in one before that. A bundle
+# that records a timeout records a failure that did not happen, which is exactly what this
+# script's snapshotting exists to prevent.
+TEST_TIMEOUT="${BORGE_BUNDLE_TIMEOUT:-180m}"
+
+echo "mkbundle: running tests (timeout $TEST_TIMEOUT per package)"
+{ go test -timeout "$TEST_TIMEOUT" ./... 2>&1 || echo "[go test exited $?]"; } > "$OUT/go-test.txt"
+# The second pass is nearly free: Go caches a package's successful test result, so this
+# re-reports the same outcome in machine-readable form rather than re-running it.
+{ go test -timeout "$TEST_TIMEOUT" -json ./... 2>&1 || true; }                 > "$OUT/go-test.json"
 # -short for the race pass only: the differential corpora take minutes on their own and
 # far longer under -race, and they exercise no concurrency for -race to find. The full
 # (non-race) run above still covers them.
-{ go test -race -short -timeout 60m ./... 2>&1 || echo "[go test -race exited $?]"; } > "$OUT/go-test-race.txt"
+{ go test -race -short -timeout "$TEST_TIMEOUT" ./... 2>&1 || echo "[go test -race exited $?]"; } \
+    > "$OUT/go-test-race.txt"
 
 # --- build inputs ------------------------------------------------------------------
 cp -f go.mod "$OUT/" 2>/dev/null || true
