@@ -100,7 +100,16 @@ python -m pip install --quiet --upgrade pip setuptools wheel setuptools_scm
 #   borgstore - the object store layer  (borge ports it in stage 2)
 # Both are Borg Collective projects; their licenses are recorded by
 # scripts/check-upstream-licenses.sh (plan task 0.8) before any of their code is read.
-python -m pip install --quiet "borghash" "borgstore[rest,blake3]~=0.6.0"
+# The extras are what borgstore needs to reach each backend, and they are here so the
+# reference borg can reach the ones borge is being compared against:
+#   rest    - requests; the rest:// client and "borg serve --rest"
+#   sftp    - paramiko; the sftp: backend
+#   s3      - boto3;    the s3: and b2: backends
+#   rclone  - requests; the rclone: backend (the rclone binary itself is not pip's)
+#   blake3  - the blake3 id-hash modes
+# Without sftp and s3 the venv's borg cannot open those repositories at all, and the
+# differential tests for them would quietly become borge-against-borge (PORTING_PLAN 11.5).
+python -m pip install --quiet "borghash" "borgstore[rest,sftp,s3,rclone,blake3]~=0.6.0"
 
 # Editable install so the venv tracks the checkout without copying it.
 python -m pip install --quiet -e "$BORG_SRC"

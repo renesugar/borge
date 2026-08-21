@@ -2601,6 +2601,17 @@ possible and is not worth it: it is a wire protocol with a specification, not a 
 decision, and the project's "prefer the standard library" rule is about not taking
 dependencies for things Go can already do.
 
+**Authentication is by key, and there is no password anywhere.** Measured, after asking for
+a password-authenticated test account and finding that borg cannot use one:
+borgstore's sftp URL regex has *no password group* at all, and its `ssh.connect()` is called
+with `key_filename` and `allow_agent=True` and no `password=`. What it does honour is the
+ssh config — `/etc/ssh/ssh_config` then `~/.ssh/config`, for hostname, user, port and
+identityfile — so `sftp://some-alias/path` resolves entirely out of the user's own config.
+And it **enforces `known_hosts`**, deliberately: "we do not deal with unknown hosts … the
+user should make the first contact using the ssh or sftp CLI command and interactively
+verify remote host fingerprints". A first connection to an unknown host fails rather than
+trusting it. borge must do all three, or a URL that works in one tool fails in the other.
+
 Behaviour to reproduce rather than invent: a write goes to a randomly-named `.tmp` file in
 the destination directory and is renamed over, so a reader never sees a partial object; the
 `mkdir` of the parent is attempted only *after* a write fails with "no such file", because
@@ -2636,6 +2647,20 @@ Installed and running on this machine, so none of these tests need a network:
 | **LocalStack** | running via `lstk`, endpoint **:4566**, S3 available | `s3:` backend |
 | **awslocal / aws** | 2.36.28 | creating and inspecting test buckets |
 
+`tests/remote/setup.sh` prepares all of it and is idempotent: it creates the sftpgo user and
+its key, adds the `borge-sftp-test` alias to `~/.ssh/config` and the host key to
+`known_hosts`, and creates the LocalStack bucket. It lists its own teardown at the end.
+**Every URL below has been run against the reference borg** — `repo-create`, `create`,
+`repo-list` and `check` — so the comparison target is known to work before any Go is
+written:
+
+```
+sftp     sftp://borge-sftp-test/repo1
+s3       s3:test:test@http://localhost:4566/borge-test-1/repo1
+rclone   rclone:/abs/path/repo1
+rest     rest:///abs/path/repo1
+```
+
 Each backend's tests skip when its service is absent, the way the borg-CLI tests already
 skip when `.venv-borg2` is missing — and each *asserts non-vacuity* first, so a skipped
 service cannot look like a pass.
@@ -2661,24 +2686,22 @@ comparison against a borg that cannot reach the service is no comparison — and
 step the sftp and s3 tests would quietly become borge-against-borge, which is exactly the
 kind of pass that means nothing.
 
-#### What I need from you
+#### The environment, as set up on 2026-08-20
 
-1. **An sftpgo user.** sftpgo is running but I have no credentials and no passwordless
-   sudo, so I cannot create one. Either create a test user (any name, password auth, a home
-   directory it may write to) and tell me the credentials, or give me an admin login for the
-   UI on :8080 and I will create it. A throwaway user is fine — the tests only need it to
-   hold scratch repositories.
-2. **Confirmation that LocalStack may be used for the S3 tests**, and whether the tests may
-   create and destroy buckets named `borge-test-*`. `LOCALSTACK_AUTH_TOKEN` is in
-   `secret-tool` as you noted; the tests themselves need only the endpoint and the standard
-   `test`/`test` credentials, so the token stays out of the test path.
-3. **Permission to widen the borg venv's extras.** The reference borg needs
-   `borgstore[sftp,s3]` to be able to reach two of the four backends at all (see the table
-   above). That means editing `tests/borg2/setup.sh` and regenerating
-   `tests/borg2/requirements.lock` — a change to the pinned reference environment, which is
-   why I am asking rather than doing it. Nothing new is needed on the machine itself:
-   rclone, sftpgo, LocalStack and awslocal cover all four backends, and
-   `golang.org/x/crypto` is already a Go dependency.
+All three of the questions this section originally asked have been answered and acted on:
+
+1. **The sftpgo user exists.** `borge`, home `/var/lib/sftpgo/borge-test`, **public-key
+   authentication** — the ask for a password-authenticated account was mistaken, see the
+   sftp section above. The key is `~/.ssh/borge_sftp_test` and the connection details are a
+   `Host borge-sftp-test` block in `~/.ssh/config`, so no secret appears in any URL. (A
+   password was also set and stored in `secret-tool` before the key-only requirement was
+   found; nothing uses it.)
+2. **LocalStack is in use** for the S3 tests, bucket `borge-test-1`, credentials
+   `test`/`test`. `LOCALSTACK_AUTH_TOKEN` stays out of the test path entirely.
+3. **The venv's extras are widened.** `tests/borg2/setup.sh` now installs
+   `borgstore[rest,sftp,s3,rclone,blake3]` and `tests/borg2/requirements.lock` is
+   regenerated; `paramiko`, `boto3` and their trees are the only additions, and the pinned
+   borg version is unchanged.
 
 #### What this does not include
 
