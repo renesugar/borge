@@ -1721,7 +1721,7 @@ a table at all.
 
 | # | Item | Recorded in | State |
 | --- | --- | --- | --- |
-| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | §11 | not started; the largest single item |
+| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **planned 2026-08-20**, not started. Five pieces, not one: a `Location` type, then `rclone`, then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
 | 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
 | 3 | ~~missing per-command options~~ | §11.2, `option-coverage.sh` | **done 2026-08-20**, down from 111 to 11, and every short spelling borg offers is now borge's too. Nine commands reached zero in one day (DIVERGENCES #48-#53). Of the eleven left, four are other rows' (`recreate` row 4, `repo-create` row 2) and the rest have written reasons in #53: `check`'s two need a pack-level check borge has not ported, `repo-delete --keep-security-info` manages a directory borge does not keep, `repo-list --from-borg1` is a §0.6 non-goal |
 | 4 | ~~`recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter`~~ | §11.2 | **done 2026-08-20** (DIVERGENCES #54). The tag scan reads `CACHEDIR.TAG` out of the item stream, since recreate has no filesystem to look at. Beside it: `recreate`'s positional was read as an archive name where borg reads a *path*, so the same command line emptied every archive under borg; and `--list` reported `+` for everything where borg reports the item's type letter, which made `--filter` useless |
@@ -2491,6 +2491,210 @@ truncated packs, missing index, missing archive object, stale lock).
 > readability, so with a stale index a missing chunk is caught by the repository check
 > rather than the archive check. borg's does the same. Both together catch it; either
 > alone would not.
+
+---
+
+### 11.5 `serve` and the remote backends — planned 2026-08-20
+
+Table row 1, and the last of stage 8's work items besides `transfer`. Written from
+borgstore 0.6.1 as installed in `.venv-borg2` and from borg at the pinned commit, not from
+documentation.
+
+#### What "remote backends" means in borg 2, which is not what it meant in borg 1
+
+This is the first thing to get right, because it changes the shape of the work. **borg 2 has
+no repository RPC protocol of its own.** Its `serve` has two modes and neither is borg 1's:
+
+- **`borg serve`** (no option) serves a **legacy borg 1.x** repository over the old RPC
+  protocol, for `borg transfer --from-borg1`. Reading borg 1 repositories is a §0.6
+  non-goal, so this mode is a **non-goal for borge** and must be refused with a message
+  saying where that is written down — not "unknown option".
+- **`borg serve --rest --backend FILE:<path>`** serves a *current* repository as the server
+  side of a `rest://` URL, speaking **HTTP over stdio**. This is the mode borge implements.
+
+Everything else — `sftp:`, `s3:`, `b2:`, `rclone:` — is a **client-side backend**. There is
+no borge process on the far end: the client speaks SFTP, S3 or rclone's RC API directly.
+borg's own `Location` does not even parse those URLs; it detects the scheme and hands the
+raw string to borgstore (`BORGSTORE_SCHEMES = ("sftp", "http", "https", "s3", "b2",
+"rclone")`).
+
+So row 1 is really *five* pieces of work with one thing in common — a `Backend`
+implementation — and only one of them involves a server borge has to write.
+
+#### Why borge is already shaped for this
+
+`internal/store.Backend` is a method-for-method analogue of borgstore's `BackendBase`:
+`Create`, `Destroy`, `Open`, `Close`, `Load(name, offset, size)`, `Store`, `Delete`, `Move`,
+`Info`, `List`, `Mkdir`, `Rmdir`. Nothing above it knows what a filesystem is. Two further
+facts make the port tractable rather than architectural:
+
+- **Locking is already backend-agnostic.** `internal/repository/lock.go` writes lock
+  *objects* into `locks/` and resolves contention by listing that namespace, precisely
+  because "a repository may be … reached through a backend that is not a filesystem at
+  all". No flock, nothing to redesign.
+- **The pack cache already exists.** `Options.Cache` plus `NamespaceConfig(packCache, …)`
+  wire a writethrough cache onto `packs/`. Nothing in the CLI turns it on today, because
+  nothing has needed it.
+
+Three methods borgstore's interface has and borge's does not, each needed by exactly one
+piece of this work:
+
+| method | needed by | note |
+| --- | --- | --- |
+| `hash(name, algorithm)` | the REST server (`cmd=hash`) | also what `check --max-age`/`--max-duration` need (DIVERGENCES #53) — the pack-level check is the *same* missing primitive |
+| `quota()` | the `file:` backend | `POST /?cmd=quota`; only the file backend supports it in borg |
+| `defrag(...)` | nothing yet | borgstore has a default implementation; borge can leave it out until something calls it |
+
+#### Order of work, and why this order
+
+**1. `Location`: one type that knows what a repository string is.** Today
+`Env.resolveRepo` ends in `filepath.Abs`, and 57 call sites pass the result to
+`repository.Open(path)`. Every one of those becomes "open this URL". This is the change
+that touches the most code and none of the interesting logic, so it goes first, alone, with
+the existing local behaviour preserved exactly: a bare path stays a bare path.
+
+borg's rules, to be reproduced: `file://` needs an absolute path; a local path must not
+begin with `//` or with any known scheme; `ssh://` is legacy-only; `rest://` is parsed by
+borg itself (user/host/port/path) because it needs the parts to build an ssh command;
+everything else is scheme-detected and passed through whole.
+
+**2. The `rclone:` backend — first, because it needs no new dependency and no credentials.**
+borgstore spawns `rclone rcd` on a random port with random auth and drives it over its RC
+HTTP API: `operations/stat`, `operations/list`, `operations/uploadfile`,
+`operations/deletefile`, `operations/movefile`, `operations/mkdir`, `operations/rmdir`,
+`operations/purge`, `rc/noop`. All of that is `net/http` plus `os/exec`. It also gives a
+*local* remote for testing (`rclone:local:/tmp/...`), so the whole backend can be exercised
+without a network or a service. It is the cheapest way to find out whether the `Backend`
+interface really is sufficient.
+
+**3. The REST client and `serve --rest`.** One protocol, two ends, written together so they
+can be tested against each other and against borg's. The wire format, read from
+`borgstore/backends/rest.py` and `borgstore/server/rest.py`:
+
+```
+PUT    /<name>              store            body = object
+GET    /<name>              load             Range: bytes=… for ranges
+HEAD   /<name>              info             X-BorgStore-Is-Directory/-Atime/-Mtime
+DELETE /<name>              delete
+GET    /<path>/             list             JSON [{name,size,directory,atime,mtime}]
+POST   /?cmd=create|move|mkdir|hash|quota|defrag
+DELETE /?cmd=rmdir|destroy
+Accept: application/vnd.x.borgstore.rest.v1
+```
+
+Status codes carry the error type: 404 not found, 409 already exists, 410 backend does not
+exist, 412 open/closed state, 403 permission denied, 416 bad range, 507 quota exceeded, 400
+malformed. Over stdio the client writes an HTTP/1.1 request onto the child's stdin and reads
+the status line, headers and `Content-Length` body back — a hand-rolled framing, not a
+socket, and Go's `net/http` will not do it for us in either direction.
+
+`serve --rest` also carries `--permissions` (`all`, `no-delete`, `write-only`, `read-only`,
+default from `BORG_REPO_PERMISSIONS`) and `--restrict-to-path` / `--restrict-to-repository`,
+which are checked against the `FILE:` path before anything is served. borge's store already
+has the permission letters (`lrwWD`) in `internal/store`; what it lacks is the mapping from
+borg's four names and the enforcement point.
+
+**4. The `sftp:` backend.** The only piece needing a new module. `golang.org/x/crypto` is
+*already* a dependency, so this adds `golang.org/x/crypto/ssh` (no new module) plus
+`github.com/pkg/sftp` for the SFTP v3 protocol. Implementing SFTP by hand over `x/ssh` is
+possible and is not worth it: it is a wire protocol with a specification, not a borg format
+decision, and the project's "prefer the standard library" rule is about not taking
+dependencies for things Go can already do.
+
+Behaviour to reproduce rather than invent: a write goes to a randomly-named `.tmp` file in
+the destination directory and is renamed over, so a reader never sees a partial object; the
+`mkdir` of the parent is attempted only *after* a write fails with "no such file", because
+each round trip costs latency; and the connection carries keepalives with a read timeout so
+a dead link is noticed rather than hanging.
+
+**5. The `s3:`/`b2:` backend.** Two credible routes, and the choice should be made
+deliberately:
+
+- `aws-sdk-go-v2` — correct, maintained, and a large dependency tree for what borgstore uses:
+  `put_object`, `get_object` (with `Range`), `head_object`, `delete_object`,
+  `delete_objects`, `copy_object`, `list_objects_v2` (with `Delimiter` and
+  `CommonPrefixes`).
+- `net/http` plus SigV4 signing by hand — perhaps 250 lines, no new module, and testable
+  against LocalStack from the first commit.
+
+**Recommendation: the hand-written one**, on the same reasoning that kept borge off a
+msgpack library and a Python-marshal library: the surface actually used is small and fixed,
+and the alternative is a dependency an order of magnitude larger than the code it replaces.
+The decision is reversible in one file.
+
+Note `move` on S3 is copy-then-delete and is **not atomic**, which matters because that is
+how borge soft-deletes. borg has the same property and lives with it.
+
+#### The test environment, which exists
+
+Installed and running on this machine, so none of these tests need a network:
+
+| service | state | used for |
+| --- | --- | --- |
+| **rclone 1.75.0** | on `PATH` | `rclone:` backend; a `local:` remote needs no configuration at all |
+| **sftpgo** | `systemctl active`, SFTP on **:2022**, admin UI on :8080, data in `/var/lib/sftpgo` | `sftp:` backend |
+| **LocalStack** | running via `lstk`, endpoint **:4566**, S3 available | `s3:` backend |
+| **awslocal / aws** | 2.36.28 | creating and inspecting test buckets |
+
+Each backend's tests skip when its service is absent, the way the borg-CLI tests already
+skip when `.venv-borg2` is missing — and each *asserts non-vacuity* first, so a skipped
+service cannot look like a pass.
+
+**The interop rows are the point of having borg here.** For every backend: borge writes a
+repository through it and **borg reads it**, and borg writes one and **borge reads it**.
+That is what proves the port rather than proving borge self-consistent.
+
+**But the reference borg cannot currently reach two of the four.** Checked rather than
+assumed: `tests/borg2/setup.sh` installs `borgstore[rest,blake3]`, so the venv has
+`requests` and **not** `paramiko` or `boto3`.
+
+| backend | borg in `.venv-borg2` | needs |
+| --- | --- | --- |
+| `rclone:` | works — `requests` present, `rclone` on PATH | nothing |
+| `rest://` | works — `requests` present | nothing |
+| `sftp:` | **cannot** — `paramiko` missing | `borgstore[sftp]` in the venv |
+| `s3:`/`b2:` | **cannot** — `boto3` missing | `borgstore[s3]` in the venv |
+
+So `setup.sh` must become `borgstore[rest,sftp,s3,rclone,blake3]` and `requirements.lock`
+must be regenerated, as its own commit, *before* the sftp and s3 backends are written. A
+comparison against a borg that cannot reach the service is no comparison — and without this
+step the sftp and s3 tests would quietly become borge-against-borge, which is exactly the
+kind of pass that means nothing.
+
+#### What I need from you
+
+1. **An sftpgo user.** sftpgo is running but I have no credentials and no passwordless
+   sudo, so I cannot create one. Either create a test user (any name, password auth, a home
+   directory it may write to) and tell me the credentials, or give me an admin login for the
+   UI on :8080 and I will create it. A throwaway user is fine — the tests only need it to
+   hold scratch repositories.
+2. **Confirmation that LocalStack may be used for the S3 tests**, and whether the tests may
+   create and destroy buckets named `borge-test-*`. `LOCALSTACK_AUTH_TOKEN` is in
+   `secret-tool` as you noted; the tests themselves need only the endpoint and the standard
+   `test`/`test` credentials, so the token stays out of the test path.
+3. **Permission to widen the borg venv's extras.** The reference borg needs
+   `borgstore[sftp,s3]` to be able to reach two of the four backends at all (see the table
+   above). That means editing `tests/borg2/setup.sh` and regenerating
+   `tests/borg2/requirements.lock` — a change to the pinned reference environment, which is
+   why I am asking rather than doing it. Nothing new is needed on the machine itself:
+   rclone, sftpgo, LocalStack and awslocal cover all four backends, and
+   `golang.org/x/crypto` is already a Go dependency.
+
+#### What this does not include
+
+- **borg 1.x anything.** `serve` without `--rest`, `ssh://` repositories and
+  `transfer --from-borg1` stay §0.6 non-goals. `serve` must refuse them by name.
+- **`borgstore-server-rest` compatibility as a client.** borg's own `rest://` client spawns
+  `borg serve --rest`; borge spawns `borge serve --rest`. Whether borge should also be able
+  to talk to a `borgstore-server-rest` process is a question for after the protocol works.
+
+#### The order these should be committed in
+
+One backend per commit, each with its own interop rows, in the order above: `Location`,
+then `rclone`, then REST client + `serve --rest`, then `sftp`, then `s3`. The first two
+commits answer the only architectural question — whether `store.Backend` is the right shape
+— at the lowest cost, and if the answer is no, it is better to find out against a local
+rclone remote than three backends later.
 
 ---
 
