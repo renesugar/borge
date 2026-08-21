@@ -17,6 +17,7 @@ import (
 
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/location"
 )
 
 // What makes two repositories *related*, and why transfer insists on it.
@@ -34,25 +35,25 @@ import (
 // looks exactly like success, only slower and larger, which is why borg refuses it up front
 // rather than letting it happen.
 
-// relatedMaterial builds key material for a repository related to the one at otherPath.
-func (e *Env) relatedMaterial(otherPath string, repoID []byte, copyCryptKey bool) (*item.Key, error) {
+// relatedMaterial builds key material for a repository related to the one at other.
+func (e *Env) relatedMaterial(other *location.Location, repoID []byte, copyCryptKey bool) (*item.Key, error) {
 	// Opened the way transfer opens its source, which matters for the passphrase: the two
 	// repositories need not share one, and unlocking the source with the *destination's*
 	// passphrase would work in every test where they happen to be equal and fail for a
 	// user who set them apart - which is the case --other-repo exists for.
-	other, err := e.openOtherRepo(otherPath)
+	src, err := e.openOtherRepo(other)
 	if err != nil {
 		return nil, err
 	}
-	defer other.Close()
+	defer src.Close()
 
-	if other.unlocked == nil || other.unlocked.Material == nil {
+	if src.unlocked == nil || src.unlocked.Material == nil {
 		// The unencrypted modes have no key material at all, which is the case borg names
 		// explicitly - and it is not a failure to explain as "wrong passphrase".
 		return nil, errors.New("Copying key material from an unencrypted repository is not possible.")
 	}
-	src := other.unlocked.Material
-	if len(src.IDKey) == 0 || src.ChunkSeed == nil {
+	srcKey := src.unlocked.Material
+	if len(srcKey.IDKey) == 0 || srcKey.ChunkSeed == nil {
 		return nil, errors.New("Copying key material from an unencrypted repository is not possible.")
 	}
 
@@ -61,14 +62,14 @@ func (e *Env) relatedMaterial(otherPath string, repoID []byte, copyCryptKey bool
 		return nil, err
 	}
 	// Inherited: the two secrets that make deduplication work across the pair.
-	material.IDKey = append([]byte(nil), src.IDKey...)
-	seed := *src.ChunkSeed
+	material.IDKey = append([]byte(nil), srcKey.IDKey...)
+	seed := *srcKey.ChunkSeed
 	material.ChunkSeed = &seed
 	if copyCryptKey {
 		// The user asked for the same authenticated-encryption key. borg offers this and
 		// borge does not second-guess it: a transfer then re-encrypts nothing, which is
 		// faster and is a weaker boundary than the default.
-		material.CryptKey = append([]byte(nil), src.CryptKey...)
+		material.CryptKey = append([]byte(nil), srcKey.CryptKey...)
 	} else {
 		// A fresh AE key. borg's comment: "borg transfer re-encrypts all data anyway, thus
 		// we can default to a new, random AE key". NewMaterial already drew one; this is

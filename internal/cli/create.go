@@ -37,7 +37,7 @@ func cmdRepoCreate(e *Env, args []string) int {
 	fs.StringVar(encryption, "encryption", "", "encryption mode (required)")
 	idHash := fs.String("i", "", "id hash for the encrypted modes: sha256 or blake3")
 	fs.StringVar(idHash, "id-hash", "", "id hash for the encrypted modes")
-	location := fs.String("key-location", "repokey", "where to keep the key: repokey or keyfile")
+	keyLocation := fs.String("key-location", "repokey", "where to keep the key: repokey or keyfile")
 	otherRepo := fs.String("other-repo", "",
 		"inherit key material from this repository, making the new one RELATED to it")
 	copyCryptKey := fs.Bool("copy-crypt-key", false,
@@ -55,7 +55,14 @@ func cmdRepoCreate(e *Env, args []string) int {
 			"(docs/PORTING_PLAN.md §0.6). Use borg itself to transfer from a 1.x repository first.")
 		return ExitError
 	}
-	if *copyCryptKey && *otherRepo == "" {
+	// Resolved before anything is created, so that a bad source location fails before a
+	// repository exists at the destination. It may come from BORGE_OTHER_REPO rather than
+	// from the command line - see optionalOtherRepo.
+	other, err := e.optionalOtherRepo(*otherRepo)
+	if err != nil {
+		return e.fail(err)
+	}
+	if *copyCryptKey && other == nil {
 		e.errorf("--copy-crypt-key only means something with --other-repo")
 		return ExitError
 	}
@@ -82,19 +89,19 @@ func cmdRepoCreate(e *Env, args []string) int {
 	var k key.Key
 	if key.RequiresKeyMaterial(modeTypeByte(mode)) {
 		storage := key.StorageRepo
-		switch *location {
+		switch *keyLocation {
 		case "repokey":
 		case "keyfile":
 			storage = key.StorageKeyfile
 		default:
-			return e.fail(fmt.Errorf("--key-location must be repokey or keyfile, not %q", *location))
+			return e.fail(fmt.Errorf("--key-location must be repokey or keyfile, not %q", *keyLocation))
 		}
 
 		var material *item.Key
-		if *otherRepo == "" {
+		if other == nil {
 			material, err = key.NewMaterial(repo.ID())
 		} else {
-			material, err = e.relatedMaterial(*otherRepo, repo.ID(), *copyCryptKey)
+			material, err = e.relatedMaterial(other, repo.ID(), *copyCryptKey)
 		}
 		if err != nil {
 			return e.fail(err)

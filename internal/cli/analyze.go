@@ -277,7 +277,7 @@ func analyzeSet(e *Env, o *opened, chunks *hashindex.ChunkIndex, opts manifest.L
 		// the distinction is one a frontend can act on: fewer than two archives matched.
 		spots := data.Hotspots
 		data.Hotspots = nil
-		repoBlock, encBlock := o.envelope(o.repo.Path())
+		repoBlock, encBlock := o.envelope(o.repo.Location())
 		doc := map[string]any{
 			"dedup_size": data,
 			"hotspots":   nil,
@@ -416,7 +416,7 @@ func analyzeByName(e *Env, o *opened, chunks *hashindex.ChunkIndex, common commo
 	}
 
 	if common.json {
-		repoBlock, encBlock := o.envelope(o.repo.Path())
+		repoBlock, encBlock := o.envelope(o.repo.Location())
 		enc := json.NewEncoder(e.Stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(map[string]any{

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repository"
 )
@@ -108,7 +109,7 @@ func (r *borgRepo) mustRun(args ...string) string {
 
 func (r *borgRepo) open(t *testing.T) *manifest.Manifest {
 	t.Helper()
-	repo, err := repository.Open(r.path, repository.Options{})
+	repo, err := repository.Open(location.MustLocal(r.path), repository.Options{})
 	if err != nil {
 		t.Fatalf("borge could not open borg's repository: %v", err)
 	}

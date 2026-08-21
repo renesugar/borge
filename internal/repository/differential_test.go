@@ -21,6 +21,7 @@ import (
 	"github.com/renesugar/borge/internal/compress"
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/hashindex"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/repoobj"
 )
 
@@ -211,7 +212,7 @@ func TestBorgeWritesBorgReads(t *testing.T) {
 
 	ids, objects := testObjects(t, 60)
 
-	r, err := Create(path, smallPackOptions())
+	r, err := Create(location.MustLocal(path), smallPackOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +276,7 @@ func TestBorgWritesBorgeReads(t *testing.T) {
 	borgDigest := fields[1]
 	o.ask(t, "X %s", path)
 
-	r, err := Open(path, Options{})
+	r, err := Open(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatalf("borge could not open borg's repository: %v", err)
 	}
@@ -329,7 +330,7 @@ func TestBorgeRebuildsIndexFromBorgPacks(t *testing.T) {
 		}
 	}
 
-	r, err := Open(path, Options{})
+	r, err := Open(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +364,7 @@ func TestBorgCheckPassesOnBorgeRepository(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repo")
 
 	ids, objects := testObjects(t, 50)
-	r, err := Create(path, smallPackOptions())
+	r, err := Create(location.MustLocal(path), smallPackOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +405,7 @@ func TestLayoutMatchesBorg(t *testing.T) {
 	o.ask(t, "F %s", borgPath)
 	o.ask(t, "X %s", borgPath)
 
-	r, err := Create(borgePath, Options{})
+	r, err := Create(location.MustLocal(borgePath), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +465,7 @@ func TestPackContentsAreIdentical(t *testing.T) {
 	o.ask(t, "F %s", borgPath)
 	o.ask(t, "X %s", borgPath)
 
-	r, err := Create(borgePath, Options{})
+	r, err := Create(location.MustLocal(borgePath), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

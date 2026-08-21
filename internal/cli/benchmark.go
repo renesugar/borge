@@ -23,6 +23,7 @@ import (
 	"github.com/renesugar/borge/internal/compress"
 	"github.com/renesugar/borge/internal/crypto"
 	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/msgpackx"
 )
 
@@ -152,10 +153,15 @@ func cmdBenchmarkCRUD(e *Env, args []string) int {
 	// The repository has to exist already: creating one here would hide the key
 	// management, and a benchmark that silently makes a repository in the wrong place is
 	// a bad surprise.
-	if _, err := os.Stat(filepath.Join(repo, "config", "readme")); err != nil {
-		e.errorf("%s is not a repository; create one first (the benchmark writes "+
-			"archives named borge-benchmark-crud* into it)", repo)
-		return ExitError
+	// Only a local repository can be checked this cheaply. A remote one is left to the
+	// create below, which fails with the backend's own message rather than a guess made
+	// from here.
+	if repo.IsLocal() {
+		if _, err := os.Stat(filepath.Join(repo.Path, "config", "readme")); err != nil {
+			e.errorf("%s is not a repository; create one first (the benchmark writes "+
+				"archives named borge-benchmark-crud* into it)", repo)
+			return ExitError
+		}
 	}
 
 	samples := crudSamples
@@ -181,7 +187,7 @@ func cmdBenchmarkCRUD(e *Env, args []string) int {
 }
 
 // runCRUDSample writes the input files, then measures the four operations over them.
-func runCRUDSample(e *Env, repo, dataRoot string, s crudSample) (crudTiming, error) {
+func runCRUDSample(e *Env, repo *location.Location, dataRoot string, s crudSample) (crudTiming, error) {
 	dir, err := os.MkdirTemp(dataRoot, "borge-test-data-")
 	if err != nil {
 		return crudTiming{}, err
@@ -208,13 +214,15 @@ func runCRUDSample(e *Env, repo, dataRoot string, s crudSample) (crudTiming, err
 }
 
 // measureCRUD runs the commands, in borg's order and with borg's arguments.
-func measureCRUD(e *Env, repo, path string) (crudTiming, error) {
+func measureCRUD(e *Env, repo *location.Location, path string) (crudTiming, error) {
 	var t crudTiming
 
 	// Every sub-command runs through the ordinary dispatch, so what is measured is what a
 	// user gets rather than a special path that might be faster.
 	run := func(args ...string) error {
-		return runQuiet(e, append([]string{args[0], "-r", repo}, args[1:]...)...)
+		// The openable form, not the canonical one: these sub-commands have to open the
+		// repository, and canonicalisation removes any credentials it carries.
+		return runQuiet(e, append([]string{args[0], "-r", repo.Openable()}, args[1:]...)...)
 	}
 	timed := func(fn func() error) (time.Duration, error) {
 		start := time.Now()

@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/placeholders"
 	"github.com/renesugar/borge/internal/repository"
@@ -273,11 +273,14 @@ func newPassthroughFlagSet(e *Env, name string) *flagSet {
 	return fs
 }
 
-// resolveRepo works out which repository to act on. The answer is always absolute.
+// resolveRepo works out which repository to act on.
 //
+// The answer is a location, not a path, because in borg 2 a repository need not be a
+// directory: "-r sftp://host/repo" and "-r /srv/repo" are both repositories and only one of
+// them has a filesystem underneath. A bare path is still a bare path, made absolute -
 // borg resolves a relative "-r sub/repo", or a relative BORG_REPO, against the working
-// directory, and reports the absolute form as the repository's Location. borge refused a
-// relative path outright until 2026-08-18; see docs/DIVERGENCES.md #22.
+// directory and reports the absolute form (borge refused a relative path outright until
+// 2026-08-18; see docs/DIVERGENCES.md #22).
 //
 // The resolution happens here rather than in the store because the store's rule - a
 // backend is rooted at an absolute path - is worth keeping. A backend rooted at something
@@ -286,24 +289,25 @@ func newPassthroughFlagSet(e *Env, name string) *flagSet {
 //
 // No "~" expansion, because borg does none: "-r ~/backups" means a directory literally
 // named "~" in both tools, and expanding it here would be borge inventing behaviour.
-func (e *Env) resolveRepo(given string) (string, error) {
-	path := given
-	if path == "" {
+func (e *Env) resolveRepo(given string) (*location.Location, error) {
+	raw := given
+	if raw == "" {
 		if v, ok := e.lookupBorg("REPO"); ok && v != "" {
-			path = v
+			raw = v
 		}
 	}
-	if path == "" {
-		return "", errors.New("no repository given; pass -r or set BORGE_REPO")
+	if raw == "" {
+		return nil, errors.New("no repository given; pass -r or set BORGE_REPO")
 	}
-	// A repository path may carry placeholders, as borg's may: "-r /backups/{hostname}"
-	// is how one BORGE_REPO setting serves a fleet. Expanded before the path is made
-	// absolute, so "-r {hostname}/repo" resolves the way a reader expects.
-	expanded, err := e.expand(path)
+	// A repository location may carry placeholders, as borg's may: "-r /backups/{hostname}"
+	// is how one BORGE_REPO setting serves a fleet. Expanded before it is parsed, so
+	// "-r {hostname}/repo" resolves the way a reader expects - and the unexpanded form is
+	// kept, because that is the one a later command re-expands against a timestamp.
+	expanded, err := e.expand(raw)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return filepath.Abs(expanded)
+	return location.ParseRaw(raw, expanded)
 }
 
 // placeholderValues is the substitution set for this process, taken once.
@@ -383,21 +387,41 @@ func (e *Env) otherPassphrase() string {
 
 // resolveOtherRepo is resolveRepo for --other-repo. It reads BORGE_OTHER_REPO when the
 // option is absent, as borg reads BORG_OTHER_REPO.
-func (e *Env) resolveOtherRepo(given string) (string, error) {
-	path := given
-	if path == "" {
+func (e *Env) resolveOtherRepo(given string) (*location.Location, error) {
+	raw := given
+	if raw == "" {
 		if v, ok := e.lookupBorg("OTHER_REPO"); ok && v != "" {
-			path = v
+			raw = v
 		}
 	}
-	if path == "" {
-		return "", errors.New("no source repository given; pass --other-repo or set BORGE_OTHER_REPO")
+	if raw == "" {
+		return nil, errors.New("no source repository given; pass --other-repo or set BORGE_OTHER_REPO")
 	}
-	expanded, err := e.expand(path)
+	expanded, err := e.expand(raw)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return filepath.Abs(expanded)
+	return location.ParseRaw(raw, expanded)
+}
+
+// optionalOtherRepo resolves a --other-repo that may not have been given at all.
+//
+// borg spells this as a default rather than as code: --other-repo's argparse default is
+// Location(other=True), which parses BORG_OTHER_REPO at parser construction, and
+// with_other_repository then acts on any location that came out valid. So "BORG_OTHER_REPO=A
+// borg repo-create -r B -e ..." makes B a *related* repository with no option on the
+// command line at all - measured, because the source is opened and its passphrase asked
+// for. borge did not do that; see DIVERGENCES.md #57.
+//
+// nil, nil means neither the option nor the environment named a source, which is the
+// ordinary case.
+func (e *Env) optionalOtherRepo(given string) (*location.Location, error) {
+	if given == "" {
+		if v, ok := e.lookupBorg("OTHER_REPO"); !ok || v == "" {
+			return nil, nil
+		}
+	}
+	return e.resolveOtherRepo(given)
 }
 
 // opened is a repository, its key and its manifest, which is what every command needs.
@@ -418,8 +442,8 @@ func (o *opened) Close() error {
 }
 
 // openRepo opens a repository, unlocks it and loads the manifest.
-func (e *Env) openRepo(path string, exclusive bool, ops ...manifest.Operation) (*opened, error) {
-	repo, err := repository.Open(path, repository.Options{Exclusive: exclusive})
+func (e *Env) openRepo(loc *location.Location, exclusive bool, ops ...manifest.Operation) (*opened, error) {
+	repo, err := repository.Open(loc, repository.Options{Exclusive: exclusive})
 	if err != nil {
 		return nil, err
 	}
@@ -440,24 +464,24 @@ func (e *Env) openRepo(path string, exclusive bool, ops ...manifest.Operation) (
 // BORGE_OTHER_PASSPHRASE rather than the destination's passphrase, and never prompting -
 // a transfer is the kind of thing that runs unattended, and two prompts on one command line
 // would be worse than an error naming which repository could not be opened.
-func (e *Env) openOtherRepo(path string) (*opened, error) {
+func (e *Env) openOtherRepo(loc *location.Location) (*opened, error) {
 	// Locked, and exclusively, because borg's with_other_repository does: the source is
 	// read from beginning to end while another process could be writing to it, and a
 	// transfer that read half of an archive being deleted underneath it would produce a
 	// destination that looks complete.
-	repo, err := repository.Open(path, repository.Options{Exclusive: true})
+	repo, err := repository.Open(loc, repository.Options{Exclusive: true})
 	if err != nil {
-		return nil, fmt.Errorf("--other-repo %s: %w", path, err)
+		return nil, fmt.Errorf("--other-repo %s: %w", loc, err)
 	}
 	k, u, err := repo.Unlock(e.otherPassphrase())
 	if err != nil {
 		repo.Close()
-		return nil, fmt.Errorf("--other-repo %s: %w (set BORGE_OTHER_PASSPHRASE)", path, err)
+		return nil, fmt.Errorf("--other-repo %s: %w (set BORGE_OTHER_PASSPHRASE)", loc, err)
 	}
 	m, err := manifest.Load(repo, k, manifest.OpRead)
 	if err != nil {
 		repo.Close()
-		return nil, fmt.Errorf("--other-repo %s: %w", path, err)
+		return nil, fmt.Errorf("--other-repo %s: %w", loc, err)
 	}
 	return &opened{repo: repo, key: k, manifest: m, unlocked: u}, nil
 }

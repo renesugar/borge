@@ -216,3 +216,36 @@ func TestVersionPrintsClientAndServer(t *testing.T) {
 		t.Errorf("version -long does not name the repository format version:\n%s", long)
 	}
 }
+
+// TestWithLockGivesTheChildAnOpenableRepository: the command runs with BORG_REPO and
+// BORGE_REPO set to a location it can actually open.
+//
+// borg sets neither - the child simply inherits the environment - so this is borge's
+// addition, and the value has to be the absolute path rather than the "-r sub/repo" the
+// user typed: the child is a command like rsync or a shell script, and it is allowed to
+// change directory. It also must not be the canonical form, which for a remote location has
+// had its credentials removed (DIVERGENCES #56).
+func TestWithLockGivesTheChildAnOpenableRepository(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the helper command is a shell script")
+	}
+	r := newBorgRepo(t, "none-sha256")
+	t.Chdir(filepath.Dir(r.path))
+
+	seen := filepath.Join(t.TempDir(), "seen")
+	script := `cd / && printf '%s\n%s\n' "$BORGE_REPO" "$BORG_REPO" > ` + seen
+	if _, stderr, code := r.borge(t, "with-lock", "-r", filepath.Base(r.path),
+		"sh", "-c", script); code != ExitOK {
+		t.Fatalf("with-lock exited %d\n%s", code, stderr)
+	}
+	got, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(got)), "\n") {
+		if line != r.path {
+			t.Errorf("the child was given %q; from another directory that names no repository, "+
+				"the absolute %q does", line, r.path)
+		}
+	}
+}

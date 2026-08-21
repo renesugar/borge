@@ -17,6 +17,7 @@ import (
 
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/hashindex"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/repoobj"
 	"github.com/renesugar/borge/internal/store"
 )
@@ -328,7 +329,7 @@ func realObject(t *testing.T, i int) (id, obj []byte) {
 
 func TestRepositoryRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repo")
-	r, err := Create(path, smallPackOptions())
+	r, err := Create(location.MustLocal(path), smallPackOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +368,7 @@ func TestRepositoryRoundTrip(t *testing.T) {
 	}
 
 	// Reopening must find everything through the persisted index.
-	r2, err := Open(path, Options{})
+	r2, err := Open(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +401,7 @@ func TestConfigReadmeMustMatchBorg(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "repo")
-	r, err := Create(path, Options{})
+	r, err := Create(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,14 +420,14 @@ func TestConfigReadmeMustMatchBorg(t *testing.T) {
 		[]byte("This is a borge repository.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(path, Options{}); !errors.Is(err, ErrInvalidRepository) {
+	if _, err := Open(location.MustLocal(path), Options{}); !errors.Is(err, ErrInvalidRepository) {
 		t.Errorf("a repository with a wrong readme opened: %v", err)
 	}
 }
 
 func TestOpenRejectsWrongVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repo")
-	r, err := Create(path, Options{})
+	r, err := Create(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +436,7 @@ func TestOpenRejectsWrongVersion(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(path, "config", "version"), []byte("3"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Open(path, Options{})
+	_, err = Open(location.MustLocal(path), Options{})
 	if !errors.Is(err, ErrInvalidRepository) {
 		t.Errorf("a version 3 repository opened: %v", err)
 	} else if !strings.Contains(err.Error(), "version 3") {
@@ -447,7 +448,7 @@ func TestCreateWritesAnEmptyIndex(t *testing.T) {
 	// Repository creation writes an empty index fragment so the first operation does not
 	// have to rebuild the index by listing every packs/ subdirectory.
 	path := filepath.Join(t.TempDir(), "repo")
-	r, err := Create(path, Options{})
+	r, err := Create(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +594,7 @@ func TestBreakLock(t *testing.T) {
 
 func TestRepositoryLocking(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repo")
-	r, err := Create(path, Options{Exclusive: true})
+	r, err := Create(location.MustLocal(path), Options{Exclusive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +611,7 @@ func TestRepositoryLocking(t *testing.T) {
 	if err := os.WriteFile(foreignName, []byte(foreign), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if r2, err := Open(path, Options{Exclusive: true}); err == nil {
+	if r2, err := Open(location.MustLocal(path), Options{Exclusive: true}); err == nil {
 		r2.Close()
 		t.Error("an open succeeded while another client held an exclusive lock")
 	}
@@ -622,7 +623,7 @@ func TestRepositoryLocking(t *testing.T) {
 		t.Fatal(err)
 	}
 	// And an open succeeds once the repository is free.
-	r2, err := Open(path, Options{Exclusive: true})
+	r2, err := Open(location.MustLocal(path), Options{Exclusive: true})
 	if err != nil {
 		t.Fatalf("could not open after close: %v", err)
 	}

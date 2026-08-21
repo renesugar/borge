@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/repository"
 )
 
@@ -87,8 +88,8 @@ func printKeyUsage(w io.Writer) {
 // No lock, because borg takes none either for export and import, and because a user
 // locked out of a repository by a lost passphrase still has to be able to import the key
 // that gets them back in. The commands that write pass exclusive=true.
-func (e *Env) openKeys(path string, exclusive bool) (*repository.Repository, *key.Manager, error) {
-	repo, err := repository.Open(path, repository.Options{Exclusive: exclusive, NoLock: !exclusive})
+func (e *Env) openKeys(loc *location.Location, exclusive bool) (*repository.Repository, *key.Manager, error) {
+	repo, err := repository.Open(loc, repository.Options{Exclusive: exclusive, NoLock: !exclusive})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,8 +103,10 @@ func (e *Env) openKeys(path string, exclusive bool) (*repository.Repository, *ke
 
 // unlockOrFail opens the current key, prompting when the environment did not supply a
 // working passphrase and there is a terminal to ask at.
-func (e *Env) unlockOrFail(mgr *key.Manager, repoPath string) (*key.Unlocked, error) {
-	return e.unlockKeyManagerWithPrompt(mgr, repoPath)
+func (e *Env) unlockOrFail(mgr *key.Manager, loc *location.Location) (*key.Unlocked, error) {
+	// The prompt names the repository in its canonical spelling, which is what borg's
+	// prompt does and what keeps a credential out of a message read off a screen.
+	return e.unlockKeyManagerWithPrompt(mgr, loc.Canonical())
 }
 
 // ---------------------------------------------------------------- list

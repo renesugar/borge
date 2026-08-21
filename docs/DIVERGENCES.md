@@ -2458,3 +2458,100 @@ expansion would be the more useful rule and it is the wrong one to implement: a 
 accepts and borg rejects is a script that stops working when it is run under borg. (Before
 this was wired up borge accepted that command line and wrote an archive literally named
 `2026/08`.)
+
+## 56. Every remote URL was a local directory — **fixed 2026-08-20**
+
+**Stage 8 · `internal/location`, `internal/cli/cli.go`, `internal/store/backends.go`**
+
+borge resolved a repository with `filepath.Abs` and nothing else. `Abs` does not reject a
+URL; it *joins* one to the working directory. So a location borge could not reach was not
+refused — it became a directory name:
+
+```
+$ borge repo-create -r sftp://backup.example.com/srv/repo -e none-sha256
+Repository created: /home/u/sftp:/backup.example.com/srv/repo
+Encryption: none-sha256
+$ find . -maxdepth 2
+./sftp:
+./sftp:/backup.example.com
+```
+
+That is the failure this port keeps finding: it looks like success. A user pointing borge
+at the repository they reach with borg over SFTP would have got a local repository on the
+machine being backed up, a "Repository created" line naming it, and backups that appeared
+to work — with the one property a backup exists for, being somewhere else, silently absent.
+`file://` had the same fate (`./file:/srv/repo`), which is worse in a way, because that is
+a form borg fully supports.
+
+**What replaces it.** `internal/location` is a port of borg's `Location`, and its rules are
+borg's, checked against borg's own parser over a 45-case corpus
+(`TestLocationMatchesBorg`):
+
+| written | proto | what happens |
+| --- | --- | --- |
+| `repo`, `../repo`, `/srv/repo` | `file` | made absolute, as before |
+| `file:///srv/repo` | `file` | the same repository as `/srv/repo`, and reported by that name |
+| `rest://[user@host[:port]]/path` | `rest` | parsed into parts: borg needs them to build the serving command |
+| `ssh://host/path` | `ssh` | parsed, then refused: borg 2 uses `ssh://` for borg 1.x repositories only (§0.6) |
+| `sftp:`, `s3:`, `b2:`, `rclone:`, `http(s):` | the scheme | detected only, and the raw URL handed to the backend — as borg does, so that one URL never has two parsers |
+| anything else | `file` | a path, even `ftp://host/x`, which is a directory called `ftp:` |
+
+Refusal is one place, `store.NewBackend`, so every command says the same thing: the
+backends that are coming say "not implemented yet (§11.5)", and `ssh://` says borg 1.x by
+name, because "not yet" would be a promise this port is not making.
+
+**A borg quirk that came with it, worth knowing before it surprises someone.** borg's
+lookahead for "this is a local path" excludes `//`, `ssh://`, `file://` and the borgstore
+schemes — but **not** `rest://`. So a `rest://` URL that fails to parse is not an error in
+borg: it falls through to the local branch and becomes a relative path.
+
+```
+rest://host          →  proto=file, path=$PWD/rest:/host
+rest://host:port/x   →  proto=file, path=$PWD/rest:/host:port/x
+```
+
+A `rest://` URL with a typo in the port, or with the path left off, quietly names a local
+directory. borge reproduces this exactly rather than being stricter, because `-r` accepting
+in one tool what it rejects in the other is a script that breaks on the way from borg to
+borge; the corpus above pins it, so if upstream fixes it the test says so.
+
+**And the credentials.** An `s3:` or `b2:` location carries its key and secret in the URL.
+borg keeps two strings for this reason — the processed URL, which is what opens the
+repository, and `canonical_path()`, which is redacted — and borge now does the same:
+`Location.String()` *is* the canonical form, so `%s` on a location cannot print a secret,
+and reaching the form that opens a repository is the deliberate act of calling
+`.Openable()`. The three places that need it are the child process of `with-lock`, the
+sub-commands of `benchmark crud`, and the backend itself. `Openable` is the absolute path
+for a local repository rather than the URL as typed, so a `with-lock` child that changes
+directory still finds the repository its parent locked — which is what borge exported
+before locations existed.
+
+## 57. `repo-create` ignored `BORG_OTHER_REPO` — **fixed 2026-08-20**
+
+**Stage 8 · `internal/cli/create.go`**
+
+borg's `--other-repo` is not only an option. Its argparse default is
+`Location(other=True)`, which reads `BORG_OTHER_REPO` when the parser is built, and
+`with_other_repository` acts on any location that came out valid. So the environment alone
+is enough:
+
+```
+$ BORG_OTHER_REPO=$PWD/A borg repo-create -r B -e aes256-ocb
+Enter passphrase for key /.../A:            # the *source* repository, unasked-for on the command line
+$ BORG_OTHER_PASSPHRASE=x borg transfer -r B --other-repo $PWD/A --dry-run
+a1 …: incomplete, transfer_size: 6 B        # accepted: B is related to A
+$ BORG_OTHER_PASSPHRASE=x borg transfer -r C --other-repo $PWD/A --dry-run
+Error: You must use the same chunker secret … Use a related repository!
+```
+
+borge read the option and nothing else, so the same command line produced an **unrelated**
+repository — and nothing said so. The report would have arrived one `transfer` later, as a
+refusal against a repository the user believed they had created for exactly that purpose,
+or, with `--chunker-params` also in play, as a transfer that duplicated every chunk.
+
+Fixed by `Env.optionalOtherRepo`, which is the environment-aware resolution `transfer`
+already used; `--copy-crypt-key` now also counts a source that came from the environment,
+where it used to refuse the command as if none had been given.
+`TestRepoCreateInheritsFromTheEnvironment` holds it, and holds it with borg as the judge:
+borg's own `transfer` accepts the repository borge made from the variable, and refuses the
+one made without it.

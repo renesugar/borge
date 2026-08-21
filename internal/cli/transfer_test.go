@@ -523,3 +523,50 @@ func TestTransferWithDifferentPassphrases(t *testing.T) {
 		t.Error("the destination opened with the source's passphrase")
 	}
 }
+
+// TestRepoCreateInheritsFromTheEnvironment: BORGE_OTHER_REPO alone makes a related
+// repository, with no --other-repo on the command line.
+//
+// borg spells this as an argparse default - --other-repo defaults to Location(other=True),
+// which reads BORG_OTHER_REPO - so the option being absent does not mean there is no source.
+// Measured on borg before it was ported: with only the variable set, repo-create asks for
+// the *source* repository's passphrase, and the repository it makes is one transfer accepts.
+// borge read the flag and nothing else, so the same command made an unrelated repository,
+// and the surprise would have arrived one transfer later. DIVERGENCES.md #57.
+func TestRepoCreateInheritsFromTheEnvironment(t *testing.T) {
+	r := newBorgRepo(t, "aes256-ocb")
+	transferRepos(t, r)
+	dst := filepath.Join(t.TempDir(), "dst")
+	plain := filepath.Join(t.TempDir(), "plain")
+
+	if _, stderr, code := r.borgeWithEnv(t, map[string]string{
+		"BORGE_OTHER_REPO":       r.path,
+		"BORGE_OTHER_PASSPHRASE": r.passphrase,
+	}, "repo-create", "-r", dst, "-e", "aes256-ocb"); code != ExitOK {
+		t.Fatalf("borge repo-create with BORGE_OTHER_REPO exited %d\n%s", code, stderr)
+	}
+
+	// borg is the judge of whether the key material really was inherited: its own transfer
+	// refuses a repository that is not related, so a dry run that finds work to do is proof
+	// that the id key and the chunk seed came across.
+	out, err := r.runErrOther("transfer", "-r", dst, "--other-repo", r.path, "--dry-run")
+	if err != nil {
+		t.Fatalf("borg refuses the repository borge made from BORGE_OTHER_REPO: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "incomplete") {
+		t.Errorf("borg's dry run reported no archives to transfer:\n%s", out)
+	}
+
+	// The control, without which the assertion above would pass for a repository that is
+	// related to everything: the same command with no source in the environment.
+	if _, stderr, code := r.borge(t, "repo-create", "-r", plain, "-e", "aes256-ocb"); code != ExitOK {
+		t.Fatalf("borge repo-create exited %d\n%s", code, stderr)
+	}
+	out, err = r.runErrOther("transfer", "-r", plain, "--other-repo", r.path, "--dry-run")
+	if err == nil {
+		t.Fatalf("borg transferred into an unrelated repository:\n%s", out)
+	}
+	if !strings.Contains(out, "chunker secret") {
+		t.Errorf("borg refused for some other reason than relatedness:\n%s", out)
+	}
+}

@@ -167,7 +167,13 @@ func cmdWithLock(e *Env, args []string) int {
 	cmd.Stdin = e.Stdin
 	cmd.Stdout = e.Stdout
 	cmd.Stderr = e.Stderr
-	cmd.Env = append(os.Environ(), "BORG_REPO="+path, "BORGE_REPO="+path)
+	// The openable form, not the canonical one: the child has to be able to *open* the
+	// repository, and canonicalisation strips credentials. For a local repository that is
+	// the absolute path, so a child that changes directory still finds it, and the
+	// placeholders are already expanded, so it cannot resolve "{now}" to a different
+	// second than its parent did.
+	cmd.Env = append(os.Environ(),
+		"BORG_REPO="+path.Openable(), "BORGE_REPO="+path.Openable())
 
 	err = cmd.Run()
 	if err == nil {

@@ -23,6 +23,7 @@ import (
 	"github.com/renesugar/borge/internal/archive"
 	"github.com/renesugar/borge/internal/compress"
 	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/msgpackx"
 	"github.com/renesugar/borge/internal/repoobj"
 	"github.com/renesugar/borge/internal/repository"
@@ -121,8 +122,8 @@ func (o *openedRaw) Close() error {
 	return o.repo.Close()
 }
 
-func (e *Env) openRepoRaw(path string, exclusive bool) (*openedRaw, error) {
-	repo, err := repository.Open(path, repository.Options{Exclusive: exclusive})
+func (e *Env) openRepoRaw(loc *location.Location, exclusive bool) (*openedRaw, error) {
+	repo, err := repository.Open(loc, repository.Options{Exclusive: exclusive})
 	if err != nil {
 		return nil, err
 	}

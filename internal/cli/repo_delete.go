@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/cache"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repository"
 )
@@ -104,7 +105,10 @@ func cmdRepoDelete(e *Env, args []string) int {
 	if err := repo.Close(); err != nil {
 		return e.fail(err)
 	}
-	leftover, err := destroyRepository(path)
+	// Local-only, and it can be: every other backend is refused at Open (§11.5), so a
+	// location that reaches here is a directory. When the remote backends land this has to
+	// become store.Destroy, and the "leftover files" behaviour of #18 has to go with it.
+	leftover, err := destroyRepository(path.Path)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -130,7 +134,7 @@ func describeRepoForDeletion(e *Env, repo *repository.Repository, list bool) (st
 		"every archive in it:")
 	fmt.Fprintln(&b, strings.Repeat("-", 72))
 	fmt.Fprintf(&b, "Repository ID: %s\n", repo.IDString())
-	fmt.Fprintf(&b, "Location:      %s\n", repo.Path())
+	fmt.Fprintf(&b, "Location:      %s\n", repo.Location())
 
 	// The manifest may be unreadable - a damaged repository is one of the reasons to
 	// delete one - so its absence is reported rather than treated as a failure.
@@ -231,8 +235,8 @@ func repoCacheDir(repo *repository.Repository) (string, error) {
 	return cache.Dir(repo.ID())
 }
 
-func deleteCacheOnly(e *Env, path string, dryRun bool) int {
-	repo, err := repository.Open(path, repository.Options{NoLock: true})
+func deleteCacheOnly(e *Env, loc *location.Location, dryRun bool) int {
+	repo, err := repository.Open(loc, repository.Options{NoLock: true})
 	if err != nil {
 		return e.fail(err)
 	}

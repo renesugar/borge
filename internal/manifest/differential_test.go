@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/repository"
 )
 
@@ -127,7 +128,7 @@ func (r *borgRepo) createArchive(name string, extra ...string) string {
 // open opens the repository with borge and unlocks it.
 func (r *borgRepo) open(t *testing.T) (*repository.Repository, *Manifest) {
 	t.Helper()
-	repo, err := repository.Open(r.path, repository.Options{})
+	repo, err := repository.Open(location.MustLocal(r.path), repository.Options{})
 	if err != nil {
 		t.Fatalf("borge could not open borg's repository: %v", err)
 	}
@@ -259,7 +260,7 @@ func TestBorgReadsBorgeRewrittenManifest(t *testing.T) {
 	}
 	before := r.repoList()
 
-	repo, err := repository.Open(r.path, repository.Options{Exclusive: true})
+	repo, err := repository.Open(location.MustLocal(r.path), repository.Options{Exclusive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +346,7 @@ func TestSoftDeleteMatchesBorg(t *testing.T) {
 		r.createArchive(name)
 	}
 
-	repo, err := repository.Open(r.path, repository.Options{Exclusive: true})
+	repo, err := repository.Open(location.MustLocal(r.path), repository.Options{Exclusive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +394,7 @@ func TestSoftDeleteMatchesBorg(t *testing.T) {
 	}
 
 	// And borge can put it back.
-	repo, err = repository.Open(r.path, repository.Options{Exclusive: true})
+	repo, err = repository.Open(location.MustLocal(r.path), repository.Options{Exclusive: true})
 	if err != nil {
 		t.Fatal(err)
 	}

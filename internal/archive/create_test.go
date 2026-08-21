@@ -17,6 +17,7 @@ import (
 	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repository"
 )
@@ -34,7 +35,7 @@ import (
 // createBuilder opens a repository and starts an archive builder on it.
 func createBuilder(t *testing.T, r *borgRepo) (*repository.Repository, *Builder) {
 	t.Helper()
-	repo, err := repository.Open(r.path, repository.Options{Exclusive: true})
+	repo, err := repository.Open(location.MustLocal(r.path), repository.Options{Exclusive: true})
 	if err != nil {
 		t.Fatal(err)
 	}

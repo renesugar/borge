@@ -86,7 +86,7 @@ func (e *Env) unlockWithPrompt(repo *repository.Repository) (key.Key, *key.Unloc
 	}
 
 	for try := 0; try < passphraseTries; try++ {
-		pass, ok, promptErr := e.promptPassphrase("Enter passphrase for " + repo.Path() + ": ")
+		pass, ok, promptErr := e.promptPassphrase("Enter passphrase for " + repo.Location().Canonical() + ": ")
 		if promptErr != nil {
 			return nil, nil, promptErr
 		}

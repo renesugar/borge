@@ -1720,7 +1720,7 @@ a table at all.
 
 | # | Item | Recorded in | State |
 | --- | --- | --- | --- |
-| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **planned 2026-08-20**, not started. Five pieces, not one: a `Location` type, then `rclone`, then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
+| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), then `rclone`, then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
 | 2 | ~~`transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards~~ | §11.1, DIVERGENCES #55 | **done 2026-08-20.** All seven work items closed. borg transfers into a repository borge created with `--other-repo`, and reads what borge's transfer wrote; both relatedness guards refuse with borg's exact words; a re-run skips. Work item 7 answered by measurement: neither `chunks_healthy` nor `part` can occur in a borg 2 archive, so neither branch is ported. Beside it: borge validated **no** archive name or comment anywhere, so `create` accepted names borg's own parser refuses |
 | 3 | ~~missing per-command options~~ | §11.2, `option-coverage.sh` | **done 2026-08-20**, down from 111 to 11, and every short spelling borg offers is now borge's too. Nine commands reached zero in one day (DIVERGENCES #48-#53). Of the eleven left, four are other rows' (`recreate` row 4, `repo-create` row 2) and the rest have written reasons in #53: `check`'s two need a pack-level check borge has not ported, `repo-delete --keep-security-info` manages a directory borge does not keep, `repo-list --from-borg1` is a §0.6 non-goal |
 | 4 | ~~`recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter`~~ | §11.2 | **done 2026-08-20** (DIVERGENCES #54). The tag scan reads `CACHEDIR.TAG` out of the item stream, since recreate has no filesystem to look at. Beside it: `recreate`'s positional was read as an archive name where borg reads a *path*, so the same command line emptied every archive under borg; and `--list` reported `+` for everything where borg reports the item's type letter, which made `--filter` useless |
@@ -2754,6 +2754,24 @@ then `rclone`, then REST client + `serve --rest`, then `sftp`, then `s3`. The fi
 commits answer the only architectural question — whether `store.Backend` is the right shape
 — at the lowest cost, and if the answer is no, it is better to find out against a local
 rclone remote than three backends later.
+
+#### Piece 1 — `Location` — done 2026-08-20
+
+`internal/location` parses what borg's `Location` parses, checked case by case against
+borg's own parser (a 45-case corpus, `TestLocationMatchesBorg`), and `store.NewBackend` is
+the single place that turns a location into a backend — and therefore the single place that
+refuses one. `resolveRepo` returns a `*location.Location` rather than a string, so the
+compiler, not a convention, decides where the openable form (`.Processed`, which may carry
+an S3 secret) is used and where the canonical one is.
+
+Two defects fell out of it, both recorded: **#56**, every URL was joined to the working
+directory rather than rejected, so `-r sftp://host/repo` created a *local* directory and
+reported success; and **#57**, `repo-create` ignored `BORG_OTHER_REPO`, where borg treats
+the variable as the option's default and makes a related repository from it.
+
+The rest of the row is unchanged: the `Backend` interface was not touched, which is the
+first evidence that it is the right shape — though the piece that really tests that is
+`rclone`, next.
 
 ---
 

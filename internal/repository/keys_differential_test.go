@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/repoobj"
 )
 
@@ -151,7 +152,7 @@ func TestBorgeUnlocksBorgRepositories(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path := c.createRepo("repo", tc.encryption, tc.idHash, tc.location)
 
-			r, err := Open(path, Options{})
+			r, err := Open(location.MustLocal(path), Options{})
 			if err != nil {
 				t.Fatalf("borge could not open borg's repository: %v", err)
 			}
@@ -223,11 +224,11 @@ func TestBorgeUnlocksBorgRepositories(t *testing.T) {
 func TestBorgAcceptsBorgeWrittenKeys(t *testing.T) {
 	c := newBorgCLI(t)
 
-	for _, location := range []string{"repokey", "keyfile"} {
-		t.Run(location, func(t *testing.T) {
-			path := c.createRepo("repo", "aes256-ocb", "sha256", location)
+	for _, keyLoc := range []string{"repokey", "keyfile"} {
+		t.Run(keyLoc, func(t *testing.T) {
+			path := c.createRepo("repo", "aes256-ocb", "sha256", keyLoc)
 
-			r, err := Open(path, Options{Exclusive: true})
+			r, err := Open(location.MustLocal(path), Options{Exclusive: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -260,7 +261,7 @@ func TestBorgAcceptsBorgeWrittenKeys(t *testing.T) {
 			}
 
 			// And a passphrase change made by borge takes effect for borg.
-			r, err = Open(path, Options{Exclusive: true})
+			r, err = Open(location.MustLocal(path), Options{Exclusive: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -296,7 +297,7 @@ func TestKeyExportImportCrossCheck(t *testing.T) {
 	c := newBorgCLI(t)
 	path := c.createRepo("repo", "aes256-ocb", "sha256", "repokey")
 
-	r, err := Open(path, Options{})
+	r, err := Open(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +382,7 @@ func TestBorgReadsARepositoryBorgeHasLocked(t *testing.T) {
 	c := newBorgCLI(t)
 	path := c.createRepo("repo", "none-sha256", "", "")
 
-	r, err := Open(path, Options{})
+	r, err := Open(location.MustLocal(path), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +429,7 @@ func TestBorgeSeesBorgsLocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := Open(path, Options{})
+	r, err := Open(location.MustLocal(path), Options{})
 	if err == nil {
 		r.Close()
 		t.Fatal("borge opened a repository borg holds an exclusive lock on")

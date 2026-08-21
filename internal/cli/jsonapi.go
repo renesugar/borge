@@ -20,6 +20,7 @@ import (
 	"github.com/renesugar/borge/internal/crypto/key"
 	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repository"
 )
@@ -82,16 +83,19 @@ func splitEncryptionMode(mode string) encryptionJSON {
 }
 
 // envelope is what every JSON-producing repository command has around its payload.
-func (o *opened) envelope(location string) (repositoryJSON, encryptionJSON) {
-	return envelopeFor(o.repo, o.key, o.manifest, location)
+func (o *opened) envelope(loc *location.Location) (repositoryJSON, encryptionJSON) {
+	return envelopeFor(o.repo, o.key, o.manifest, loc)
 }
 
 // envelopeFor is envelope for the commands that hold the three pieces separately rather
 // than as an "opened" - create and import-tar open the repository themselves.
 func envelopeFor(
-	repo *repository.Repository, k key.Key, m *manifest.Manifest, location string,
+	repo *repository.Repository, k key.Key, m *manifest.Manifest, loc *location.Location,
 ) (repositoryJSON, encryptionJSON) {
-	out := repositoryJSON{ID: repo.IDString(), Location: location}
+	// The canonical form, which is borg's: parseformat.py publishes
+	// _location.canonical_path() here, so two spellings of one repository produce one
+	// string and an S3 location does not publish its secret key in a JSON log.
+	out := repositoryJSON{ID: repo.IDString(), Location: loc.Canonical()}
 	// A repository whose timestamp cannot be read still has an id and a location worth
 	// reporting, so a bad timestamp leaves the field empty rather than failing the
 	// command. borg has no such case: it always has a manifest timestamp by here.
@@ -185,7 +189,7 @@ func createStatsJSON(nfiles, originalSize int64, fileStatus map[string]int64,
 // keeps per repository exactly as borg does.
 func archiveCreatedJSON(
 	repo *repository.Repository, k key.Key, m *manifest.Manifest,
-	location, cachePath string, meta *item.ArchiveItem, id []byte, stats map[string]any,
+	loc *location.Location, cachePath string, meta *item.ArchiveItem, id []byte, stats map[string]any,
 ) map[string]any {
 	archiveBlock := map[string]any{
 		"name":  meta.Name,
@@ -211,7 +215,7 @@ func archiveCreatedJSON(
 		archiveBlock["command_line"] = *meta.CommandLine
 	}
 
-	repoBlock, encBlock := envelopeFor(repo, k, m, location)
+	repoBlock, encBlock := envelopeFor(repo, k, m, loc)
 	return map[string]any{
 		"archive":    archiveBlock,
 		"cache":      map[string]any{"path": cachePath},

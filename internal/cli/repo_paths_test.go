@@ -112,13 +112,18 @@ func TestResolveRepoExpandsBeforeResolving(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRepo: %v", err)
 	}
-	if want := filepath.Join(work, host, "repo"); got != want {
-		t.Errorf("resolveRepo(%q) = %q, want %q", "{hostname}/repo", got, want)
+	if want := filepath.Join(work, host, "repo"); got.Path != want {
+		t.Errorf("resolveRepo(%q) = %q, want %q", "{hostname}/repo", got.Path, want)
+	}
+	// The unexpanded form is kept beside the expanded one, because that is what a command
+	// re-expands when it needs the location as of a particular time.
+	if got.Raw != "{hostname}/repo" {
+		t.Errorf("resolveRepo kept raw=%q, want the location as the user wrote it", got.Raw)
 	}
 
 	// An absolute path is left where it is.
-	if got, err := e.resolveRepo("/backups/here"); err != nil || got != "/backups/here" {
-		t.Errorf("resolveRepo(\"/backups/here\") = %q, %v", got, err)
+	if got, err := e.resolveRepo("/backups/here"); err != nil || got.Path != "/backups/here" {
+		t.Errorf("resolveRepo(\"/backups/here\") = %v, %v", got, err)
 	}
 	// And no repository at all is still an error rather than the working directory.
 	if _, err := e.resolveRepo(""); err == nil {

@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/hashindex"
+	"github.com/renesugar/borge/internal/location"
 	"github.com/renesugar/borge/internal/repoobj"
 	"github.com/renesugar/borge/internal/store"
 )
@@ -105,7 +106,7 @@ type Options struct {
 // Repository is an opened borg repository.
 type Repository struct {
 	store   *store.Store
-	path    string
+	loc     *location.Location
 	id      []byte
 	version int
 
@@ -122,13 +123,13 @@ type Repository struct {
 	opts Options
 }
 
-// Create makes a new repository at an absolute path.
+// Create makes a new repository at a location.
 //
 // The creation order matters, and the last step is a performance measure rather than a
 // correctness one: writing an empty chunk index means the first operation does not have
 // to rebuild it by listing every packs/ subdirectory.
-func Create(path string, opts Options) (*Repository, error) {
-	backend, err := store.NewPosixFS(path, nil)
+func Create(loc *location.Location, opts Options) (*Repository, error) {
+	backend, err := store.NewBackend(loc)
 	if err != nil {
 		return nil, err
 	}
@@ -166,12 +167,12 @@ func Create(path string, opts Options) (*Repository, error) {
 	if _, err := WriteChunkIndex(s, empty, WriteIndexOptions{ForceWrite: true}); err != nil {
 		return nil, err
 	}
-	return Open(path, opts)
+	return Open(loc, opts)
 }
 
 // Open opens an existing repository.
-func Open(path string, opts Options) (*Repository, error) {
-	backend, err := store.NewPosixFS(path, nil)
+func Open(loc *location.Location, opts Options) (*Repository, error) {
+	backend, err := store.NewBackend(loc)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +184,12 @@ func Open(path string, opts Options) (*Repository, error) {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidRepository, err)
 	}
 
-	r := &Repository{store: s, path: path, opts: opts, packCache: newPackCache(3)}
+	r := &Repository{store: s, loc: loc, opts: opts, packCache: newPackCache(3)}
 
 	readme, err := s.Load("config/readme", 0, -1, false)
 	if err != nil {
 		s.Close()
-		return nil, fmt.Errorf("%w: no config/readme at %s", ErrInvalidRepository, path)
+		return nil, fmt.Errorf("%w: no config/readme at %s", ErrInvalidRepository, loc)
 	}
 	if string(readme) != RepositoryReadme {
 		s.Close()
@@ -308,8 +309,11 @@ func (r *Repository) IDString() string { return hex.EncodeToString(r.id) }
 // Version is the repository format version.
 func (r *Repository) Version() int { return r.version }
 
-// Path is where this repository lives on disk.
-func (r *Repository) Path() string { return r.path }
+// Location is where this repository lives.
+//
+// It prints as borg's canonical path, with any credentials removed, so a caller that wants
+// to show the user which repository it is working on can print this directly.
+func (r *Repository) Location() *location.Location { return r.loc }
 
 // Store exposes the underlying object store, for the namespaces the repository does not
 // wrap (archives/, keys/, config/manifest).
