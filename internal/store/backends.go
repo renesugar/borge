@@ -49,7 +49,9 @@ func NewBackend(loc *location.Location) (Backend, error) {
 		// credentials may be in the URL or in the environment, as borgstore allows.
 		user, password := restCredentials(loc)
 		return NewRESTOverHTTP(withoutCredentials(loc.Processed), user, password)
-	case "sftp", "s3", "b2":
+	case "sftp":
+		return NewSFTP(loc.Processed)
+	case "s3", "b2":
 		return nil, fmt.Errorf("store: the %s backend is not implemented yet "+
 			"(docs/PORTING_PLAN.md §11.5); this borge reads local repositories only", loc.Proto)
 	default:

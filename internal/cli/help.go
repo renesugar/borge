@@ -408,6 +408,10 @@ REMOTE REPOSITORIES
   BORGE_REPO_PERMISSIONS     what a serve --rest process allows its client to do: all
                              (default), no-delete, write-only or read-only. The option
                              --permissions overrides it
+  BORGE_KNOWN_HOSTS          the known_hosts file an sftp: repository's host key must be
+                             in, instead of ~/.ssh/known_hosts. There is no option to
+                             accept an unknown key: borge refuses a host it has not seen,
+                             so first contact is made with ssh or sftp and verified there
 
 Three variables here are not borge's own and are read under their own names, because the
 tools on the far end and the libraries in between already use them: BORGSTORE_RSH is

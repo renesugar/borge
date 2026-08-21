@@ -21,27 +21,33 @@ import (
 
 // TestRemoteLocationsAreRefusedNotJoined: a location borge cannot reach must fail, and must
 // leave nothing behind.
+//
+// What is asserted here is deliberately not "this backend is not implemented yet". That was
+// the first version, and it broke on every piece of §11.5 that landed - three times, each
+// time reporting a failure where the code had improved. The invariant that does not move is
+// the one the bug was about: a URL is never joined to the working directory, and the
+// refusal names the location rather than a path.
 func TestRemoteLocationsAreRefusedNotJoined(t *testing.T) {
 	r := newBorgRepo(t, "none-sha256")
 
+	// Hostnames use .invalid (RFC 2606), which never resolves, so an implemented backend
+	// fails at one lookup instead of reaching the network.
 	for _, c := range []struct {
-		url  string
+		url string
+		// says is what the message must contain. For most of these it is the location
+		// itself; the two that name something else say why below.
 		says string
 	}{
-		{"sftp://backup.example.com/srv/repo", "not implemented yet"},
-		{"s3:key:secret@http://localhost:4566/bucket/repo", "not implemented yet"},
-		{"b2:key:secret@bucket/repo", "not implemented yet"},
-		// The implemented backends get as far as the backend, which is the same check
-		// from the other side: the URL reached a backend rather than becoming a
-		// directory name. rclone does not know the remote; the others cannot reach the
-		// host. ".invalid" is reserved by RFC 2606 and never resolves, so this costs one
-		// failed lookup rather than a real connection.
-		{"rclone:no-such-remote:path/repo", "rclone"},
+		{"sftp://borge-nowhere.invalid/srv/repo", "borge-nowhere.invalid"},
 		{"rest://borge-nowhere.invalid/srv/repo", "borge-nowhere.invalid"},
 		{"https://borge-nowhere.invalid/repo", "borge-nowhere.invalid"},
-		// ssh:// is not "later": it is borg 1.x, which is a §0.6 non-goal, and the
-		// message has to say so rather than suggest waiting for a release.
-		{"ssh://backup.example.com/srv/repo", "borg 1.x"},
+		{"rclone:no-such-remote:path/repo", "rclone"},
+		// Still unimplemented, and the message must say that rather than fail obscurely.
+		{"s3:key:secret@http://localhost:4566/bucket/repo", "not implemented yet"},
+		{"b2:key:secret@bucket/repo", "not implemented yet"},
+		// ssh:// is not "later": it is borg 1.x, a §0.6 non-goal, and the message says so
+		// rather than suggesting a future release.
+		{"ssh://borge-nowhere.invalid/srv/repo", "borg 1.x"},
 	} {
 		t.Run(c.url, func(t *testing.T) {
 			work := t.TempDir()
@@ -52,9 +58,14 @@ func TestRemoteLocationsAreRefusedNotJoined(t *testing.T) {
 				t.Fatalf("borge created a repository at %q", c.url)
 			}
 			if !strings.Contains(stderr, c.says) {
-				t.Errorf("the refusal of %q does not say %q:\n%s", c.url, c.says, stderr)
+				t.Errorf("the refusal of %q does not mention %q:\n%s", c.url, c.says, stderr)
 			}
-			// The point of the test: nothing was created under the working directory.
+			// The point of the test: nothing was created under the working directory,
+			// and the error does not name it either - both would mean the URL had been
+			// taken for a path.
+			if strings.Contains(stderr, work) {
+				t.Errorf("the refusal of %q names the working directory:\n%s", c.url, stderr)
+			}
 			entries, err := os.ReadDir(work)
 			if err != nil {
 				t.Fatal(err)

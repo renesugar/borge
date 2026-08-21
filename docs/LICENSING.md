@@ -121,6 +121,36 @@ A CI check enforces that every `.go` file has an SPDX line, and that any file wh
 header claims an upstream origin names a path that exists in the pinned upstream
 checkout.
 
+## 7. Third-party Go dependencies, and one thing that is deliberately not one
+
+Dependencies are linked, not vendored and not relicensed; their own licenses continue to
+apply. The list is short on purpose (PORTING_PLAN §0.4: prefer the standard library), and
+each addition is a decision with a reason:
+
+| module | license | why it is here |
+| --- | --- | --- |
+| `github.com/klauspost/compress` | BSD-3-Clause | zstd, and the fastest pure-Go deflate |
+| `github.com/pierrec/lz4/v4` | BSD-3-Clause | lz4, borg's default compression |
+| `github.com/ulikunitz/xz` | BSD-3-Clause | lzma, which borg offers |
+| `lukechampine.com/blake3` | MIT | BLAKE3, one of borg's two id hashes |
+| `golang.org/x/crypto` | BSD-3-Clause | argon2, ssh (the sftp backend's transport) |
+| `golang.org/x/sys`, `golang.org/x/term` | BSD-3-Clause | syscalls and terminal handling |
+| `github.com/pkg/sftp` | BSD-2-Clause | the SFTP v3 protocol, added 2026-08-21 |
+| `github.com/kr/fs` | BSD-3-Clause | pulled in by `pkg/sftp` |
+
+**SFTP is a wire protocol with a specification, not a borg format decision.** Implementing
+it by hand over `x/crypto/ssh` is possible and would be a few thousand lines of someone
+else's protocol; the "prefer the standard library" rule is about not taking a dependency for
+something Go can already do, and Go cannot already do this.
+
+**paramiko is not a dependency and must not become one.** borg reads `~/.ssh/config`
+through paramiko, so paramiko's behaviour is what borge has to match for an `sftp://` URL to
+mean the same thing in both tools — but paramiko is LGPL-2.1-or-later, and borge is
+Apache-2.0. `internal/store/sshconfig.go` is therefore an independent implementation of
+rules OpenSSH documents, with paramiko used as a **test oracle**: the differential test runs
+both and compares. Behaviour is not copyrightable; an implementation is. Nothing in that
+file is copied or translated from paramiko, and its header says so.
+
 ## 6. `borghash` and `borgstore` — resolved
 
 `borg` 2 has moved two components into separate PyPI packages that `borge` must also

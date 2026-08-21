@@ -4,11 +4,13 @@ package store
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// planter puts a file into the store that the backend would refuse to write, at a name
+// relative to the store's root.
+type planter func(t *testing.T, name string)
 
 // One suite, every backend.
 //
@@ -22,10 +24,11 @@ import (
 // §11.5): the interface needed no change for the second backend, and this suite is the
 // evidence rather than the claim.
 //
-// open returns an opened backend and the local directory holding it - both of borge's
-// backends are local in these tests, and one case below has to put something in that
-// directory that the backend itself would refuse to write.
-func runBackendConformance(t *testing.T, open func(t *testing.T) (Backend, string)) {
+// open returns an opened backend and a way to plant a file in it that the backend itself
+// would refuse to write - a name that is not one of borge's. One case below needs that, and
+// how it is done differs: for a local store it is a file, and for a store on an SFTP server
+// it goes over the same connection the backend uses.
+func runBackendConformance(t *testing.T, open func(t *testing.T) (Backend, planter)) {
 	t.Run("store and load", func(t *testing.T) {
 		b, _ := open(t)
 		if err := b.Store("config/id", []byte("0123456789abcdef")); err != nil {
@@ -131,7 +134,7 @@ func runBackendConformance(t *testing.T, open func(t *testing.T) (Backend, strin
 	})
 
 	t.Run("list is sorted and skips what is not ours", func(t *testing.T) {
-		b, dir := open(t)
+		b, plant := open(t)
 		for _, name := range []string{"archives/c", "archives/a", "archives/b"} {
 			if err := b.Store(name, []byte(name)); err != nil {
 				t.Fatal(err)
@@ -142,9 +145,7 @@ func runBackendConformance(t *testing.T, open func(t *testing.T) (Backend, strin
 		// report them or fail: the storage may hold a leftover temp file, or something
 		// that never came from borge at all, and neither is a reason to stop a backup.
 		for _, foreign := range []string{"NOTES.txt", "half-written" + TmpSuffix, "a b"} {
-			if err := os.WriteFile(filepath.Join(dir, "archives", foreign), []byte("x"), 0o600); err != nil {
-				t.Fatal(err)
-			}
+			plant(t, "archives/"+foreign)
 		}
 		entries, err := b.List("archives")
 		if err != nil {

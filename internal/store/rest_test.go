@@ -32,7 +32,7 @@ import (
 
 // newRESTForTest returns a REST client talking to a REST server over a real HTTP
 // connection, and the directory the server is serving.
-func newRESTForTest(t *testing.T) (Backend, string) {
+func newRESTForTest(t *testing.T) (Backend, planter) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "remote")
 	served, err := NewPosixFS(dir, nil)
@@ -53,7 +53,7 @@ func newRESTForTest(t *testing.T) (Backend, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	return client, dir
+	return client, localPlanter(dir)
 }
 
 // TestRESTResponsesCarryContentLength: every response says how long its body is, and none
@@ -295,7 +295,7 @@ func TestMain(m *testing.M) {
 }
 
 // newRESTStdioForTest returns a client talking to this test binary, running as a server.
-func newRESTStdioForTest(t *testing.T) (Backend, string) {
+func newRESTStdioForTest(t *testing.T) (Backend, planter) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "remote")
 	served, err := NewPosixFS(dir, nil)
@@ -321,7 +321,7 @@ func newRESTStdioForTest(t *testing.T) (Backend, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	return client, dir
+	return client, localPlanter(dir)
 }
 
 // TestRESTStdioCarriesManyRequestsOnOneConnection: the transport has to be keep-alive, or

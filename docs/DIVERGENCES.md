@@ -2721,3 +2721,77 @@ a file format's magic number.
 reports 55 implemented, three recorded absences — `mount`, `umount`, `webdav`, all §0.6
 non-goals — and **no gaps**. `serve` without `--rest` serves a borg 1.x repository over the
 legacy protocol and is refused by name, like the other §0.6 non-goals.
+
+## 60. sftp, the alias, and the host key that "changed" — **2026-08-21**
+
+**Stage 8 · `internal/store/sftp.go`, `internal/store/sshconfig.go`**
+
+Row 1, piece 4 of five (PORTING_PLAN §11.5). An `sftp://` repository is files in
+directories on someone else's machine, reached over SSH — `golang.org/x/crypto/ssh` for the
+transport and `github.com/pkg/sftp` for the protocol, which is a specification rather than
+a borg format decision (LICENSING §7).
+
+**There is no password, and that was measured.** borgstore's sftp URL has no password field
+at all and its connect call passes a key file and an agent. A password-authenticated test
+account was set up before this was noticed and could not be used by borg at all, so borge
+authenticates with a key or through the agent and nothing else. `TestSFTPNeverAsksForAPassword`
+holds both halves: that a colon in the user part is part of the *name* rather than a
+separator, and that no password authentication method appears in the backend.
+
+**An unknown host is a refusal, not a question.** The host key must already be in
+`known_hosts`. borgstore's own comment says why — the user should make first contact with
+the `ssh` or `sftp` command and verify the fingerprint — and a backup program that accepted
+a new key on its own would be one that keeps working while somebody stands in the middle.
+The two failures get different messages, because they need different answers: never seen
+("connect once with ssh HOST and verify the fingerprint") against changed ("either the
+server changed or something is impersonating it").
+
+**And the bug that made a known host look changed.** The first working connection reported:
+
+```
+the host key of borge-sftp-test does not match the one in known_hosts.
+Either the server changed or something is impersonating it
+```
+
+Nothing had changed. Go negotiates a host key algorithm without consulting `known_hosts`,
+so the server offered RSA or ECDSA while the file held only the ed25519 key it was
+registered with — and the check then compared two different keys and called it a mismatch.
+`x/crypto/ssh/knownhosts` offers no way to ask which algorithms it holds, so borge asks the
+only way the package allows: it offers a key the file cannot possibly know and reads the
+list of what it wanted instead. That list becomes `HostKeyAlgorithms`.
+
+This is worth recording beyond the fix. The alarm was the *loud* one — "something is
+impersonating it" — raised by a connection that was in no way suspicious. A tool that cries
+wolf on an ordinary connection teaches its users to ignore the one case it exists for.
+
+**One variable that is borge's own.** `BORGE_KNOWN_HOSTS` points at the file the host key
+must be in; borg has no equivalent, because paramiko reads `~/.ssh/known_hosts` and offers
+no way past it. It exists so that a test can prove the refusal happens (an empty file makes
+every host unknown), and it is documented rather than hidden, because a variable that
+decides which host keys are trusted is not an implementation detail. It cannot weaken the
+check: pointing it somewhere means those keys and no others.
+
+**The ssh config is not decoration.** `sftp://backup-server/repo` is normally an alias, and
+the hostname, user, port and key all come out of `~/.ssh/config`. borg reads that through
+paramiko, so paramiko is the contract: `TestSSHConfigMatchesParamiko` compares the two over
+globs with negation, `Key=value`, first-value-wins, `IdentityFile` accumulation and `%h`
+tokens.
+
+**What borge does not read, and what it does about it.** paramiko supports `Match` blocks;
+borge does not. It would be easy to ignore the keyword and let the block's contents attach
+to whatever `Host` came before it — and that would send a connection somewhere the config
+never said. So a `Match` line ends the current block instead: borge reads *less* than borg
+would, never something different. `TestSSHConfigMatchBlocksAreNotRead` pins it. Neither tool
+supports `Include`.
+
+**A skip that looked like a pass.** The interop rows probed the server with `ssh HOST true`
+— which an SFTP-only server refuses with "exec request failed" — so every sftp row skipped
+while reporting success. It was caught by the suite finishing in 0.3 seconds. The probe now
+uses the `sftp` client, and the rule around it changed: a `Host` block for the test alias
+means this machine was set up for these tests, so an unreachable server after that is a
+**failure**, not a skip. §11.5 asked for exactly this and the first version of the test did
+not have it.
+
+**The rows.** Each tool writes and the other reads; then one repository written by *both*
+over sftp, with each extracting the other's archive and `check --verify-data` run by each —
+two independent SSH implementations against one repository.

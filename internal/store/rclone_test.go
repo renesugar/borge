@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,7 @@ func requireRclone(t *testing.T) {
 
 // newRcloneForTest returns an opened rclone backend over a fresh local remote, and the
 // directory that remote is.
-func newRcloneForTest(t *testing.T) (Backend, string) {
+func newRcloneForTest(t *testing.T) (Backend, planter) {
 	t.Helper()
 	requireRclone(t)
 	dir := filepath.Join(t.TempDir(), "remote")
@@ -46,10 +47,10 @@ func newRcloneForTest(t *testing.T) (Backend, string) {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
-	return b, dir
+	return b, localPlanter(dir)
 }
 
-func newPosixFSForTest(t *testing.T) (Backend, string) {
+func newPosixFSForTest(t *testing.T) (Backend, planter) {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "remote")
 	b, err := NewPosixFS(dir, nil)
@@ -63,7 +64,21 @@ func newPosixFSForTest(t *testing.T) (Backend, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
-	return b, dir
+	return b, localPlanter(dir)
+}
+
+// localPlanter writes a file straight into the directory a store is kept in.
+func localPlanter(dir string) planter {
+	return func(t *testing.T, name string) {
+		t.Helper()
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("not borge's"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // TestBackendConformance runs one suite over every backend borge has.
@@ -75,6 +90,7 @@ func TestBackendConformance(t *testing.T) {
 	t.Run("rclone", func(t *testing.T) { runBackendConformance(t, newRcloneForTest) })
 	t.Run("rest-http", func(t *testing.T) { runBackendConformance(t, newRESTForTest) })
 	t.Run("rest-stdio", func(t *testing.T) { runBackendConformance(t, newRESTStdioForTest) })
+	t.Run("sftp", func(t *testing.T) { runBackendConformance(t, newSFTPForTest) })
 }
 
 // TestRcloneWritesWhatPosixFSWould is the interop claim in its smallest form: a store

@@ -1720,7 +1720,7 @@ a table at all.
 
 | # | Item | Recorded in | State |
 | --- | --- | --- | --- |
-| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), ~~`rclone`~~ (**done 2026-08-21**, #58), ~~the REST client with `serve --rest`~~ (**done 2026-08-21**, #59), then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
+| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), ~~`rclone`~~ (**done 2026-08-21**, #58), ~~the REST client with `serve --rest`~~ (**done 2026-08-21**, #59), ~~`sftp`~~ (**done 2026-08-21**, #60), then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
 | 2 | ~~`transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards~~ | §11.1, DIVERGENCES #55 | **done 2026-08-20.** All seven work items closed. borg transfers into a repository borge created with `--other-repo`, and reads what borge's transfer wrote; both relatedness guards refuse with borg's exact words; a re-run skips. Work item 7 answered by measurement: neither `chunks_healthy` nor `part` can occur in a borg 2 archive, so neither branch is ported. Beside it: borge validated **no** archive name or comment anywhere, so `create` accepted names borg's own parser refuses |
 | 3 | ~~missing per-command options~~ | §11.2, `option-coverage.sh` | **done 2026-08-20**, down from 111 to 11, and every short spelling borg offers is now borge's too. Nine commands reached zero in one day (DIVERGENCES #48-#53). Of the eleven left, four are other rows' (`recreate` row 4, `repo-create` row 2) and the rest have written reasons in #53: `check`'s two need a pack-level check borge has not ported, `repo-delete --keep-security-info` manages a directory borge does not keep, `repo-list --from-borg1` is a §0.6 non-goal |
 | 4 | ~~`recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter`~~ | §11.2 | **done 2026-08-20** (DIVERGENCES #54). The tag scan reads `CACHEDIR.TAG` out of the item stream, since recreate has no filesystem to look at. Beside it: `recreate`'s positional was read as an archive name where borg reads a *path*, so the same command line emptied every archive under borg; and `--list` reported `+` for everything where borg reports the item's type letter, which made `--filter` useless |
@@ -2791,6 +2791,21 @@ that does not track one. That leaves the interface table in this section fully a
 
 **With `serve`, the command gate has no gaps left**: 55 implemented, and only `mount`,
 `umount` and `webdav` recorded absent, all §0.6 non-goals.
+
+#### Piece 4 — `sftp` — done 2026-08-21
+
+`golang.org/x/crypto/ssh` plus `github.com/pkg/sftp`, as this section planned, and the two
+things it called out are both there: authentication is by key or agent with no password
+anywhere, and `known_hosts` is enforced with no fallback. The ssh config is read by borge's
+own parser, checked against paramiko case by case — paramiko is the oracle rather than a
+dependency, for the licensing reason recorded in LICENSING §7.
+
+Two findings, both in DIVERGENCES #60: Go negotiates a host key algorithm without consulting
+`known_hosts`, so a perfectly ordinary connection raised "the host key changed" until the
+algorithms were constrained to what the file holds; and the interop rows skipped silently
+for a while because they probed an SFTP-only server with `ssh HOST true`. The second changed
+a rule as well as a line: where this machine is configured for these tests, an unreachable
+service now fails rather than skips.
 
 #### The order these should be committed in
 
