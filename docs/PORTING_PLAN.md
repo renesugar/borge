@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark`, `completion`, `key`, `repo-delete` and `help` done: **31 of borg's 36 commands**, with `tests/evidence/command-coverage.sh` as the gate. What remains: `serve` and the remote backends, and a decision on borg2-to-borg2 `transfer`. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified.** `mount`/`umount`/`webdav` are §0.6 non-goals.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark`, `completion`, `key`, `repo-delete` and `help` done: **32 of borg's 36 commands**, with `tests/evidence/command-coverage.sh` as the gate. `transfer` (borg 2 to borg 2) done 2026-08-20. What remains: `serve` and the remote backends (§11.5), and the stage's evidence bundle. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified.** `mount`/`umount`/`webdav` are §0.6 non-goals.**
 Last updated: 2026-08-17.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
@@ -1705,11 +1705,10 @@ Everything needed for feature parity, once correctness is established.
 > missing through eight stages. The gate now descends into the three groups and asks borg
 > for each list, which took the comparison from 36 commands to 53.
 >
-> Current state (2026-08-20): 53 implemented, 5 absent with a recorded reason, 0
-> unexplained. Of the five, three are non-goals (`mount`, `umount`, `webdav`, §0.6); the
-> other two are `serve` and `transfer`, and `transfer` is **decided as of 2026-08-18**: it
-> is in scope for borg 2 to borg 2. The table below is the whole of what stage 8 still
-> owes, commands and otherwise; the notes after it give each row its reasoning.
+> Current state (2026-08-20, after `transfer` landed): 54 implemented, 4 absent with a
+> recorded reason, 0 unexplained. Three of the four are non-goals (`mount`, `umount`,
+> `webdav`, §0.6); the fourth is `serve`, row 1. The table below is the whole of what stage
+> 8 still owes, commands and otherwise; the notes after it give each row its reasoning.
 
 #### What stage 8 still owes — as at 2026-08-18
 
@@ -1722,7 +1721,7 @@ a table at all.
 | # | Item | Recorded in | State |
 | --- | --- | --- | --- |
 | 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **planned 2026-08-20**, not started. Five pieces, not one: a `Location` type, then `rclone`, then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
-| 2 | `transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards | §11.1 | decided 2026-08-18; four work items, none started |
+| 2 | ~~`transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards~~ | §11.1, DIVERGENCES #55 | **done 2026-08-20.** All seven work items closed. borg transfers into a repository borge created with `--other-repo`, and reads what borge's transfer wrote; both relatedness guards refuse with borg's exact words; a re-run skips. Work item 7 answered by measurement: neither `chunks_healthy` nor `part` can occur in a borg 2 archive, so neither branch is ported. Beside it: borge validated **no** archive name or comment anywhere, so `create` accepted names borg's own parser refuses |
 | 3 | ~~missing per-command options~~ | §11.2, `option-coverage.sh` | **done 2026-08-20**, down from 111 to 11, and every short spelling borg offers is now borge's too. Nine commands reached zero in one day (DIVERGENCES #48-#53). Of the eleven left, four are other rows' (`recreate` row 4, `repo-create` row 2) and the rest have written reasons in #53: `check`'s two need a pack-level check borge has not ported, `repo-delete --keep-security-info` manages a directory borge does not keep, `repo-list --from-borg1` is a §0.6 non-goal |
 | 4 | ~~`recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter`~~ | §11.2 | **done 2026-08-20** (DIVERGENCES #54). The tag scan reads `CACHEDIR.TAG` out of the item stream, since recreate has no filesystem to look at. Beside it: `recreate`'s positional was read as an archive name where borg reads a *path*, so the same command line emptied every archive under borg; and `--list` reported `+` for everything where borg reports the item's type letter, which made `--filter` useless |
 | 5 | ~~JSON API: `repo-info`, `info`, `version`, `analyze` schemas~~ | §11.4b | **done 2026-08-19.** All eight of borg's `--json` commands now match, held by `TestJSONSchemaMatchesBorg` |
@@ -1795,9 +1794,9 @@ described as outstanding until this table was built.
   descends into `debug`, `key` and `benchmark` and asks borg for the list — 53 commands
   compared where there were 36 — and `borge debug --help`, which had been an error, now
   prints the group's usage as borg's does.
-- **`transfer`** between two borg 2 repositories — **in scope, decided 2026-08-18.** With
-  it, `repo-create --other-repo` and a `BORGE_OTHER_PASSPHRASE` variable, which it cannot
-  work without. Design and the accuracy notes behind the decision are in §11.1.
+- ~~**`transfer`** between two borg 2 repositories~~ — **done 2026-08-20** (§11.1,
+  DIVERGENCES #55). With it, `repo-create --other-repo`, `--copy-crypt-key` and a
+  `BORGE_OTHER_PASSPHRASE` variable, which it cannot work without.
 - ~~**Archive-name placeholders**~~ (DIVERGENCES #17). **Done 2026-08-17**,
   `internal/placeholders`. Not a command, so the coverage gate never saw it; it was found
   by writing `borge help placeholders` from borg's behaviour and then running the command.
@@ -2360,7 +2359,9 @@ matters, and one needs a borge-specific caveat.
    says borge "does not implement `mount` or `transfer`", and DIVERGENCES #14's neighbours
    describe `transfer` as undecided. Grep for `transfer` across `docs/` and `internal/`
    before calling the item done — this is the fourth time in stage 8 that a sentence
-   describing an absence outlived it.
+   describing an absence outlived it. *(Done: the sweep found the help.go header, this
+   section's own status lines, and the two coverage gates, which had `transfer` recorded as
+   a deferred command and as an option budget of its own.)*
 4. **The relatedness guards**, ported with their messages, and tested for *refusal*: an
    unrelated destination has to be rejected before a single chunk is written. A transfer
    that silently re-stores every chunk is the failure this prevents, and it looks like
@@ -2382,6 +2383,41 @@ matters, and one needs a borge-specific caveat.
 **Gate:** `borge transfer` moves a repository borg wrote into a related borge repository
 that borg can then read and `check --verify-data`; the reverse direction likewise; a
 re-run is a no-op; and an unrelated destination is refused with borg's message.
+
+#### Done 2026-08-20 — all seven items, and what the seventh turned out to be
+
+The gate passes. `TestTransferBetweenTools` runs all four combinations of which tool
+prepares the destination and which one moves the archives, over both `--recompress never`
+and `--recompress always`, and has the tool that did *not* transfer read every result;
+`TestTransferRefusesAnUnrelatedRepositoryLikeBorg` pins the refusal against borg's own
+output rather than against a string in borge's source. DIVERGENCES #55 is the write-up.
+
+**Item 7, answered by measurement rather than by reading the comment.** Neither branch can
+occur in a borg 2 archive, so neither is ported:
+
+- `chunks_healthy` has **no writer anywhere in borg 2**. The only assignment
+  (`archive.py:357`, commented `# legacy`) re-hydrates the field of an item that already
+  carried it, which only a borg 1.x archive does.
+- `part` has no writer either; `transfer_cmd.py:227` reads it to drop borg 1.x checkpoint
+  parts.
+
+Checked against a repaired repository as the item asked: a borg 2 `check --repair
+--verify-data` over an archive with a corrupted pack removes the defect chunk and reports
+`Missing chunk detected`, and the resulting items carry neither field. borg 1 recorded the
+pre-repair chunk list in `chunks_healthy`; borg 2 does not.
+
+A missing source chunk still has to be handled, because that repair leaves one: borge does
+what borg does and writes a chunk list entry with the correct id and size while storing
+nothing, so the entry stays correct if the chunk ever reappears.
+
+**Found beside the work, and larger than it:** borge validated no archive name and no
+comment, anywhere — not in `create`, not in `import-tar`, not in `recreate --target`. borg
+validates all of them at parse time, which is why its `transfer` re-validates: the archives
+being moved may predate the current rules. borge could therefore write an archive that borg
+would refuse to transfer. The validators are now borge's too, measured from borg's rather
+than read from its documentation, including the two details that are easy to get wrong —
+lengths in characters and not bytes, and a message that quotes the offending text without
+escaping it. See DIVERGENCES #55.
 
 > **`key`, `repo-delete` and `help` done 2026-08-17**, closing the three gaps the coverage
 > gate found.
@@ -3066,7 +3102,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 31 of borg's 36 commands. Fifteen numbered items remain, tabled in §11 under "What stage 8 still owes": `serve` and the remote backends, `transfer` (§11.1), 35 per-command options (§11.2), four JSON schemas and `--log-json` (§11.4b), `bsdflags` and `xattrs` (DIVERGENCES #8), and `debug convert-profile` — of which every row but 1, 2 and 15 is now closed | not yet bundled, and not to be bundled until that table is empty but for its last row |
+| 8 | Remaining commands + remote backends | **in progress** — 32 of borg's 36 commands, the other four being `serve` and the three §0.6 non-goals. Of the fifteen items tabled in §11 under "What stage 8 still owes", **only rows 1 and 15 are open**: `serve` and the remote backends (§11.5, planned 2026-08-20), and the stage's evidence bundle | not yet bundled, and not to be bundled until that table is empty but for its last row |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

@@ -761,6 +761,12 @@ end, since borg finishes a subtree before reporting the directory that held it. 
 It does **not** reach `import-tar --list`, whose order comes from the tar file rather than
 from a directory walk. That one is compared as a sequence.
 
+**And it moves a stored number, found 2026-08-20.** The item metadata stream is chunked
+over these bytes, so a different order cuts it in different places; a contentless archive's
+recorded size is exactly the list of pointers to those chunks. Two archives of the same 600
+empty files can therefore record 69 and 35 — same items, same stream length, different
+cuts. Details and the test it broke are in #36.
+
 ## 24. The rsync slashdot hack — **implemented 2026-08-18**
 
 **Stage 8 · `internal/archive` · a gap, not a decision**
@@ -1226,12 +1232,46 @@ and forcing them to would mean lying about the archive's contents.
 `TestCreateReportedSizeFollowsBorgsRule` pins the relationship instead: for both tools the
 reported figure exceeds the stored one and the gap is the size of an archive object.
 
-**And the item streams themselves are not the same size.** Recreating trees that the two
-tools created *separately* gives 1284447 against 1194429 — about 18 bytes an item — because
-borg writes `bsdflags` and `xattrs` on every item and borge writes neither. Both archives
-restore identically and each tool reads the other's, so this is not a correctness problem,
-but it is why only same-source comparisons are exact. `bsdflags` is #8; the `xattrs` half
-was found here and is not yet recorded elsewhere.
+**And the item streams themselves were not the same size — until #8 closed.** Recreating
+trees that the two tools created *separately* gave 1284447 against 1194429 — about 18 bytes
+an item — because borg wrote `bsdflags` and `xattrs` on every item and borge wrote neither.
+`bsdflags` is #8; the `xattrs` half was found here. Both were fixed on 2026-08-19, and the
+measurement was repeated on 2026-08-20: 600 empty files give an item stream of 95906 bytes
+through either tool, and recreating either archive records 95941 — the stream plus its
+one 35-byte pointer list, from both tools, exactly equal.
+
+What remains is that the streams are the same length without being the same bytes, because
+the items are in a different order (#23). That costs nothing on a recreate, whose figure is
+the stream's length, and it is the whole of the create-side difference described next.
+
+**The stored size of a contentless archive can still differ, found 2026-08-20 — and the
+reason is the order, not the accounting.** Such an archive's size *is* the encoding of its
+item pointer list: one byte of msgpack array header and 34 bytes per chunk id. So it moves
+in whole ids as the item stream is cut into more or fewer chunks, and the stream is cut by
+the item chunker (buzhash, 32 kB minimum, 128 kB average) on content that the two tools
+write in different orders — borg walks a directory by inode and borge by name (#23). Same
+items, same total length, different bytes, so the cut points fall differently:
+
+```
+400 empty files   borg size=35   borge size=35
+600 empty files   borg size=69   borge size=35
+```
+
+Neither figure is wrong; both are the same rule applied to streams that were cut in
+different places. It is recorded because it is visible in `repo-list` and reads as an
+accounting bug. Below the chunker's 32 kB minimum the stream is one chunk whatever its
+content, so small archives always agree — which is what makes an exact cross-tool test
+possible at all.
+
+It surfaced as a flaky test rather than as an observation. `TestArchiveSizeMatchesBorg`
+compared the two tools' figures for 400 empty files exactly, which held until `t.TempDir()`
+drew a longer name, added a character to 400 stored paths and pushed borg's stream past a
+cut point. It passed in isolation and failed in the full run, which is the worst way to
+learn this. The case now asserts the rule that does hold — the figure is a list of item
+pointers and nothing else, which is exactly what the 2000× bug above violated — and a
+100-item shape, whose stream fits one chunk in both tools by construction, keeps an exact
+cross-tool comparison of the number.
+
 
 ## 37. borge records a command line for `import-tar` — **fixed 2026-08-18**
 
@@ -2272,3 +2312,149 @@ had wrong made a `--filter` useless (see #52).
 A dry run ends with one line — `ARCHIVE: would keep 8 item(s), exclude 3` — where borg
 prints nothing but the per-item lines. Same reasoning as #34: this is the command that
 rewrites archives, and "nothing happened" and "nothing matched" should not look alike.
+
+## 55. `transfer`, and the failure that looks like success — **implemented 2026-08-20**
+
+`transfer` copies archives out of one repository into another. It is the command a user runs
+once, during a migration, on data they are about to stop keeping anywhere else — so it is a
+bad place for a difference to surface.
+
+borge did not have it at all. It has it now, with borg's guards, borg's refusals and borg's
+per-archive output. Five things are worth writing down.
+
+### The guards are the feature
+
+A transfer into an *unrelated* repository works. It reads every chunk, hashes it under the
+destination's id key, finds nothing already there, and stores all of it — so the command
+finishes, reports success, takes as long as a fresh backup and deduplicates nothing. Nothing
+in the output says so. Whether the destination is related is not a detail of the transfer;
+it is the whole reason to run a transfer instead of a fresh `create`.
+
+So borg refuses up front, on two conditions, and borge refuses on the same two with the same
+words:
+
+```
+You must either keep the same ID hash or use --chunker-params.
+You must use the same chunker secret or deduplication will break. Use a related repository!
+```
+
+The first compares the **family** of the id hash, not the key mode: keyed HMAC-SHA256, keyed
+BLAKE3, unkeyed SHA-256, unkeyed BLAKE3. `aes256-ocb` and `chacha20-poly1305` are different
+key modes with the same id-hash family, so a transfer between them is allowed. The second
+compares the chunk seed, which decides where chunk boundaries fall: two repositories with
+different seeds cut the same file into different pieces, so no chunk of one is ever a chunk
+of the other.
+
+The family comparison had a bug of its own, and it was in the guard rather than in the
+transfer: the check ended in `f[:7] != "unknown"` on a family name that is six characters
+long for BLAKE3, so a transfer between two BLAKE3 repositories panicked on the safety check.
+Every test written for the feature used an HMAC-SHA256 mode. `TestIDHashFamilies` is now a
+table over all four families and `TestTransferBetweenBlake3Repositories` walks the whole
+path in one of them.
+
+`--chunker-params` escapes both, because re-chunked content is cut afresh and hashed afresh;
+there is nothing left to inherit. That is borg's escape hatch and borge implements it as
+one.
+
+The related destination itself comes from `repo-create --other-repo`, which is what actually
+makes the guards passable: it **inherits** the source's id key and chunk seed and draws a
+fresh AE key. `--copy-crypt-key` keeps the AE key too, which borg documents as the option to
+avoid unless you have a reason — the point of a fresh one is that the two repositories do
+not share the key that encrypts data.
+
+Two bugs of borge's own were on the passphrase side of this, and both were invisible to
+every test that existed, because the test harness gives both repositories the same
+passphrase — which is exactly what `--other-repo` exists to stop being true.
+`repo-create --other-repo` unlocked the source with the *destination's* passphrase, and
+`transfer` opened its source **unlocked** where borg takes an exclusive lock on it.
+`TestTransferWithDifferentPassphrases` sets the two apart and checks that the destination
+afterwards refuses the source's passphrase.
+
+### `--recompress never` moves bytes it never compresses
+
+With `never`, the compressed payload is copied as-is: parsed with `want_compressed`, so the
+id is still verified against the decompressed content, but re-assembled and stored without
+being compressed again. With `always`, the chunk is decompressed and re-compressed with
+`-C`. The distinction matters for a migration on a slow machine — recompressing a terabyte
+is not the same job as copying it.
+
+This is where the transfer can silently produce a repository the other tool cannot read, and
+where a same-tool test cannot see it: the tool that wrote the destination never decompressed
+the payload it stored. So the interop test has the *other* tool read every result, and runs
+all four combinations of which tool prepares the destination and which one moves the
+archives.
+
+### Resumable, because archives are not identified by name
+
+borg 2 allows duplicate archive names, so neither the name nor the timestamp identifies an
+archive. A transfer decides an archive is already present by matching name+timestamp **or**
+name+id, and skips it:
+
+```
+ARCHIVE 2026-08-20T11:02:03: archive is already present in destination repo, skipping.
+```
+
+Which is what makes an interrupted transfer resumable: run it again and it finishes what was
+left, rather than copying everything a second time under duplicate names.
+
+All of those lines go to **stdout**, not stderr — borg writes them with `print()` rather
+than through its logger, and its stderr is empty on a successful transfer. borge had them on
+stderr, which is the sort of difference nothing notices until someone writes
+`borge transfer … | tee migration.log` and gets an empty log. Measured, not assumed:
+
+```
+$ borg transfer -r dst --other-repo src 1>/dev/null   # stderr only
+$                                                     # (nothing)
+```
+
+### The two options that exist in order to be refused
+
+`transfer --from-borg1` and `repo-create --from-borg1` are registered, parsed, and then
+refused with a pointer to PORTING_PLAN.md §0.6 — reading a borg 1.x repository is out of
+scope, and `--upgrader` accepts only `NoOp` for the same reason. They are registered rather
+than left out so that the refusal names the thing that is unsupported; an unregistered
+option would produce "flag provided but not defined", which reads like a typo in borge
+rather than a decision. **The option gate counts both as present**, because it compares
+spellings and cannot see that one of them ends in an error. This entry is the record.
+
+### Found beside the option: borge validated no archive name at all
+
+borg validates every archive name and every comment *before* a transfer starts, in two
+passes, reporting all the bad ones at once — because the archives being moved may have been
+written by an older borg under looser rules, and a rename is easier to do in one go than one
+at a time. Implementing that pass showed that borge validated **neither**, anywhere:
+`create`, `import-tar` and `recreate --target` accepted names borg's own parser rejects. So
+borge could write an archive that borg would refuse to transfer, and the repository would
+look fine until the migration.
+
+The rules are borg's, measured from its validators rather than read from its docs:
+
+| | rule |
+|---|---|
+| archive name | 1–200 characters, no control characters, none of ``/\"<|>?*``, no leading or trailing blank, valid unicode |
+| comment | at most 10000 characters, no NUL, valid unicode |
+
+Two details are easy to get wrong and both were: lengths are counted in **characters**, as
+Python counts them, so a 200-character accented name is legal and its 400 bytes are not the
+measure; and the message quotes the offending text with plain double quotes and escapes
+nothing, so a name with a tab in it prints the tab. Go's `%q` would have escaped exactly the
+character the message is about. The 200 is not arbitrary either — it is 260 (Windows
+`MAX_PATH`) less an 8.3 name less 48 characters of margin for a path under `borg mount`, a
+limit borge inherits although it does not implement `mount`.
+
+borg validates the name **as typed**, before placeholders are expanded, and borge validates
+in the same place rather than after expansion — which is not a detail. Measured:
+
+```
+$ borg  create -r repo '{now:%Y/%m}' src
+error: argument NAME: Invalid archive name: "{now:%Y/%m}" [invalid chars detected matching "/\"<|>?*"]
+$ borge create -r repo '{now:%Y/%m}' src
+borge: Invalid archive name: "{now:%Y/%m}" [invalid chars detected matching "/\"<|>?*"]
+```
+
+The slash being refused is the one in the *format string*, not one in the expansion, so a
+name that would have expanded to something perfectly legal is rejected. Validating after
+expansion would be the more useful rule and it is the wrong one to implement: a name borge
+accepts and borg rejects is a script that stops working when it is run under borg. (Before
+this was wired up borge accepted that command line and wrote an archive literally named
+`2026/08`.)

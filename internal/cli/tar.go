@@ -69,8 +69,16 @@ func cmdImportTar(e *Env, args []string) int {
 		return ExitError
 	}
 	source := fs.Arg(1)
+	// borg validates the name the user typed, before any placeholder in it is expanded,
+	// so an expansion that produces something borg would refuse is accepted by both tools.
+	if err := validateArchiveName(fs.Arg(0)); err != nil {
+		return e.fail(err)
+	}
 	name, err := e.expand(fs.Arg(0))
 	if err != nil {
+		return e.fail(err)
+	}
+	if err := validateComment(*comment); err != nil {
 		return e.fail(err)
 	}
 	comm, err := e.expand(*comment)

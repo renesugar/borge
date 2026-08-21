@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
-// This file implements borg's --log-json, specified in docs/internals/frontends.rst.
+// This file implements borg's --log-json: the JsonFormatter and the log-record fields of
+// src/borg/logger.py, against the wire format specified in borg's
+// docs/internals/frontends.rst.
 // Original work Copyright (C) 2015-2026 The Borg Collective; Copyright (C) 2010-2014 Jonas Borgström.
 // Licensed under the BSD 3-Clause License, see licenses/borg/LICENSE.
 // Modifications and Go translation Copyright (C) 2026 The borge authors,

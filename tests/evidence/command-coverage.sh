@@ -52,7 +52,6 @@ declare -A deferred=(
     [umount]="non-goal for 1.0 (PORTING_PLAN 0.6): pairs with mount"
     [webdav]="non-goal for 1.0 (PORTING_PLAN 0.6)"
     [serve]="stage 8 remote backends (PORTING_PLAN 0.6, 11): not yet implemented"
-    [transfer]="stage 8 (PORTING_PLAN 11.1): borg2-to-borg2 decided in scope 2026-08-18, not yet implemented; from borg 1.x stays a non-goal (0.6)"
 )
 
 # gap says which of the deferred commands are work still to do, as against settled
@@ -63,7 +62,6 @@ declare -A deferred=(
 # out of the very list this script prints to name the gaps.
 declare -A gap=(
     [serve]=1
-    [transfer]=1
 )
 
 borg_commands() {

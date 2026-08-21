@@ -263,6 +263,57 @@ func (b *Builder) AddChunk(data []byte, roType string) (item.ChunkListEntry, err
 	return item.ChunkListEntry{ID: id, Size: size}, nil
 }
 
+// ReuseChunk records a reference to a chunk the repository already holds.
+//
+// It is transfer's fast path and the reason a second transfer of the same archives is
+// cheap: the chunk is not read, not decrypted and not written, only counted. Reports false
+// when the chunk is not there, so the caller can copy it.
+func (b *Builder) ReuseChunk(id []byte, size int64) (item.ChunkListEntry, bool) {
+	if _, ok := b.chunks.Get(id); !ok {
+		return item.ChunkListEntry{}, false
+	}
+	b.stats.Chunks++
+	b.stats.OriginalSize += size
+	return item.ChunkListEntry{ID: id, Size: size}, true
+}
+
+// AddCompressedChunk stores a payload that is already compressed, under an id the caller
+// has already verified.
+//
+// This is "transfer --recompress never": the chunk is re-encrypted for the destination and
+// otherwise crosses untouched. The id is the source's, which is the point - a transfer that
+// recomputed ids would deduplicate against nothing.
+func (b *Builder) AddCompressedChunk(id []byte, meta *repoobj.Meta, compressed []byte, size int64) (
+	item.ChunkListEntry, error) {
+
+	b.stats.Chunks++
+	b.stats.OriginalSize += size
+
+	if _, seen := b.chunks.Get(id); seen {
+		return item.ChunkListEntry{ID: id, Size: size}, nil
+	}
+	obj, err := b.ro.FormatCompressed(id, meta, compressed)
+	if err != nil {
+		return item.ChunkListEntry{}, err
+	}
+	results, err := b.repo.Put(id, obj)
+	if err != nil {
+		return item.ChunkListEntry{}, err
+	}
+	if size > int64(^uint32(0)) {
+		return item.ChunkListEntry{}, fmt.Errorf("archive: chunk of %d bytes is too large", size)
+	}
+	if err := b.chunks.Add(id, uint32(size)); err != nil {
+		return item.ChunkListEntry{}, err
+	}
+	if err := b.chunks.UpdatePackInfo(results); err != nil {
+		return item.ChunkListEntry{}, err
+	}
+	b.stats.NewChunks++
+	b.stats.DedupedSize += size
+	return item.ChunkListEntry{ID: id, Size: size}, nil
+}
+
 // ChunkFile splits a reader into content chunks and stores them.
 func (b *Builder) ChunkFile(r io.Reader) ([]item.ChunkListEntry, error) {
 	ch, err := chunker.New(b.chunkerParams, b.chunkerKey, b.chunkSeed, r)

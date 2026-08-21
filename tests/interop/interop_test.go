@@ -88,6 +88,9 @@ func (tl *tools) env() []string {
 		"BORG_CONFIG_DIR="+tl.configDir,
 		"BORG_CACHE_DIR="+filepath.Join(tl.cacheDir, "borg"),
 		"BORG_PASSPHRASE="+tl.passphrase,
+		// transfer reads the source repository's passphrase from its own variable, which
+		// falls back to nothing in either tool (docs/DIVERGENCES.md #55).
+		"BORG_OTHER_PASSPHRASE="+tl.passphrase,
 		"BORG_TESTONLY_WEAKEN_KDF=1",
 		"BORG_KEY_FILE=",
 		"BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes",
@@ -97,6 +100,7 @@ func (tl *tools) env() []string {
 		"BORGE_KEYS_DIR="+tl.keysDir,
 		"BORGE_CACHE_DIR="+filepath.Join(tl.cacheDir, "borge"),
 		"BORGE_PASSPHRASE="+tl.passphrase,
+		"BORGE_OTHER_PASSPHRASE="+tl.passphrase,
 		"BORGE_TESTONLY_WEAKEN_KDF=1",
 		"BORGE_KEY_FILE=",
 	)

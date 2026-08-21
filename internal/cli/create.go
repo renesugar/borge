@@ -15,12 +15,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/renesugar/borge/internal/archive"
 	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/chunker"
 	"github.com/renesugar/borge/internal/compress"
 	"github.com/renesugar/borge/internal/crypto/key"
+	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/repository"
 	"time"
@@ -36,7 +38,25 @@ func cmdRepoCreate(e *Env, args []string) int {
 	idHash := fs.String("i", "", "id hash for the encrypted modes: sha256 or blake3")
 	fs.StringVar(idHash, "id-hash", "", "id hash for the encrypted modes")
 	location := fs.String("key-location", "repokey", "where to keep the key: repokey or keyfile")
+	otherRepo := fs.String("other-repo", "",
+		"inherit key material from this repository, making the new one RELATED to it")
+	copyCryptKey := fs.Bool("copy-crypt-key", false,
+		"with --other-repo, reuse its encryption key too instead of generating a fresh one")
+	fromBorg1 := fs.Bool("from-borg1", false, "the other repository is a borg 1.x one (not supported)")
 	if err := fs.Parse(args); err != nil {
+		return ExitError
+	}
+	if *fromBorg1 {
+		// Registered so that the option is refused by name rather than as "flag provided
+		// but not defined", which reads like a typo. Reading borg 1.x repositories is a
+		// non-goal for 1.0 (PORTING_PLAN §0.6): it needs the borg 1 reader, which is a
+		// larger piece of work with its own format reference.
+		e.errorf("--from-borg1 is not supported: borge does not read borg 1.x repositories " +
+			"(docs/PORTING_PLAN.md §0.6). Use borg itself to transfer from a 1.x repository first.")
+		return ExitError
+	}
+	if *copyCryptKey && *otherRepo == "" {
+		e.errorf("--copy-crypt-key only means something with --other-repo")
 		return ExitError
 	}
 	if *encryption == "" {
@@ -70,7 +90,12 @@ func cmdRepoCreate(e *Env, args []string) int {
 			return e.fail(fmt.Errorf("--key-location must be repokey or keyfile, not %q", *location))
 		}
 
-		material, err := key.NewMaterial(repo.ID())
+		var material *item.Key
+		if *otherRepo == "" {
+			material, err = key.NewMaterial(repo.ID())
+		} else {
+			material, err = e.relatedMaterial(*otherRepo, repo.ID(), *copyCryptKey)
+		}
 		if err != nil {
 			return e.fail(err)
 		}
@@ -302,6 +327,11 @@ func cmdCreate(e *Env, args []string) int {
 		e.warnf("--paths-delimiter does nothing without --paths-from-stdin, " +
 			"--paths-from-command or --paths-from-shell-command")
 	}
+	// borg validates the name the user typed, before any placeholder in it is expanded,
+	// so an expansion that produces something borg would refuse is accepted by both tools.
+	if err := validateArchiveName(fs.Arg(0)); err != nil {
+		return e.fail(err)
+	}
 	name, err := e.expand(fs.Arg(0))
 	if err != nil {
 		return e.fail(err)
@@ -316,6 +346,9 @@ func cmdCreate(e *Env, args []string) int {
 		}
 	}
 
+	if err := validateComment(*comment); err != nil {
+		return e.fail(err)
+	}
 	comm, err := e.expand(*comment)
 	if err != nil {
 		return e.fail(err)
@@ -630,6 +663,76 @@ func validateTags(spec string) ([]string, error) {
 		out = append(out, tag)
 	}
 	return out, nil
+}
+
+// validateArchiveName is borg's archivename_validator.
+//
+// The limit is not arbitrary and its arithmetic is borg's: 260 is Windows' default MAX_PATH,
+// less the 8.3 name it reserves, less 48 characters of "safety margin" for the path under a
+// FUSE mount - mountpoint / archivename / dir / … / file. So an archive name is bounded by
+// what "borg mount" would need on the most restrictive platform, whether or not anyone is
+// going to mount it.
+//
+// The forbidden characters are the union of what POSIX and Windows refuse in a path
+// component, minus ":" - which borg cannot blacklist because its own {now} placeholder
+// produces ISO-8601 times containing it.
+func validateArchiveName(name string) error {
+	const maxArchiveName = 260 - len("12345678.123") - 48
+	// Lengths are counted in characters, as Python counts them: a name of 200 accented
+	// letters is 200 characters to borg and 400 bytes to Go.
+	if utf8.RuneCountInString(name) < 1 {
+		return fmt.Errorf("Invalid archive name: %s [length < 1]", quoteLikeBorg(name))
+	}
+	if utf8.RuneCountInString(name) > maxArchiveName {
+		return fmt.Errorf("Invalid archive name: %s [length > %d]", quoteLikeBorg(name), maxArchiveName)
+	}
+	for _, r := range name {
+		if r < 32 {
+			return fmt.Errorf("Invalid archive name: %s [invalid control chars detected]",
+				quoteLikeBorg(name))
+		}
+	}
+	const invalidChars = `/\"<|>?*`
+	if strings.ContainsAny(name, invalidChars) {
+		return fmt.Errorf("Invalid archive name: %s [invalid chars detected matching \"%s\"]",
+			quoteLikeBorg(name), invalidChars)
+	}
+	if strings.HasPrefix(name, " ") || strings.HasSuffix(name, " ") {
+		return fmt.Errorf("Invalid archive name: %s [leading or trailing blanks detected]",
+			quoteLikeBorg(name))
+	}
+	if !utf8.ValidString(name) {
+		// borg gets here when a name carries surrogate escapes, which is how Python
+		// smuggles undecodable bytes through a str. Go has no surrogate escapes, but it
+		// does have invalid UTF-8, and it reaches the same conclusion.
+		return fmt.Errorf("Invalid archive name: %s [contains non-unicode characters]",
+			quoteLikeBorg(name))
+	}
+	return nil
+}
+
+// validateComment is borg's comment_validator: text_validator(name="comment",
+// max_length=10000) - so only the length and the NUL byte, no character or blank rules.
+func validateComment(comment string) error {
+	if utf8.RuneCountInString(comment) > 10000 {
+		return fmt.Errorf("Invalid comment: %s [length > 10000]", quoteLikeBorg(comment))
+	}
+	if strings.ContainsRune(comment, 0) {
+		return fmt.Errorf("Invalid comment: %s [invalid control chars detected]",
+			quoteLikeBorg(comment))
+	}
+	if !utf8.ValidString(comment) {
+		return fmt.Errorf("Invalid comment: %s [contains non-unicode characters]",
+			quoteLikeBorg(comment))
+	}
+	return nil
+}
+
+// quoteLikeBorg wraps text in plain double quotes and escapes nothing, which is what
+// Python's f-string does. Go's %q would escape the control characters and the non-ASCII
+// ones, so the message about an invalid character would no longer contain it.
+func quoteLikeBorg(text string) string {
+	return `"` + text + `"`
 }
 
 // validateTag is borg's text_validator(name="tag", min_length=1, max_length=10,

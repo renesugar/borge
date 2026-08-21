@@ -92,9 +92,15 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # missing flag; down to 11 when help and "key remove" reached zero, which also took the
 # ALIAS gap to zero - every short spelling borg offers, borge now offers.
 #
-# Down to 7 when recreate's exclusion group landed (table row 4, DIVERGENCES #54). The seven
-# that remain are not a backlog of small work: three belong to row 2 (repo-create), and the
-# rest are blocked on something borge does not have or does not want - see #53.
+# Down to 7 when recreate's exclusion group landed (table row 4, DIVERGENCES #54), and to 4
+# when transfer landed with repo-create's --other-repo and --copy-crypt-key (row 2,
+# DIVERGENCES #55). The four that remain are blocked on something borge does not have or
+# does not want - see #53.
+#
+# Two of the options this gate counts as PRESENT are refusals: repo-create --from-borg1 and
+# transfer --from-borg1 are registered so that they can be refused by name with a pointer to
+# 0.6, rather than reported as unknown options. The gate compares spellings and cannot see
+# that difference; #55 records it.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -118,12 +124,13 @@ declare -A budget=(
     [recreate]=0
     [rename]=0
     [repo-compress]=0
-    [repo-create]=3
+    [repo-create]=0
     [repo-delete]=1
     [repo-info]=0
     [repo-list]=1
     [repo-space]=0
     [tag]=0
+    [transfer]=0
     [undelete]=0
     [version]=0
     [with-lock]=0

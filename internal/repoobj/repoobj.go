@@ -260,7 +260,11 @@ func (r *RepoObj) Format(id []byte, meta *Meta, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.assemble(id, meta, compressed)
+}
 
+// assemble encrypts the metadata and the (already compressed) payload and frames them.
+func (r *RepoObj) assemble(id []byte, meta *Meta, compressed []byte) ([]byte, error) {
 	aad := headerAAD(id)
 	dataEncrypted, err := r.key.Encrypt(id, compressed, append(append([]byte{}, aad...), dataAADTag...))
 	if err != nil {
@@ -285,6 +289,38 @@ func (r *RepoObj) Format(id []byte, meta *Meta, data []byte) ([]byte, error) {
 	out = append(out, metaEncrypted...)
 	out = append(out, dataEncrypted...)
 	return out, nil
+}
+
+// FormatCompressed builds an object from a payload that is *already* compressed.
+//
+// This is what "transfer --recompress never" needs: the source object's compressed bytes
+// are kept exactly as they are and only re-encrypted, which is the whole saving - borg's
+// comment calls it "keep the compressed payload the same". The metadata has to carry the
+// source's ctype, clevel and plaintext size, because nothing here can recompute them: the
+// plaintext is never reconstituted on this path.
+//
+// The id is not recomputed either. The caller has already verified it, by parsing the
+// source object with WantCompressed (which decompresses to check id == hash(plaintext) and
+// hands back the compressed bytes anyway). Doing that check here would mean decompressing a
+// second time.
+func (r *RepoObj) FormatCompressed(id []byte, meta *Meta, compressed []byte) ([]byte, error) {
+	if len(id) != ChunkIDSize {
+		return nil, fmt.Errorf("repoobj: chunk id must be %d bytes, got %d", ChunkIDSize, len(id))
+	}
+	if meta == nil {
+		return nil, errors.New("repoobj: meta is required")
+	}
+	if meta.Type == "" || meta.Type == TypeDontCare {
+		return nil, fmt.Errorf("repoobj: a concrete object type is required, got %q", meta.Type)
+	}
+	if !meta.SizeSet {
+		return nil, errors.New("repoobj: a precompressed object needs the plaintext size in its metadata")
+	}
+	if len(compressed) > MaxDataSize {
+		return nil, fmt.Errorf("repoobj: %d bytes exceeds the %d byte maximum for one object",
+			len(compressed), MaxDataSize)
+	}
+	return r.assemble(id, meta, compressed)
 }
 
 // header is a parsed object header.

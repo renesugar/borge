@@ -26,7 +26,7 @@ import (
 // It is tempting to copy the topics across: the licence allows it and they are good
 // documentation. But every one of them would then be wrong somewhere. borge reads
 // BORGE_* variables, refuses three of borg's chunkers, has four zstd levels rather than
-// twenty-two (docs/DIVERGENCES.md #16), and does not implement `mount` or `transfer`. A
+// twenty-two (docs/DIVERGENCES.md #16), and does not implement `mount`. A
 // help topic that describes a tool's behaviour has to describe *this* tool's behaviour,
 // and a nearly-right one is worse than none: it is believed.
 //
@@ -382,6 +382,11 @@ BEHAVIOUR
   BORGE_PRUNE_FORMAT         the default --format for "prune", when it is not given
   BORGE_REPO_LIST_FORMAT     the default --format for "repo-list", when it is not given
   BORGE_UNITS                si (default), iec or raw, for how sizes are printed
+  BORGE_OTHER_REPO           the source repository for "transfer" and
+                             "repo-create --other-repo", when --other-repo is not given
+  BORGE_OTHER_PASSPHRASE     the passphrase for that source repository. It does NOT fall
+                             back to BORGE_PASSPHRASE, because borg's does not: two
+                             repositories are open at once and need not share one
   BORGE_ZSTD_MT_WORKERS      how many threads compress a .tar.zst tarball. Unset means
                              one per CPU, where borg's default is one thread; the bytes
                              a decompressor sees are the same either way

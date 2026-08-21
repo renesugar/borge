@@ -59,6 +59,24 @@ func cmdRecreate(e *Env, args []string) int {
 		return ExitError
 	}
 
+	// borg validates both of these at parse time, so a bad --target or --comment is
+	// refused before the archive is read.
+	targetGiven := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "target" {
+			targetGiven = true
+		}
+	})
+	if targetGiven {
+		// An explicit empty --target is a bad name, not an absent one.
+		if err := validateArchiveName(*target); err != nil {
+			return e.fail(err)
+		}
+	}
+	if err := validateComment(*comment); err != nil {
+		return e.fail(err)
+	}
+
 	var params *chunker.Params
 	if *chunkerParams != "" {
 		p, err := chunker.ParseParams(*chunkerParams)

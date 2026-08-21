@@ -151,6 +151,13 @@ was written from borg's behaviour and was false for borge, which had none. It wa
 running the command. `TestHelpPlaceholdersTopicIsTrue` now checks the claim against the
 behaviour, and has since caught the *opposite* error when placeholders were implemented.
 
+**Which stream is part of the behaviour.** `transfer`'s per-archive lines go to *stdout* in
+borg, because it writes them with `print()` and not through its logger — most of borg's
+progress output goes to stderr, so the reasonable assumption was wrong. borge had them on
+stderr, which nothing notices until someone runs `borge transfer … | tee migration.log` and
+gets an empty log. Differential tests that compare combined output cannot see it: check
+stdout and stderr separately, at least once per command.
+
 **Documentation goes stale silently, and prose is the part that does.** Four claims went
 false during stage 8; the two with tests behind them failed loudly, the two that were prose
 needed a human to notice. Until the rest of the doc-anchor work in `PORTING_PLAN.md` §2.1

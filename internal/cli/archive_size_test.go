@@ -56,6 +56,16 @@ func TestArchiveSizeMatchesBorg(t *testing.T) {
 		"empty": func(dir string) {
 			write(t, filepath.Join(dir, "empty"), "")
 		},
+		// 100 items is an item stream of some 26 kB against a recorded size of 35, so
+		// counting the stream would be off by three orders of magnitude - and it is
+		// safely under the item chunker's 32 kB minimum, so the stream is one chunk in
+		// both tools and the two figures are exactly comparable. See "many" for why that
+		// last part has to be arranged rather than assumed.
+		"some": func(dir string) {
+			for i := 0; i < 100; i++ {
+				write(t, filepath.Join(dir, fmt.Sprintf("file-with-a-longish-name-%d", i)), "")
+			}
+		},
 		"many": func(dir string) {
 			for i := 0; i < 400; i++ {
 				write(t, filepath.Join(dir, fmt.Sprintf("file-with-a-longish-name-%d", i)), "")
@@ -76,7 +86,7 @@ func TestArchiveSizeMatchesBorg(t *testing.T) {
 		},
 	}
 
-	names := []string{"empty", "many", "large", "nested"}
+	names := []string{"empty", "some", "many", "large", "nested"}
 	for _, name := range names {
 		dir := filepath.Join(base, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -103,13 +113,41 @@ func TestArchiveSizeMatchesBorg(t *testing.T) {
 			t.Fatalf("borge's %s archive is not in the listing: %v", name, got)
 		}
 		distinct[borg[0]] = true
+		if borg[1] != borge[1] {
+			t.Errorf("%s: borg counted %d files, borge counted %d", name, borg[1], borge[1])
+		}
+		if name == "many" {
+			// The one case where the two tools need not print the same number, and the
+			// reason is not accounting. A contentless archive's recorded size is nothing
+			// but the encoding of its item pointer list, so it moves in whole 34-byte
+			// chunk ids as the item stream is cut into more or fewer chunks. The two
+			// streams hold the same items and are the same length, but not in the same
+			// order - borg walks a directory by inode and borge by name (#23) - so past
+			// the item chunker's 32 kB minimum the cuts fall elsewhere and agreement is
+			// luck:
+			// measured, 600 empty files record 69 through borg and 35 through borge, and
+			// 400 record 35 through both until the temporary directory's name grows a
+			// character. What is not luck, and is what this case exists to hold, is that
+			// the figure is a pointer list at all: the bug it was written for recorded
+			// 74869 here.
+			for _, c := range []struct {
+				tool string
+				size int64
+			}{{"borg", borg[0]}, {"borge", borge[0]}} {
+				if !isItemPointerList(c.size) {
+					t.Errorf("many: %s recorded size=%d for 400 empty files; that is not a "+
+						"list of item pointers, so something else is being counted", c.tool, c.size)
+				}
+			}
+			continue
+		}
 		if borg != borge {
 			t.Errorf("%s: borg recorded size=%d nfiles=%d, borge recorded size=%d nfiles=%d",
 				name, borg[0], borg[1], borge[0], borge[1])
 		}
 	}
 
-	// Four shapes that all recorded the same size would compare a constant with itself,
+	// Shapes that all recorded the same size would compare a constant with itself,
 	// and a set of sizes that never exceeds the 35-byte floor would not exercise content
 	// at all. Both are ways this test could pass while measuring nothing.
 	if len(distinct) < 3 {
@@ -125,6 +163,19 @@ func TestArchiveSizeMatchesBorg(t *testing.T) {
 	if largest < 1000 {
 		t.Errorf("the largest archive recorded %d bytes; no case has real content", largest)
 	}
+}
+
+// isItemPointerList reports whether size is msgpack's encoding of a list of chunk ids:
+// one byte of array header, then 34 bytes for each id (a one-byte bin8 tag, a length byte
+// and 32 bytes of id). 35 is one chunk, 69 two, 341 ten - the figures borg records for
+// archives whose content is empty.
+func isItemPointerList(size int64) bool {
+	for ids := int64(1); ids <= 16; ids++ {
+		if size == 1+34*ids {
+			return true
+		}
+	}
+	return false
 }
 
 func write(t *testing.T, path, content string) {

@@ -163,6 +163,7 @@ func commands() []command {
 		{"find", "search for paths across archives", cmdFind},
 		{"break-lock", "remove the repository's locks", cmdBreakLock},
 		{"with-lock", "run a command with the repository lock held", cmdWithLock},
+		{"transfer", "copy archives from another repository into this one", cmdTransfer},
 		{"analyze", "report where the repository's space goes", cmdAnalyze},
 		{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
 		{"key", "manage the repository's keys", cmdKey},
@@ -359,11 +360,54 @@ func (e *Env) passphrase() string {
 	return ""
 }
 
+// otherPassphrase is the passphrase for the *source* repository of a transfer.
+//
+// Two repositories are open at once and they need not share a passphrase: the point of
+// "repo-create --other-repo" is to make a new repository related to an old one, and the new
+// one is where a new passphrase belongs.
+//
+// It does NOT fall back to the ordinary passphrase, and that is measured rather than
+// assumed: borg's Passphrase.env_passphrase(other=True) reads BORG_OTHER_PASSPHRASE alone
+// and then prompts. Running "borg repo-create --other-repo" with only BORG_PASSPHRASE set
+// asks for a passphrase interactively and fails in a script. Falling back would be
+// friendlier and would mean a command that works under borge hangs under borg.
+func (e *Env) otherPassphrase() string {
+	if v, ok := e.lookupBorg("OTHER_PASSPHRASE"); ok {
+		return v
+	}
+	// Empty, not the main passphrase: an empty passphrase is what the unencrypted modes
+	// use, and for an encrypted source this fails the unlock with a message about the
+	// source repository - which is the truth.
+	return ""
+}
+
+// resolveOtherRepo is resolveRepo for --other-repo. It reads BORGE_OTHER_REPO when the
+// option is absent, as borg reads BORG_OTHER_REPO.
+func (e *Env) resolveOtherRepo(given string) (string, error) {
+	path := given
+	if path == "" {
+		if v, ok := e.lookupBorg("OTHER_REPO"); ok && v != "" {
+			path = v
+		}
+	}
+	if path == "" {
+		return "", errors.New("no source repository given; pass --other-repo or set BORGE_OTHER_REPO")
+	}
+	expanded, err := e.expand(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(expanded)
+}
+
 // opened is a repository, its key and its manifest, which is what every command needs.
 type opened struct {
 	repo     *repository.Repository
 	key      key.Key
 	manifest *manifest.Manifest
+	// unlocked is the key material, when the repository had any. transfer needs it for
+	// the chunk seed: the relatedness guards compare secrets, not modes.
+	unlocked *key.Unlocked
 }
 
 func (o *opened) Close() error {
@@ -379,7 +423,7 @@ func (e *Env) openRepo(path string, exclusive bool, ops ...manifest.Operation) (
 	if err != nil {
 		return nil, err
 	}
-	k, _, err := e.unlockWithPrompt(repo)
+	k, u, err := e.unlockWithPrompt(repo)
 	if err != nil {
 		repo.Close()
 		return nil, err
@@ -389,7 +433,33 @@ func (e *Env) openRepo(path string, exclusive bool, ops ...manifest.Operation) (
 		repo.Close()
 		return nil, err
 	}
-	return &opened{repo: repo, key: k, manifest: m}, nil
+	return &opened{repo: repo, key: k, manifest: m, unlocked: u}, nil
+}
+
+// openOtherRepo opens the SOURCE repository of a transfer: read-only, unlocked with
+// BORGE_OTHER_PASSPHRASE rather than the destination's passphrase, and never prompting -
+// a transfer is the kind of thing that runs unattended, and two prompts on one command line
+// would be worse than an error naming which repository could not be opened.
+func (e *Env) openOtherRepo(path string) (*opened, error) {
+	// Locked, and exclusively, because borg's with_other_repository does: the source is
+	// read from beginning to end while another process could be writing to it, and a
+	// transfer that read half of an archive being deleted underneath it would produce a
+	// destination that looks complete.
+	repo, err := repository.Open(path, repository.Options{Exclusive: true})
+	if err != nil {
+		return nil, fmt.Errorf("--other-repo %s: %w", path, err)
+	}
+	k, u, err := repo.Unlock(e.otherPassphrase())
+	if err != nil {
+		repo.Close()
+		return nil, fmt.Errorf("--other-repo %s: %w (set BORGE_OTHER_PASSPHRASE)", path, err)
+	}
+	m, err := manifest.Load(repo, k, manifest.OpRead)
+	if err != nil {
+		repo.Close()
+		return nil, fmt.Errorf("--other-repo %s: %w", path, err)
+	}
+	return &opened{repo: repo, key: k, manifest: m, unlocked: u}, nil
 }
 
 // fail prints an error and returns the error exit code, so a command body can end with

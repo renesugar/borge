@@ -294,10 +294,16 @@ func (a *Archive) readChunk(id []byte) ([]byte, error) {
 
 // chunkStreamReader presents a file's chunks as one byte stream, so the chunker can
 // re-split it without the whole file being in memory.
+//
+// stats may be nil, and skipMissing is for transfer: a chunk a repair removed cannot be
+// represented in a re-cut chunk list, so the file is re-chunked from the bytes that are
+// still there. recreate leaves it false, because a chunk missing from the archive it is
+// rewriting in place is an error rather than a gap to carry across.
 type chunkStreamReader struct {
-	archive *Archive
-	chunks  []item.ChunkListEntry
-	stats   *RecreateStats
+	archive     *Archive
+	chunks      []item.ChunkListEntry
+	stats       *RecreateStats
+	skipMissing bool
 
 	next int
 	buf  []byte
@@ -310,11 +316,17 @@ func (r *chunkStreamReader) Read(p []byte) (int, error) {
 		}
 		data, err := r.archive.readChunk(r.chunks[r.next].ID)
 		if err != nil {
+			if r.skipMissing {
+				r.next++
+				continue
+			}
 			return 0, err
 		}
 		r.next++
-		r.stats.ChunksRead++
-		r.stats.BytesRead += int64(len(data))
+		if r.stats != nil {
+			r.stats.ChunksRead++
+			r.stats.BytesRead += int64(len(data))
+		}
 		r.buf = data
 	}
 	n := copy(p, r.buf)
