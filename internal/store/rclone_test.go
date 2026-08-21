@@ -91,6 +91,7 @@ func TestBackendConformance(t *testing.T) {
 	t.Run("rest-http", func(t *testing.T) { runBackendConformance(t, newRESTForTest) })
 	t.Run("rest-stdio", func(t *testing.T) { runBackendConformance(t, newRESTStdioForTest) })
 	t.Run("sftp", func(t *testing.T) { runBackendConformance(t, newSFTPForTest) })
+	t.Run("s3", func(t *testing.T) { runBackendConformance(t, newS3ForTest) })
 }
 
 // TestRcloneWritesWhatPosixFSWould is the interop claim in its smallest form: a store

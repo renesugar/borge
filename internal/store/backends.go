@@ -24,7 +24,7 @@ import (
 //
 // borgstore's get_backend does the same job from a URL string; borg calls it for every
 // proto but "rest", which it builds itself because the server is borg (repository.py's
-// build_rest_backend). borge will need the same exception when that backend lands.
+// build_rest_backend), and borge makes the same exception here.
 func NewBackend(loc *location.Location) (Backend, error) {
 	if loc == nil {
 		return nil, fmt.Errorf("store: a repository location is required")
@@ -52,9 +52,11 @@ func NewBackend(loc *location.Location) (Backend, error) {
 	case "sftp":
 		return NewSFTP(loc.Processed)
 	case "s3", "b2":
-		return nil, fmt.Errorf("store: the %s backend is not implemented yet "+
-			"(docs/PORTING_PLAN.md §11.5); this borge reads local repositories only", loc.Proto)
+		return NewS3(loc.Processed)
 	default:
+		// Every scheme borg's Location knows now has a backend, so reaching here means a
+		// scheme the parser produced and this switch does not handle - which would be a
+		// bug in one of the two rather than a repository a user can fix.
 		return nil, fmt.Errorf("store: no backend for %q", loc.Proto)
 	}
 }

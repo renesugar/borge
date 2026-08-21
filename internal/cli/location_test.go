@@ -42,9 +42,12 @@ func TestRemoteLocationsAreRefusedNotJoined(t *testing.T) {
 		{"rest://borge-nowhere.invalid/srv/repo", "borge-nowhere.invalid"},
 		{"https://borge-nowhere.invalid/repo", "borge-nowhere.invalid"},
 		{"rclone:no-such-remote:path/repo", "rclone"},
-		// Still unimplemented, and the message must say that rather than fail obscurely.
-		{"s3:key:secret@http://localhost:4566/bucket/repo", "not implemented yet"},
-		{"b2:key:secret@bucket/repo", "not implemented yet"},
+		// s3 and b2 reach a backend too, now that they are implemented. The bucket does
+		// not exist, which is what the message has to say - and did not, until this case
+		// was written: a missing bucket is a 404 like a missing key, and was being
+		// reported as one (DIVERGENCES #61).
+		{"s3:key:secret@http://localhost:4566/borge-no-such-bucket/repo", "bucket"},
+		{"b2:key:secret@http://localhost:4566/borge-no-such-bucket/repo", "bucket"},
 		// ssh:// is not "later": it is borg 1.x, a §0.6 non-goal, and the message says so
 		// rather than suggesting a future release.
 		{"ssh://borge-nowhere.invalid/srv/repo", "borg 1.x"},

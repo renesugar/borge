@@ -413,12 +413,19 @@ REMOTE REPOSITORIES
                              accept an unknown key: borge refuses a host it has not seen,
                              so first contact is made with ssh or sftp and verified there
 
-Three variables here are not borge's own and are read under their own names, because the
+Several variables here are not borge's own and are read under their own names, because the
 tools on the far end and the libraries in between already use them: BORGSTORE_RSH is
 honoured before BORGE_RSH and BORG_RSH, so a remote shell configured for borg works
 unchanged; BORGSTORE_REST_USERNAME and BORGSTORE_REST_PASSWORD authenticate an http(s)://
 repository whose URL carries no credentials; and RCLONE_BINARY names the rclone to run for
 an rclone: repository.
+
+An s3: or b2: repository takes its credentials from the URL, or from AWS_ACCESS_KEY_ID,
+AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN, or from the profile named by AWS_PROFILE in
+AWS_SHARED_CREDENTIALS_FILE (~/.aws/credentials by default) - the order boto3 uses, so a
+machine set up for borg needs no second setup. AWS_REGION and AWS_DEFAULT_REGION choose the
+region, which is part of the signature rather than only an address: signing for the wrong
+one is refused rather than redirected.
 
 TUNING
 

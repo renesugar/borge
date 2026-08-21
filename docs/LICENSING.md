@@ -138,6 +138,13 @@ each addition is a decision with a reason:
 | `github.com/pkg/sftp` | BSD-2-Clause | the SFTP v3 protocol, added 2026-08-21 |
 | `github.com/kr/fs` | BSD-3-Clause | pulled in by `pkg/sftp` |
 
+**S3 is not on that list, deliberately.** The S3 backend is written against the API -
+Signature Version 4 in `internal/store/sigv4.go` and eight operations in
+`internal/store/s3.go` - rather than against `aws-sdk-go-v2`, whose dependency tree is an
+order of magnitude larger than the code it would replace. The signature is the part that has
+to be exactly right, so it is compared against botocore request by request rather than
+trusted.
+
 **SFTP is a wire protocol with a specification, not a borg format decision.** Implementing
 it by hand over `x/crypto/ssh` is possible and would be a few thousand lines of someone
 else's protocol; the "prefer the standard library" rule is about not taking a dependency for

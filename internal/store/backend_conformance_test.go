@@ -124,6 +124,14 @@ func runBackendConformance(t *testing.T, open func(t *testing.T) (Backend, plant
 		if info.Name != "sized" {
 			t.Errorf("Info reported name %q, want the entry's own name", info.Name)
 		}
+		// A namespace that was *created* reports as a directory. Storing an object under
+		// a name does not create one: an object store has no directories at all, and
+		// borgstore makes them by writing a zero-byte key that ends in a delimiter. So
+		// the namespace has to be made before it can be asked about - which is what the
+		// store above does too.
+		if err := b.Mkdir("config"); err != nil {
+			t.Fatal(err)
+		}
 		dir, err := b.Info("config")
 		if err != nil {
 			t.Fatal(err)

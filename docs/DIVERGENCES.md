@@ -2795,3 +2795,73 @@ not have it.
 **The rows.** Each tool writes and the other reads; then one repository written by *both*
 over sftp, with each extracting the other's archive and `check --verify-data` run by each —
 two independent SSH implementations against one repository.
+
+## 61. s3, and the two signers botocore has — **2026-08-21**
+
+**Stage 8 · `internal/store/s3.go`, `internal/store/sigv4.go`**
+
+Row 1, piece 5 of five, and the last of §11.5. S3 and Backblaze B2, written against the API
+rather than against an SDK: the surface borgstore uses is eight operations, and
+`aws-sdk-go-v2` is a dependency tree an order of magnitude larger than the code it would
+replace. The decision lives in two files and is reversible in one.
+
+**Signature Version 4, checked against the signer borg uses.** A wrong signature is a 403
+that says `SignatureDoesNotMatch` and nothing else — the same answer as a wrong secret, a
+wrong region or a wrong clock — so `TestSigV4MatchesBotocore` compares byte for byte over
+seven request shapes: a listing with several query parameters, a valueless `?delete`, a
+header with runs of whitespace collapsed, a copy whose source is a header, and a key that
+needs escaping.
+
+**And the finding that came out of writing that test.** botocore has *two* SigV4 signers,
+and they differ on exactly one rule: the generic `SigV4Auth` encodes the request path
+**twice** and `S3SigV4Auth` encodes it once. Comparing against the wrong one demanded the
+wrong behaviour:
+
+```
+botocore SigV4Auth:    /borge-test-1/repo/odd%2520name%252Bplus
+botocore S3SigV4Auth:  /borge-test-1/repo/odd%20name%2Bplus     ← what S3 accepts
+```
+
+Only a key with a character needing an escape shows the difference, which is why a signer
+can be wrong here for years: every ordinary key signs identically under both rules. The test
+now names `S3SigV4Auth`, and says why in a comment, because the next person to read it will
+wonder.
+
+**An object store has no directories, and borg knows it.** A namespace is a zero-byte object
+whose key ends in `/`, and a listing has two halves: the objects under a prefix and the
+`CommonPrefixes` S3 synthesises from the keys below it. One consequence surfaced in the
+shared conformance suite, which had been asserting a filesystem's rule: storing
+`config/sized` does **not** make `config` exist. borgstore behaves the same way, and nothing
+in borge asks — every `Info` call in the tree names an object — so the suite now creates the
+namespace before asking about it, which is true of every backend rather than only of the
+ones backed by a filesystem.
+
+**Delete has to look first.** S3's `DeleteObject` succeeds for a key that was never there.
+Reporting that as success would mean the store above never learns that an object it expected
+is gone, so the backend heads the key first and reports `ObjectNotFound` — and the test
+asserts *both* halves, including that the raw operation really does succeed, so the check
+cannot be quietly dropped as unnecessary.
+
+**Move is not atomic and cannot be.** There is no rename: a move is a copy followed by a
+delete, and a failure in between leaves the object under both names. That matters because a
+move is how a soft delete works. borg has exactly the same property through boto3; it is
+recorded here as a test rather than a comment.
+
+**A URL that looks ambiguous and is not.** `s3:profile:with:colons@/bucket/repo` is not a
+profile — borgstore's profile group forbids colons, so the alternation falls through and it
+is an access key called `profile` with the secret `with:colons`. borge does the same, and
+the test says which, having been run against borgstore's own regex rather than reasoned
+about. (An earlier version of that test asserted the URL was refused, which borge would then
+have had to do differently from borg.)
+
+**A missing bucket reported as a missing object.** S3 answers both with 404, and the arm
+that catches "no such key" was written first, so pointing borge at a bucket that does not
+exist produced `object not found: repo/` — a user would go looking for a key. The bucket
+case is now checked first, and `TestS3ReportsAMissingBucketAsMissingBucket` holds it. Found
+by the test that asserts every scheme's refusal names the location rather than a path, which
+is the same test that had been rewritten to stop asserting which backends were implemented.
+
+**Addressing style.** A custom endpoint is addressed with the bucket in the path and AWS
+itself with the bucket in the hostname. Getting that the wrong way round produces a DNS
+lookup for a name that does not exist, against a server that is running perfectly — which
+is how it presents rather than as a protocol error.
