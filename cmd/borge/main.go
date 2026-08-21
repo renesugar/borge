@@ -43,8 +43,9 @@ borge is a port of BorgBackup (https://github.com/borgbackup/borg) and is not
 produced, sponsored or endorsed by the Borg Collective. Run "borge --license"
 for the full attribution.
 
-Repositories must be local paths for now: the remote backends are not
-implemented yet. See docs/PORTING_PLAN.md for the staged plan.
+A repository may be a local path, an rclone: remote, or a rest:// URL served
+by "borge serve --rest" (started by the client, over ssh if the URL names a
+host). sftp:, s3: and b2: are not implemented yet; see docs/PORTING_PLAN.md.
 `
 
 func main() {

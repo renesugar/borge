@@ -31,10 +31,8 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-type stringList []string
-
-func (s *stringList) String() string     { return strings.Join(*s, ",") }
-func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
+// stringList is the repeatable-option type from serve.go; this test uses it because a
+// test type with the same shape would be a second implementation to keep in step.
 
 func TestPermute(t *testing.T) {
 	cases := []struct {

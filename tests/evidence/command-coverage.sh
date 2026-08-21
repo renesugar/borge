@@ -51,7 +51,6 @@ declare -A deferred=(
     [mount]="non-goal for 1.0 (PORTING_PLAN 0.6): FUSE, deferred to section 9"
     [umount]="non-goal for 1.0 (PORTING_PLAN 0.6): pairs with mount"
     [webdav]="non-goal for 1.0 (PORTING_PLAN 0.6)"
-    [serve]="stage 8 remote backends (PORTING_PLAN 0.6, 11): not yet implemented"
 )
 
 # gap says which of the deferred commands are work still to do, as against settled
@@ -61,7 +60,10 @@ declare -A deferred=(
 # "not yet implemented" matched neither and the largest gap in stage 8 was silently left
 # out of the very list this script prints to name the gaps.
 declare -A gap=(
-    [serve]=1
+    # Empty since 2026-08-21, when serve landed (PORTING_PLAN 11.5, piece 3). borge
+    # implements serve --rest, which is the mode that serves a *current* repository;
+    # "serve" without it serves a borg 1.x repository over the legacy protocol and is
+    # refused by name, as the other 0.6 non-goals are.
 )
 
 borg_commands() {

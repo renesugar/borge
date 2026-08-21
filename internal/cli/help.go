@@ -398,6 +398,24 @@ BEHAVIOUR
                              repair,transfer,rechunk - verifying on the read path costs
                              a full extra hash pass over everything restored.
 
+REMOTE REPOSITORIES
+
+  BORGE_RSH                  the remote shell for a rest:// repository with a host,
+                             replacing "ssh" and its options entirely
+  BORGE_REMOTE_PATH          the borge to run on the far end, when a rest:// URL names a
+                             host. Placeholders are expanded, so one setting can serve a
+                             fleet of differently-laid-out machines
+  BORGE_REPO_PERMISSIONS     what a serve --rest process allows its client to do: all
+                             (default), no-delete, write-only or read-only. The option
+                             --permissions overrides it
+
+Three variables here are not borge's own and are read under their own names, because the
+tools on the far end and the libraries in between already use them: BORGSTORE_RSH is
+honoured before BORGE_RSH and BORG_RSH, so a remote shell configured for borg works
+unchanged; BORGSTORE_REST_USERNAME and BORGSTORE_REST_PASSWORD authenticate an http(s)://
+repository whose URL carries no credentials; and RCLONE_BINARY names the rclone to run for
+an rclone: repository.
+
 TUNING
 
   BORGE_PACK_MAX_COUNT       how many objects one pack file holds

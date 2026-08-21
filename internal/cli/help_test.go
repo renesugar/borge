@@ -75,7 +75,13 @@ func TestHelpEnvironmentTopicListsEveryVariable(t *testing.T) {
 // key.lookupEnv, which prepend the prefix, and through a direct os.LookupEnv.
 var (
 	envVarLookup = regexp.MustCompile(`lookupBorg\("([A-Z0-9_]+)"\)|lookupEnv\("([A-Z0-9_]+)"\)`)
-	envVarDirect = regexp.MustCompile(`LookupEnv\("BORGE_([A-Z0-9_]+)"\)|Getenv\("BORGE_([A-Z0-9_]+)"\)`)
+	// A BORGE_ name handed to anything whose name ends in "env", in any argument
+	// position. The pattern above only sees the two accessors it names, so a variable
+	// read through a helper - firstEnv, say - was invisible to this check, and
+	// BORGE_REMOTE_PATH and BORGE_RSH could have been added without ever being
+	// documented. Matching every BORGE_ string instead would be simpler and wrong:
+	// BORGE_FILES_CACHE_1 is a file format's magic number, not a variable.
+	envVarDirect = regexp.MustCompile(`\w*[Ee]nv\([^)]*"BORGE_([A-Z0-9_]+)"`)
 )
 
 func envVarsReadBySource(t *testing.T) []string {
@@ -90,6 +96,11 @@ func envVarsReadBySource(t *testing.T) []string {
 			return err
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		// help.go is the documentation, not a reader: every documented name appears in
+		// it, so scanning it would make the reverse check below vacuous.
+		if filepath.Base(path) == "help.go" {
 			return nil
 		}
 		src, err := os.ReadFile(path)

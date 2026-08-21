@@ -42,7 +42,14 @@ func NewBackend(loc *location.Location) (Backend, error) {
 		// The scheme is stripped and the rest handed over exactly as written: rclone's
 		// remote syntax is rclone's business (see NewRclone).
 		return NewRclone(strings.TrimPrefix(loc.Processed, "rclone:"))
-	case "rest", "sftp", "s3", "b2", "http", "https":
+	case "rest":
+		return NewRESTOverStdio(RESTServeCommand(loc))
+	case "http", "https":
+		// Someone else's server, reached over the network rather than over a pipe. The
+		// credentials may be in the URL or in the environment, as borgstore allows.
+		user, password := restCredentials(loc)
+		return NewRESTOverHTTP(withoutCredentials(loc.Processed), user, password)
+	case "sftp", "s3", "b2":
 		return nil, fmt.Errorf("store: the %s backend is not implemented yet "+
 			"(docs/PORTING_PLAN.md §11.5); this borge reads local repositories only", loc.Proto)
 	default:

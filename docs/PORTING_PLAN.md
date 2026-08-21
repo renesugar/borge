@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark`, `completion`, `key`, `repo-delete` and `help` done: **32 of borg's 36 commands**, with `tests/evidence/command-coverage.sh` as the gate. `transfer` (borg 2 to borg 2) done 2026-08-20. What remains: `serve` and the remote backends (§11.5), and the stage's evidence bundle. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified.** `mount`/`umount`/`webdav` are §0.6 non-goals.**
+Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark`, `completion`, `key`, `repo-delete` and `help` done: **33 of borg's 36 commands**, with `tests/evidence/command-coverage.sh` as the gate. `transfer` (borg 2 to borg 2) done 2026-08-20. `serve` (its `--rest` mode) done 2026-08-21. What remains: the `sftp` and `s3` backends (§11.5), and the stage's evidence bundle. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified.** `mount`/`umount`/`webdav` are §0.6 non-goals.**
 Last updated: 2026-08-17.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
@@ -1720,7 +1720,7 @@ a table at all.
 
 | # | Item | Recorded in | State |
 | --- | --- | --- | --- |
-| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), ~~`rclone`~~ (**done 2026-08-21**, #58), then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
+| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), ~~`rclone`~~ (**done 2026-08-21**, #58), ~~the REST client with `serve --rest`~~ (**done 2026-08-21**, #59), then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
 | 2 | ~~`transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards~~ | §11.1, DIVERGENCES #55 | **done 2026-08-20.** All seven work items closed. borg transfers into a repository borge created with `--other-repo`, and reads what borge's transfer wrote; both relatedness guards refuse with borg's exact words; a re-run skips. Work item 7 answered by measurement: neither `chunks_healthy` nor `part` can occur in a borg 2 archive, so neither branch is ported. Beside it: borge validated **no** archive name or comment anywhere, so `create` accepted names borg's own parser refuses |
 | 3 | ~~missing per-command options~~ | §11.2, `option-coverage.sh` | **done 2026-08-20**, down from 111 to 11, and every short spelling borg offers is now borge's too. Nine commands reached zero in one day (DIVERGENCES #48-#53). Of the eleven left, four are other rows' (`recreate` row 4, `repo-create` row 2) and the rest have written reasons in #53: `check`'s two need a pack-level check borge has not ported, `repo-delete --keep-security-info` manages a directory borge does not keep, `repo-list --from-borg1` is a §0.6 non-goal |
 | 4 | ~~`recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter`~~ | §11.2 | **done 2026-08-20** (DIVERGENCES #54). The tag scan reads `CACHEDIR.TAG` out of the item stream, since recreate has no filesystem to look at. Beside it: `recreate`'s positional was read as an archive name where borg reads a *path*, so the same command line emptied every archive under borg; and `--list` reported `+` for everything where borg reports the item's type letter, which made `--filter` useless |
@@ -2770,6 +2770,28 @@ correct only while remote locations were refused, and became a working-directory
 moment one opened. Fixed and held by a test; see #58. `store.ParseFileURL` also went — a
 second `file://` parser with rules of its own, left over from before `internal/location`.
 
+#### Piece 3 — the REST client and `serve --rest` — done 2026-08-21
+
+Both ends, written together and tested against each other and against borg's. borge's
+client drives borg's server, borg's client drives borge's, and borge drives itself; the
+`http(s)://` transport of the same protocol came with it, since it is the same client with
+a socket instead of a pipe.
+
+**Two things this section predicted wrongly, both settled by measurement.** The framing is
+*not* hand-rolled: `req.Write`, `http.ReadResponse` and `http.Server` over a wrapped pipe do
+all of it. And the difficulty was not the transport but a missing `Host` header in borg's
+requests, which `http.Server` refuses and borgstore's Python server never checked — so the
+stdio server reads with `http.ReadRequest` instead. See DIVERGENCES #59; borge-to-borge
+passed throughout, which is why only the cross-tool rows found it.
+
+`defrag` turned out to be required rather than optional: borg's compaction rewrites packs
+through it. `hash` and `quota` are implemented too — `hash` as borgstore's default (read the
+object, hash it), `quota` as the honest "not tracked" answer borgstore gives for a backend
+that does not track one. That leaves the interface table in this section fully answered.
+
+**With `serve`, the command gate has no gaps left**: 55 implemented, and only `mount`,
+`umount` and `webdav` recorded absent, all §0.6 non-goals.
+
 #### The order these should be committed in
 
 One backend per commit, each with its own interop rows, in the order above: `Location`,
@@ -3143,7 +3165,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 32 of borg's 36 commands, the other four being `serve` and the three §0.6 non-goals. Of the fifteen items tabled in §11 under "What stage 8 still owes", **only rows 1 and 15 are open**: `serve` and the remote backends (§11.5, planned 2026-08-20), and the stage's evidence bundle | not yet bundled, and not to be bundled until that table is empty but for its last row |
+| 8 | Remaining commands + remote backends | **in progress** — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`, so the command gate has no gaps left. Of the fifteen items tabled in §11 under "What stage 8 still owes", **only rows 1 and 15 are open**: row 1's last two backends, `sftp` and `s3` (§11.5), and the stage's evidence bundle | not yet bundled, and not to be bundled until that table is empty but for its last row |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |

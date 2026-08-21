@@ -30,12 +30,15 @@ func TestRemoteLocationsAreRefusedNotJoined(t *testing.T) {
 	}{
 		{"sftp://backup.example.com/srv/repo", "not implemented yet"},
 		{"s3:key:secret@http://localhost:4566/bucket/repo", "not implemented yet"},
-		{"rest://host/srv/repo", "not implemented yet"},
-		{"https://backup.example.com/repo", "not implemented yet"},
-		// rclone is implemented, so this one gets as far as rclone, which does not know
-		// the remote. What is being checked here is the same thing either way: the URL
-		// was not quietly turned into a directory name.
+		{"b2:key:secret@bucket/repo", "not implemented yet"},
+		// The implemented backends get as far as the backend, which is the same check
+		// from the other side: the URL reached a backend rather than becoming a
+		// directory name. rclone does not know the remote; the others cannot reach the
+		// host. ".invalid" is reserved by RFC 2606 and never resolves, so this costs one
+		// failed lookup rather than a real connection.
 		{"rclone:no-such-remote:path/repo", "rclone"},
+		{"rest://borge-nowhere.invalid/srv/repo", "borge-nowhere.invalid"},
+		{"https://borge-nowhere.invalid/repo", "borge-nowhere.invalid"},
 		// ssh:// is not "later": it is borg 1.x, which is a §0.6 non-goal, and the
 		// message has to say so rather than suggest waiting for a release.
 		{"ssh://backup.example.com/srv/repo", "borg 1.x"},

@@ -167,6 +167,7 @@ func commands() []command {
 		{"analyze", "report where the repository's space goes", cmdAnalyze},
 		{"repo-space", "manage the repository's emergency reserved space", cmdRepoSpace},
 		{"key", "manage the repository's keys", cmdKey},
+		{"serve", "serve a repository to a rest:// client (started by the client)", cmdServe},
 		{"version", "print the client and server versions", cmdVersion},
 		{"debug", "low-level repository inspection (dangerous)", cmdDebug},
 		{"benchmark", "measure this build's speed", cmdBenchmark},

@@ -129,6 +129,7 @@ declare -A budget=(
     [repo-info]=0
     [repo-list]=1
     [repo-space]=0
+    [serve]=0
     [tag]=0
     [transfer]=0
     [undelete]=0

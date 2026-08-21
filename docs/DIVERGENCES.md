@@ -2631,3 +2631,93 @@ repository was last opened under, so opening the same local repository as `/srv/
 two canonical forms, and to borg the repository has moved. borge keeps no such record
 (#53) and says nothing. The interop rows read the result out from under the warning and
 say why.
+
+## 59. `serve --rest`, and the header borg does not send — **2026-08-21**
+
+**Stage 8 · `internal/store/rest.go`, `rest_server.go`, `internal/cli/serve.go`**
+
+Row 1, piece 3 of five (PORTING_PLAN §11.5), and the only one where borge is not just a
+client: `borge serve --rest` is the server side of a `rest://` repository, and the client
+that starts it may be borg. The protocol is borgstore's REST — borg 2 has no repository
+protocol of its own, and its own `serve --rest` is a wrapper around borgstore's server.
+
+**The plan was wrong about the hard part.** §11.5 said the framing was "a hand-rolled
+framing, not a socket, and Go's `net/http` will not do it for us in either direction".
+Measured before writing any of it: `req.Write` and `http.ReadResponse` frame and parse a
+request and a response over a pipe, keep-alive included, and `http.Server` serves any
+`net.Conn`, so a reader and a writer wrapped as one connection give a server for free. The
+piece that actually needed care was somewhere else entirely.
+
+**The header borg does not send.** borg's client omits `Host`. borgstore writes the headers
+that `requests` prepared, and `Host` is normally added further down by urllib3, which the
+stdio session bypasses — so what arrives is an HTTP/1.1 request with no `Host` at all. RFC
+7230 requires one, `http.Server` enforces it, and borge's server answered every single one
+of borg's requests with:
+
+```
+HTTP/1.1 400 Bad Request: missing required Host header
+```
+
+borgstore's own Python server has no such check, so borg has never needed to send one.
+Being right about the RFC here would mean being useless as a server for borg, so the stdio
+server reads requests with `http.ReadRequest` — which is lenient — and writes the responses
+itself.
+
+This is the sharpest case yet of a class this port keeps meeting: **borge talking to borge
+worked perfectly**, because Go's client always sends `Host`. Only borg-on-the-other-end
+found it, and only for one of the three directions tested.
+
+**The trap in the other direction, which is still there and had to be tested on the wire.**
+Go decides between `Content-Length` and chunked transfer encoding by itself and picks
+chunked for anything it cannot buffer — about 4 kB. borge's own client would not care,
+because `net/http` reads chunked replies; borgstore's client reads exactly `Content-Length`
+bytes and has never heard of chunked. So every response sets `Content-Length` explicitly,
+and the test for it asserts on the bytes of the response rather than on a round trip: a
+round-trip test passes with the requirement violated, which is what the first version of it
+did.
+
+**Three directions, and how each tool is made to start the other.** Neither tool has an
+option for "serve with that program", but both build the same command for a `rest://` URL
+with a host: a remote shell, then `$BORG_REMOTE_PATH`, then `serve --rest --backend FILE:…`
+— and both take the remote shell from `BORGSTORE_RSH`. A two-line script that drops the
+hostname and runs the rest locally turns "over ssh to that host" into "as that program,
+here", with no network and no sshd, while exercising the command line each tool really
+builds. The rows are borge's client against borg's server, borg's client against borge's
+server, and borge against itself.
+
+**`defrag` is not optional.** borg's compaction rewrites a pack by naming the byte ranges
+worth keeping and having the server copy them, rather than downloading and re-uploading the
+pack. A server without it can be backed up to and not maintained, and nothing would say so
+until a repository needed compacting. borge's server implements it; the interop row asserts
+that `cmd=defrag` was actually issued, by capturing the request stream — an earlier version
+ran a compaction with nothing to reclaim and passed while exercising none of it.
+
+**What `rest://` means, which is not what it looks like.** The path after the host is
+separated by a slash that is *not part of the path*, so `rest:///srv/repo` names a
+**relative** path — `srv/repo`, resolved against the server's working directory — and only
+`rest:////srv/repo` is absolute. That is borg's grammar (`rest_re` in `parseformat.py`), and
+measured: `borg repo-create -r rest:///$PWD/x` creates `./tmp/…/x` under the current
+directory. borge reproduces it, because a URL that means one thing in one tool and another
+in the other is worse than a URL that surprises both readers equally.
+
+**Two smaller decisions.** The permission table is borg's `borg_permissions`, copied rather
+than derived, because each line has a reason that its name does not give: `locks/` stays
+writable and deletable even under `read-only`, since a reader takes a shared lock and must
+be able to remove it; `packs/` stays *readable* under `write-only`, or `create` could not
+tell which chunks are already stored and would store everything twice. And `serve`'s stdout
+belongs to the protocol: every byte of it is part of an HTTP response, so a stray warning
+would corrupt the stream and surface as a parse error far from its cause. A test asserts
+that stdout parses as exactly one response with nothing before or after it.
+
+**A gate that could not see the variables it was checking.** The environment-topic test
+scanned for `lookupBorg("X")` and `os.Getenv("BORGE_X")`, so `BORGE_REMOTE_PATH` and
+`BORGE_RSH` — read through a helper — were invisible to it, and `BORGE_REPO_PERMISSIONS`
+was caught only because it happened to use the accessor the regex knew. It now matches a
+`BORGE_` literal handed to anything whose name ends in `env`, in any argument position.
+Matching every `BORGE_` string instead would be simpler and wrong: `BORGE_FILES_CACHE_1` is
+a file format's magic number.
+
+**With `serve`, borge implements every borg command it intends to.** The command gate now
+reports 55 implemented, three recorded absences — `mount`, `umount`, `webdav`, all §0.6
+non-goals — and **no gaps**. `serve` without `--rest` serves a borg 1.x repository over the
+legacy protocol and is refused by name, like the other §0.6 non-goals.

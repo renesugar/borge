@@ -67,9 +67,14 @@ func newPosixFSForTest(t *testing.T) (Backend, string) {
 }
 
 // TestBackendConformance runs one suite over every backend borge has.
+//
+// The REST backend appears twice because it has two transports and only one protocol: over
+// a socket, and over the stdin and stdout of a server process, which is the one borg uses.
 func TestBackendConformance(t *testing.T) {
 	t.Run("posixfs", func(t *testing.T) { runBackendConformance(t, newPosixFSForTest) })
 	t.Run("rclone", func(t *testing.T) { runBackendConformance(t, newRcloneForTest) })
+	t.Run("rest-http", func(t *testing.T) { runBackendConformance(t, newRESTForTest) })
+	t.Run("rest-stdio", func(t *testing.T) { runBackendConformance(t, newRESTStdioForTest) })
 }
 
 // TestRcloneWritesWhatPosixFSWould is the interop claim in its smallest form: a store
