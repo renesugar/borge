@@ -2555,3 +2555,79 @@ where it used to refuse the command as if none had been given.
 `TestRepoCreateInheritsFromTheEnvironment` holds it, and holds it with borg as the judge:
 borg's own `transfer` accepts the repository borge made from the variable, and refuses the
 one made without it.
+
+## 58. The rclone backend, and the delete that deleted the wrong thing — **2026-08-21**
+
+**Stage 8 · `internal/store/rclone.go`, `internal/cli/repo_delete.go`**
+
+Row 1, piece 2 of five (PORTING_PLAN §11.5). An `rclone:` repository is not a protocol
+borge speaks: the client starts `rclone rcd` as a child process and drives it over rclone's
+remote-control HTTP API, and rclone reaches the storage — S3, Backblaze, Google Drive,
+WebDAV, seventy others. There is no borge and no borg on the far end.
+
+**What had to be measured rather than read.** borgstore's client is the specification, but
+several of the things a repository depends on are rclone's behaviour, not borgstore's, and
+they were checked against a running `rclone rcd` 1.75:
+
+| asked | rclone answers |
+| --- | --- |
+| `GET /[<fs>]/<name>` | the object; `206` for a `Range`, `404` for a missing one |
+| `operations/stat` on a missing name | **`200` with `"item": null`** — not `404` |
+| `operations/list` on a missing directory | `404` |
+| `deletefile`, `movefile` on a missing object | `404` |
+| `rmdir` on a non-empty directory | `500` |
+| a `Range` that runs past the end | the bytes that are there, not an error |
+
+"Missing" therefore has two spellings, and both have to reach callers as one — an
+`operations/stat` that returned `item: null` and got reported as "exists" would make
+`repo-create` believe an empty remote was occupied.
+
+**One suite over both backends.** §11.5 asks whether `store.Backend` is the right shape for
+something that is not a filesystem. The answer is now evidence rather than opinion:
+`runBackendConformance` is one set of cases — ranges including negative offsets and reads
+past the end, a missing object distinguished from an empty one, a listing that is sorted
+and skips names that are not ours, a move that takes the old name away, the lifecycle
+errors — run against `PosixFS` and against `Rclone`. The interface needed no change.
+
+The listing case is the one worth naming: it plants `NOTES.txt`, `half-written.tmp` and
+`a b` in the store *behind the backend's back*, because the backend refuses to write them.
+An earlier version of it asserted only that those names are refused on the way in, which is
+a different claim and passes whether or not the filter on the way out exists.
+
+**And the defect this piece created, found before it shipped.** `Location.Path` is empty
+for every location that is not a directory. `repo-delete` handed it to the function that
+removes borge's namespaces from a path — which was correct while every remote location was
+refused at `Open`, and stopped being correct the moment rclone opened one:
+
+```
+$ ls                      # a directory that has nothing to do with the repository
+archives  packs
+$ borge repo-delete -r rclone:/srv/remote/repo --force
+borge: open : no such file or directory
+$ ls
+$                         # both gone, with the files inside them
+$ ls /srv/remote/repo     # and the repository it was asked to delete
+archives  config  index …
+```
+
+It removed `archives` and `packs` **relative to the working directory**, took files that
+were not borge's with them, reported a confusing error, and left the repository standing.
+Measured, not imagined. `repository.Destroy` now goes through the backend for anything that
+is not a local directory; the local path keeps the "leave foreign files alone" behaviour of
+#18, which needs a filesystem, because the `Backend` interface has no subtree removal that
+stops at files it did not write. `TestRepoDeleteThroughABackendDeletesTheRepository` holds
+both halves — the decoys survive, the repository does not.
+
+**Two smaller decisions.** A missing `rclone` binary is reported as a missing *tool*
+naming `RCLONE_BINARY`, where borgstore reports it as `BackendDoesNotExist` — answering
+"the repository does not exist" would send a user looking in the wrong place. And the
+rclone child gets `Pdeathsig`, which borgstore has no equivalent of: if borge is killed
+outright, nothing else would ever stop an `rclone rcd` that is holding the user's storage
+credentials.
+
+**A borg behaviour that shows up here for the first time.** borg records the location a
+repository was last opened under, so opening the same local repository as `/srv/repo` after
+`rclone:/srv/repo` produces its "previously located at" warning — the two spellings have
+two canonical forms, and to borg the repository has moved. borge keeps no such record
+(#53) and says nothing. The interop rows read the result out from under the warning and
+say why.

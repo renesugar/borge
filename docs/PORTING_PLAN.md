@@ -1720,7 +1720,7 @@ a table at all.
 
 | # | Item | Recorded in | State |
 | --- | --- | --- | --- |
-| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), then `rclone`, then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
+| 1 | `serve` and the remote backends — `sftp`, `rest`, `s3`, `rclone` | **§11.5** | **in progress.** Five pieces, not one: ~~a `Location` type~~ (**done 2026-08-20**, DIVERGENCES #56/#57), ~~`rclone`~~ (**done 2026-08-21**, #58), then the REST client with `serve --rest`, then `sftp`, then `s3`. `serve` without `--rest` serves a borg 1.x repository and stays a §0.6 non-goal |
 | 2 | ~~`transfer` borge→borge, `repo-create --other-repo`, `BORGE_OTHER_PASSPHRASE`, the relatedness guards~~ | §11.1, DIVERGENCES #55 | **done 2026-08-20.** All seven work items closed. borg transfers into a repository borge created with `--other-repo`, and reads what borge's transfer wrote; both relatedness guards refuse with borg's exact words; a re-run skips. Work item 7 answered by measurement: neither `chunks_healthy` nor `part` can occur in a borg 2 archive, so neither branch is ported. Beside it: borge validated **no** archive name or comment anywhere, so `create` accepted names borg's own parser refuses |
 | 3 | ~~missing per-command options~~ | §11.2, `option-coverage.sh` | **done 2026-08-20**, down from 111 to 11, and every short spelling borg offers is now borge's too. Nine commands reached zero in one day (DIVERGENCES #48-#53). Of the eleven left, four are other rows' (`recreate` row 4, `repo-create` row 2) and the rest have written reasons in #53: `check`'s two need a pack-level check borge has not ported, `repo-delete --keep-security-info` manages a directory borge does not keep, `repo-list --from-borg1` is a §0.6 non-goal |
 | 4 | ~~`recreate`'s exclusion group — `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags`, `--filter`~~ | §11.2 | **done 2026-08-20** (DIVERGENCES #54). The tag scan reads `CACHEDIR.TAG` out of the item stream, since recreate has no filesystem to look at. Beside it: `recreate`'s positional was read as an archive name where borg reads a *path*, so the same command line emptied every archive under borg; and `--list` reported `+` for everything where borg reports the item's type letter, which made `--filter` useless |
@@ -2746,6 +2746,29 @@ All three of the questions this section originally asked have been answered and 
 - **`borgstore-server-rest` compatibility as a client.** borg's own `rest://` client spawns
   `borg serve --rest`; borge spawns `borge serve --rest`. Whether borge should also be able
   to talk to a `borgstore-server-rest` process is a question for after the protocol works.
+
+#### Piece 2 — `rclone` — done 2026-08-21
+
+`internal/store/rclone.go` starts `rclone rcd` on a loopback port with a fresh password
+passed through the environment, and drives it over the rc API. The wire details were
+measured against rclone 1.75 rather than read (DIVERGENCES #58), because several of them —
+a missing object answered with `200` and a null item, a range past the end answered with
+the bytes that are there — are rclone's behaviour rather than borgstore's.
+
+**The architectural question this piece exists to answer is answered: `store.Backend` did
+not change.** `runBackendConformance` is one suite run against both backends, and the
+rclone one passes it. The three methods §11.5 listed as missing from the interface
+(`hash`, `quota`, `defrag`) were not needed by this backend either: `hash` belongs to the
+REST server, `quota` to the file backend, `defrag` to nothing yet.
+
+Interop is two rows, both directions, with a third assertion that matters more than it
+looks: a repository written through `rclone:<local path>` is byte-for-byte the repository
+the local backend reads, so the format does not change when the bytes travel differently.
+
+What this piece cost elsewhere: `repo-delete` had a local-only destroy path that was
+correct only while remote locations were refused, and became a working-directory hazard the
+moment one opened. Fixed and held by a test; see #58. `store.ParseFileURL` also went — a
+second `file://` parser with rules of its own, left over from before `internal/location`.
 
 #### The order these should be committed in
 

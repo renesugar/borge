@@ -170,6 +170,21 @@ func Create(loc *location.Location, opts Options) (*Repository, error) {
 	return Open(loc, opts)
 }
 
+// Destroy removes a repository through its backend.
+//
+// This is for the locations that are not directories. A local repository is destroyed by
+// the CLI instead, which removes borge's own namespaces and leaves anything else in the
+// directory alone (DIVERGENCES #18) - a distinction that needs a filesystem, because the
+// Backend interface has no "remove this subtree" that stops at foreign files. Through a
+// backend, destroying is all or nothing, which is what borg does everywhere.
+func Destroy(loc *location.Location) error {
+	backend, err := store.NewBackend(loc)
+	if err != nil {
+		return err
+	}
+	return backend.Destroy()
+}
+
 // Open opens an existing repository.
 func Open(loc *location.Location, opts Options) (*Repository, error) {
 	backend, err := store.NewBackend(loc)

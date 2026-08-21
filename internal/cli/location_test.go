@@ -4,6 +4,7 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,9 +30,12 @@ func TestRemoteLocationsAreRefusedNotJoined(t *testing.T) {
 	}{
 		{"sftp://backup.example.com/srv/repo", "not implemented yet"},
 		{"s3:key:secret@http://localhost:4566/bucket/repo", "not implemented yet"},
-		{"rclone:remote:path/repo", "not implemented yet"},
 		{"rest://host/srv/repo", "not implemented yet"},
 		{"https://backup.example.com/repo", "not implemented yet"},
+		// rclone is implemented, so this one gets as far as rclone, which does not know
+		// the remote. What is being checked here is the same thing either way: the URL
+		// was not quietly turned into a directory name.
+		{"rclone:no-such-remote:path/repo", "rclone"},
 		// ssh:// is not "later": it is borg 1.x, which is a §0.6 non-goal, and the
 		// message has to say so rather than suggest waiting for a release.
 		{"ssh://backup.example.com/srv/repo", "borg 1.x"},
@@ -114,5 +118,71 @@ func TestRelativeLocationsStillWork(t *testing.T) {
 	}
 	if got := parseKeyValues(stdout)["Location"]; got != r.path {
 		t.Errorf("a relative path resolved to %q, want the absolute %q", got, r.path)
+	}
+}
+
+// requireRclone skips when rclone is not installed. The rclone tests that matter live in
+// internal/store; this one is here because what it checks is a decision the command layer
+// makes - which way to destroy a repository.
+func requireRclone(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping the rclone command tests in short mode")
+	}
+	if _, err := exec.LookPath("rclone"); err != nil {
+		t.Skipf("rclone is not installed: %v", err)
+	}
+}
+
+// TestRepoDeleteThroughABackendDeletesTheRepository, and specifically not the working
+// directory.
+//
+// Location.Path is empty for every location that is not a directory, and repo-delete used
+// to hand it to a function that removes borge's namespaces from a path. Once rclone became
+// openable that meant "borge repo-delete -r rclone:..." removed ./archives and ./packs from
+// wherever it happened to be run - taking files that were not borge's with them - reported
+// an error, and left the actual repository intact. Measured before the fix; DIVERGENCES #58.
+func TestRepoDeleteThroughABackendDeletesTheRepository(t *testing.T) {
+	requireRclone(t)
+	r := newBorgRepo(t, "none-sha256")
+
+	remote := filepath.Join(t.TempDir(), "remote")
+	url := "rclone:" + remote
+	if _, stderr, code := r.borge(t, "repo-create", "-r", url, "-e", "none-sha256"); code != ExitOK {
+		t.Fatalf("repo-create through rclone exited %d\n%s", code, stderr)
+	}
+	if _, stderr, code := r.borge(t, "create", "-r", url, "one", r.path); code != ExitOK {
+		t.Fatalf("create through rclone exited %d\n%s", code, stderr)
+	}
+
+	// Decoys with the names of borge's own namespaces, in the directory the command runs
+	// from. Nothing here belongs to the repository being deleted.
+	work := t.TempDir()
+	t.Chdir(work)
+	for _, dir := range []string{"archives", "packs", "config"} {
+		if err := os.MkdirAll(filepath.Join(work, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(work, dir, "mine.txt"), []byte("not borge's"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, stderr, code := r.borge(t, "repo-delete", "-r", url, "--force"); code != ExitOK {
+		t.Fatalf("repo-delete through rclone exited %d\n%s", code, stderr)
+	}
+
+	for _, dir := range []string{"archives", "packs", "config"} {
+		if _, err := os.Stat(filepath.Join(work, dir, "mine.txt")); err != nil {
+			t.Errorf("repo-delete removed %s from the working directory: %v", dir, err)
+		}
+	}
+	// And the repository it was asked to delete is gone.
+	if entries, err := os.ReadDir(remote); err == nil && len(entries) > 0 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("the repository is still there after repo-delete: %v", names)
 	}
 }

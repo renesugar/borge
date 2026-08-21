@@ -105,10 +105,17 @@ func cmdRepoDelete(e *Env, args []string) int {
 	if err := repo.Close(); err != nil {
 		return e.fail(err)
 	}
-	// Local-only, and it can be: every other backend is refused at Open (§11.5), so a
-	// location that reaches here is a directory. When the remote backends land this has to
-	// become store.Destroy, and the "leftover files" behaviour of #18 has to go with it.
-	leftover, err := destroyRepository(path.Path)
+	// A local repository is taken apart here, namespace by namespace, so that files
+	// somebody else put in the directory survive (#18). Any other backend has no such
+	// notion - and must not be handed Location.Path, which is empty for everything that is
+	// not a directory: doing so deleted "archives" and "packs" *relative to the working
+	// directory* and left the repository standing (#58).
+	var leftover []string
+	if path.IsLocal() {
+		leftover, err = destroyRepository(path.Path)
+	} else {
+		err = repository.Destroy(path)
+	}
 	if err != nil {
 		return e.fail(err)
 	}

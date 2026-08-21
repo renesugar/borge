@@ -11,6 +11,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/renesugar/borge/internal/location"
 )
@@ -37,7 +38,11 @@ func NewBackend(loc *location.Location) (Backend, error) {
 		// suggests waiting for a later release.
 		return nil, fmt.Errorf("store: %s names a borg 1.x repository, and borge does not read "+
 			"borg 1.x repositories (docs/PORTING_PLAN.md §0.6)", loc.Canonical())
-	case "rest", "sftp", "s3", "b2", "rclone", "http", "https":
+	case "rclone":
+		// The scheme is stripped and the rest handed over exactly as written: rclone's
+		// remote syntax is rclone's business (see NewRclone).
+		return NewRclone(strings.TrimPrefix(loc.Processed, "rclone:"))
+	case "rest", "sftp", "s3", "b2", "http", "https":
 		return nil, fmt.Errorf("store: the %s backend is not implemented yet "+
 			"(docs/PORTING_PLAN.md §11.5); this borge reads local repositories only", loc.Proto)
 	default:

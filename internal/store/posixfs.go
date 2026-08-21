@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // PosixFS stores objects as files under a base directory.
@@ -460,21 +459,4 @@ func (b *PosixFS) Rmdir(name string) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// ParseFileURL turns a file:// URL into a local path.
-//
-// Only local absolute paths are supported: the general URL syntax is proto://host/path,
-// the empty host means localhost, and the third slash is both the separator and the
-// start of the absolute path.
-func ParseFileURL(url string) (string, error) {
-	const prefix = "file://"
-	if !strings.HasPrefix(url, prefix) {
-		return "", fmt.Errorf("store: not a file:// URL: %q", url)
-	}
-	path := strings.TrimPrefix(url, prefix)
-	if !strings.HasPrefix(path, "/") {
-		return "", fmt.Errorf("store: file:// URL must have an empty host and an absolute path: %q", url)
-	}
-	return path, nil
 }

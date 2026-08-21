@@ -540,27 +540,6 @@ func TestRelativePathIsRejected(t *testing.T) {
 	}
 }
 
-func TestParseFileURL(t *testing.T) {
-	for url, want := range map[string]string{
-		"file:///home/renes/repo": "/home/renes/repo",
-		"file:///":                "/",
-	} {
-		got, err := ParseFileURL(url)
-		if err != nil {
-			t.Errorf("ParseFileURL(%q): %v", url, err)
-			continue
-		}
-		if got != want {
-			t.Errorf("ParseFileURL(%q) = %q, want %q", url, got, want)
-		}
-	}
-	for _, url := range []string{"file://relative", "ssh://host/path", "/plain/path", "file://host/path"} {
-		if _, err := ParseFileURL(url); err == nil {
-			t.Errorf("ParseFileURL(%q) accepted a URL it should not", url)
-		}
-	}
-}
-
 // countingBackend records how many stores went through it.
 type countingBackend struct {
 	Backend
