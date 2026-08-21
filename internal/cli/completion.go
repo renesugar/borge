@@ -111,8 +111,11 @@ var archiveTakingCommands = map[string]bool{
 	"tag":        true,
 	"delete":     true,
 	"undelete":   true,
-	"recreate":   true,
 }
+
+// recreate is deliberately absent from that list. Its positional is a PATH, not an archive
+// name - archives are selected with -a, as in borg - so completing archive names there
+// would offer the user the argument that empties the archive. See DIVERGENCES.md #54.
 
 // archiveTakingSubcommands is the same for the two command groups.
 var archiveTakingSubcommands = map[string]bool{

@@ -92,9 +92,9 @@ export PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 # missing flag; down to 11 when help and "key remove" reached zero, which also took the
 # ALIAS gap to zero - every short spelling borg offers, borge now offers.
 #
-# The eleven that remain are not a backlog of small work. Four belong to other rows
-# (recreate to row 4, repo-create to row 2) and four are blocked on something borge does not
-# have or does not want: see DIVERGENCES.md #53.
+# Down to 7 when recreate's exclusion group landed (table row 4, DIVERGENCES #54). The seven
+# that remain are not a backlog of small work: three belong to row 2 (repo-create), and the
+# rest are blocked on something borge does not have or does not want - see #53.
 declare -A budget=(
     [analyze]=0
     [benchmark]=0
@@ -115,7 +115,7 @@ declare -A budget=(
     [key]=0
     [list]=0
     [prune]=0
-    [recreate]=4
+    [recreate]=0
     [rename]=0
     [repo-compress]=0
     [repo-create]=3

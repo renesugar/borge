@@ -2203,3 +2203,72 @@ directory that does not exist would be an option that does nothing.
 
 The first two are gaps with a shape: each names a subsystem borge has not ported. The third
 is a decision already taken. None of them is a flag somebody forgot.
+
+---
+
+## 54. `recreate`'s exclusion group, and the positional that meant two things — **fixed 2026-08-20**
+
+**Stage 8 · `internal/archive/recreate_tags.go`, `internal/cli/recreate.go`**
+**· found by giving borg the argument borge expected**
+
+Table row 4: `--exclude-caches`, `--exclude-if-present`, `--keep-exclude-tags` and
+`--filter` on `recreate`. One feature over four options, and two defects found beside them
+that were worse than the options.
+
+### The same rule, read from a different place
+
+`create` decides whether a directory is a cache by opening `CACHEDIR.TAG` on the filesystem.
+`recreate` has no filesystem to look at — the tree it is filtering exists only as an item
+stream — so it reads the tag file's **stored content**. It has to be a separate pass over
+the stream, because the decision about a directory is made by a file *inside* it, which the
+stream may not have reached when the directory item goes past.
+
+The patterns and their order are borg's: the tag files are added as includes **first**, so
+that with `--keep-exclude-tags` a tag file survives the exclusion of the directory holding
+it, and matching stops at the first hit. `TestRecreateExcludesTheRealCacheOnly` checks the
+part a differential comparison cannot — two tools that both excluded every directory
+containing a file *named* `CACHEDIR.TAG` would agree with each other and be wrong, so the
+tree holds a decoy with the name and not the signature.
+
+**One difference kept deliberately.** borg runs its tag scan against a matcher shared by
+every archive in the run, so one archive's cache directories are excluded from the next.
+borge gives each archive its own copy. For a single archive the two agree; for several,
+borge's answer is the one that can be explained.
+
+### The positional argument meant two different things
+
+`borg recreate` takes **`[PATH ...]` and no archive name**: archives are selected with `-a`,
+and every positional is a path to keep. borge read the first positional as an archive name.
+So the same command line did opposite things, and the dangerous direction is not the obvious
+one:
+
+```
+borge recreate ARCHIVE      keeps the whole archive
+borg  recreate ARCHIVE      recreates EVERY archive in the repository,
+                            keeping only paths matching "ARCHIVE" - which empties them
+```
+
+A borge user's script run once under borg empties the repository's archives. The option gate
+could not see it: it compares options, and this is a positional. It surfaced because a
+differential test passed borg an archive name where borg wanted a path, and the archive came
+back empty — which I first mistook for a data-loss bug in borg.
+
+borge's positionals are paths now, and its archive selector is `-a` alone. Two things went
+with it: five existing tests had been passing the archive name as a positional and each one
+then emptied the archive it was testing — which is exactly what those command lines had been
+doing under borg all along — and the shell completion had been offering **archive names**
+for that positional, so it was completing the argument that empties the archive.
+
+### Status letters, again
+
+`recreate --list` reported `+` for every kept item. borg reports the item's **type**:
+`A` for a regular file, `d` for a directory, `s`, `f`, `b`, `c`, `?` — `file_status(mode)`,
+the same letters `create` uses. Only a dry run prints `+`. So `--filter A` selected nothing
+until this was fixed, which is the second time in two clusters that a status letter borge
+had wrong made a `--filter` useless (see #52).
+
+### What borge still prints that borg does not
+
+A dry run ends with one line — `ARCHIVE: would keep 8 item(s), exclude 3` — where borg
+prints nothing but the per-item lines. Same reasoning as #34: this is the command that
+rewrites archives, and "nothing happened" and "nothing matched" should not look alike.

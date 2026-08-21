@@ -57,6 +57,14 @@ func archiveChunkerParams(t *testing.T, r *borgRepo, name string) string {
 	return fmt.Sprint(doc.Archives[0].ChunkerParams)
 }
 
+// The archive is always named with "-a" here, never as a positional.
+//
+// borg's recreate takes "[PATH ...]" and no archive name, so a positional is a path to
+// keep. These tests passed the archive name as a positional until 2026-08-20, when borge
+// stopped reading it as a selector - and every one of them then emptied the archive it was
+// testing, which is exactly what the same command line had been doing under borg all along.
+// See DIVERGENCES.md #54.
+
 // TestRecreateExcludesPaths is the reason recreate exists: excluding a path from future
 // backups does nothing about the copies already stored.
 func TestRecreateExcludesPaths(t *testing.T) {
@@ -73,7 +81,7 @@ func TestRecreateExcludesPaths(t *testing.T) {
 		t.Fatal("the test tree has no logs to exclude")
 	}
 
-	stdout, stderr, code := r.borge(t, "recreate", "-exclude", "*.log", "-stats", "original")
+	stdout, stderr, code := r.borge(t, "recreate", "-exclude", "*.log", "-stats", "-a", "original")
 	if code != ExitOK {
 		t.Fatalf("recreate: %d\n%s", code, stderr)
 	}
@@ -110,7 +118,7 @@ func TestRecreateRechunks(t *testing.T) {
 
 	// Smaller chunks than the default, so every boundary moves.
 	stdout, stderr, code := r.borge(t, "recreate", "-chunker-params", "fastcdc,16,20,18,4",
-		"-stats", "original")
+		"-stats", "-a", "original")
 	if code != ExitOK {
 		t.Fatalf("recreate: %d\n%s", code, stderr)
 	}
@@ -251,7 +259,7 @@ func TestRecreateRefusesCompressionAlone(t *testing.T) {
 	r, _ := recreateRepo(t)
 
 	before := repoBytes(t, r.path)
-	_, stderr, code := r.borge(t, "recreate", "-C", "zstd,19", "original")
+	_, stderr, code := r.borge(t, "recreate", "-C", "zstd,19", "-a", "original")
 	if code == ExitOK {
 		t.Error("recreate --compression alone succeeded, having done nothing")
 	}
@@ -267,7 +275,7 @@ func TestRecreateRefusesCompressionAlone(t *testing.T) {
 func TestRecreateToTargetKeepsTheOriginal(t *testing.T) {
 	r, _ := recreateRepo(t)
 
-	if _, stderr, code := r.borge(t, "recreate", "-target", "trimmed", "-exclude", "*.log", "original"); code != ExitOK {
+	if _, stderr, code := r.borge(t, "recreate", "-target", "trimmed", "-exclude", "*.log", "-a", "original"); code != ExitOK {
 		t.Fatalf("recreate: %d\n%s", code, stderr)
 	}
 	names := borgArchiveNames(t, r)
@@ -296,7 +304,7 @@ func TestRecreateWithNothingToDoDoesNothing(t *testing.T) {
 	r, _ := recreateRepo(t)
 
 	before := borgArchiveNames(t, r)
-	_, stderr, code := r.borge(t, "recreate", "original")
+	_, stderr, code := r.borge(t, "recreate", "-a", "original")
 	if code != ExitOK {
 		t.Fatalf("recreate exited %d", code)
 	}

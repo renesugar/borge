@@ -42,7 +42,15 @@ func cmdRecreate(e *Env, args []string) int {
 	chunkerParams := fs.String("chunker-params", "", "re-chunk with these parameters")
 	dryRun := fs.Bool("dry-run", false, "say what would happen, change nothing")
 	fs.BoolVar(dryRun, "n", false, "say what would happen, change nothing")
+	excludeCaches := fs.Bool("exclude-caches", false,
+		"drop directories holding a CACHEDIR.TAG with the standard signature")
+	var excludeIfPresent multiFlag
+	fs.Var(&excludeIfPresent, "exclude-if-present",
+		"drop directories holding a file with this name (repeatable)")
+	keepExcludeTags := fs.Bool("keep-exclude-tags", false,
+		"keep the tag files themselves when their directories are dropped")
 	list := fs.Bool("list", false, "print each item as it is processed")
+	statusFilter := fs.String("filter", "", "only list items whose status is one of these characters")
 	stats := fs.Bool("stats", false, "print statistics when finished")
 	fs.BoolVar(stats, "s", false, "print statistics when finished")
 	var timestamp timestampFlag
@@ -100,23 +108,28 @@ func cmdRecreate(e *Env, args []string) int {
 		chunkSeed = uint32(key.ChunkSeed(unlocked.Material))
 	}
 
-	matcher, err := pf.matcher(nil)
+	e.setStatusFilter(*statusFilter)
+
+	// The positional arguments are PATHS, not an archive name.
+	//
+	// borg's recreate takes "[PATH ...]" and nothing else: archives are selected with -a,
+	// and every positional is a path to keep. borge read the first positional as an
+	// archive name instead, so the same command line meant two different things - and the
+	// dangerous direction is not the one you would guess. "borge recreate ARCHIVE" keeps
+	// the whole archive; run under borg, that same line recreates EVERY archive in the
+	// repository keeping only paths matching "ARCHIVE", which empties all of them.
+	//
+	// The option gate could not see this: it compares options, and this is a positional.
+	// Found on 2026-08-20 by passing borg an archive name where it wanted a path and
+	// watching the archive come back empty. See DIVERGENCES.md #54.
+	matcher, err := pf.matcher(fs.Args())
 	if err != nil {
 		return e.fail(err)
-	}
-	// An empty matcher includes everything, so passing it as a filter would make every
-	// recreate look like it has work to do. Only a matcher with patterns counts.
-	var filter func(*item.Item) bool
-	if !matcher.Empty() {
-		filter = func(it *item.Item) bool { return matcher.Match(it.Path) }
 	}
 
 	selector, err := sel.options(e)
 	if err != nil {
 		return e.fail(err)
-	}
-	if selector.Match == nil && fs.NArg() > 0 {
-		selector.Match = []string{fs.Arg(0)}
 	}
 	infos, err := m.Archives.List(selector)
 	if err != nil {
@@ -131,6 +144,11 @@ func cmdRecreate(e *Env, args []string) int {
 		return ExitError
 	}
 
+	tagged := *excludeCaches || len(excludeIfPresent) > 0
+	// Whether there is work to do is decided before the loop, so it has to be asked of the
+	// base matcher: the per-archive tag patterns are added inside it. An empty matcher
+	// includes everything, so only one holding patterns counts as a filter.
+	hasPatterns := !matcher.Empty()
 	opts := archive.RecreateOptions{
 		Timestamp:      timestamp.value(),
 		Target:         *target,
@@ -138,9 +156,11 @@ func cmdRecreate(e *Env, args []string) int {
 		ChunkerParams:  params,
 		ChunkSeed:      chunkSeed,
 		Compressor:     compressor,
-		Filter:         filter,
 		DeleteOriginal: *target == "",
 		DryRun:         *dryRun,
+		// Tag exclusion counts as work even with no patterns: it is the option that adds
+		// them, one archive at a time.
+		ExcludesByTag: tagged || hasPatterns,
 	}
 	// --compression on its own would appear to work and do nothing. A chunk's id is the
 	// hash of its plaintext, so a recompressed chunk has the same id, and every path that
@@ -167,6 +187,30 @@ func cmdRecreate(e *Env, args []string) int {
 	}
 
 	for _, info := range infos {
+		// The tag scan is per archive, as borg's is - the tagged directories of one
+		// archive are not the tagged directories of another. borg shares one matcher
+		// across every archive in the run, so its patterns accumulate; borge gives each
+		// archive its own copy of the pattern set, which is the same answer for a single
+		// archive and a defensible one for several. See DIVERGENCES.md #54.
+		archiveMatcher := matcher
+		if tagged {
+			a, err := archive.Open(m, info.ID)
+			if err != nil {
+				return e.fail(fmt.Errorf("%s: %w", info.Name, err))
+			}
+			archiveMatcher = matcher.Clone()
+			if err := archive.AddTaggedDirs(a, archiveMatcher, *excludeCaches,
+				excludeIfPresent, *keepExcludeTags); err != nil {
+				return e.fail(fmt.Errorf("%s: %w", info.Name, err))
+			}
+		}
+		// An empty matcher includes everything, so passing it as a filter would make every
+		// recreate look like it has work to do. Only a matcher with patterns counts.
+		opts.Filter = nil
+		if !archiveMatcher.Empty() {
+			opts.Filter = func(it *item.Item) bool { return archiveMatcher.Match(it.Path) }
+		}
+
 		result, newID, err := archive.Recreate(m, info.ID, opts)
 		if err != nil {
 			return e.fail(fmt.Errorf("%s: %w", info.Name, err))

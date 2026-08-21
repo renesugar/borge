@@ -247,6 +247,26 @@ func NewMatcher(fallback bool) *Matcher {
 // Empty reports whether the matcher holds no patterns.
 func (m *Matcher) Empty() bool { return len(m.entries) == 0 && len(m.fullPaths) == 0 }
 
+// Clone returns a copy that can be added to without affecting the original.
+//
+// recreate needs one: the tagged directories it finds belong to the archive it found them
+// in, and adding them to a matcher shared across several archives would carry one archive's
+// caches into the next. borg shares the matcher and accumulates; see DIVERGENCES.md #54.
+func (m *Matcher) Clone() *Matcher {
+	out := &Matcher{
+		entries:           append([]entry(nil), m.entries...),
+		fullPaths:         make(map[string]Command, len(m.fullPaths)),
+		Fallback:          m.Fallback,
+		RecurseDirDefault: m.RecurseDirDefault,
+		recurseDir:        m.recurseDir,
+		includePatterns:   append([]Pattern(nil), m.includePatterns...),
+	}
+	for k, v := range m.fullPaths {
+		out.fullPaths[k] = v
+	}
+	return out
+}
+
 // Add appends a pattern.
 func (m *Matcher) Add(p Pattern, cmd Command) {
 	// A full-path pattern goes into the map instead of the list. borg does the same, and

@@ -65,6 +65,13 @@ type RecreateOptions struct {
 	Compressor compress.Compressor
 
 	// Filter selects which items survive. Nil keeps everything.
+	//
+	// Nil is not "match nothing", and that distinction is where borg loses data: its
+	// recreate builds a PatternMatcher whose fallback is None, so with no --pattern given
+	// every item fails the match and the recreated archive is EMPTY. Measured at the
+	// pinned commit - "borg recreate --chunker-params fixed,4096 ARCHIVE" and even
+	// "borg recreate --comment hi ARCHIVE" leave nothing behind. borge keeps everything a
+	// filter does not exclude. See DIVERGENCES.md #54.
 	Filter func(*item.Item) bool
 
 	// DeleteOriginal soft-deletes the source archive when the new one is written.
@@ -72,7 +79,18 @@ type RecreateOptions struct {
 	// DryRun reports what would happen and writes nothing.
 	DryRun bool
 
-	// OnItem is called for each item, with a status character: "+" kept, "-" excluded.
+	// ExcludesByTag says the caller has applied --exclude-caches or --exclude-if-present.
+	// It only affects NeedsWork: those options can produce an empty pattern set for an
+	// archive that holds no tag files, and a recreate asked to do that has still been
+	// asked to do something.
+	ExcludesByTag bool
+
+	// OnItem is called for each item, with borg's status character: "-" for an excluded
+	// item, "+" for one kept by a dry run, and the item's *type* letter for one actually
+	// rewritten - "A" for a regular file, "d" for a directory, "s", "f", "b", "c" or "?".
+	//
+	// borge reported "+" for every kept item, whatever it was, so "recreate --list" said
+	// nothing about what each item is and "--filter A" selected nothing.
 	OnItem func(status byte, path string)
 }
 
@@ -91,7 +109,8 @@ type RecreateStats struct {
 // A recreate that changes nothing still costs a full rewrite of the archive's metadata and
 // a new archive object, so it is worth not doing.
 func (o RecreateOptions) NeedsWork() bool {
-	return o.Filter != nil || o.ChunkerParams != nil || o.Compressor != nil || o.Comment != nil
+	return o.Filter != nil || o.ChunkerParams != nil || o.Compressor != nil ||
+		o.Comment != nil || o.ExcludesByTag
 }
 
 // Recreate writes a new archive from an existing one.
@@ -146,10 +165,13 @@ func Recreate(m *manifest.Manifest, id []byte, opts RecreateOptions) (*RecreateS
 			return nil
 		}
 		stats.ItemsKept++
-		report('+', it.Path)
 		if opts.DryRun {
+			// borg's dry run says "included" and stops; only a real rewrite reports what
+			// the item is.
+			report('+', it.Path)
 			return nil
 		}
+		report(itemStatusLetter(it), it.Path)
 
 		if it.ChunksSet && len(it.Chunks) > 0 && (rechunk || recompress) {
 			chunks, err := rewriteContent(a, b, it, rechunk, stats)
@@ -357,4 +379,27 @@ func paramsFromList(list []any) (chunker.Params, bool) {
 	default:
 		return chunker.Params{}, false
 	}
+}
+
+// itemStatusLetter is borg's file_status(mode): what kind of thing an item is.
+//
+// The same letters create uses for the things it archives, which is what makes
+// "recreate --list --filter d" mean the same as "create --list --filter d".
+func itemStatusLetter(it *item.Item) byte {
+	mode := it.ModeOr(0)
+	switch {
+	case item.IsRegular(mode):
+		return 'A'
+	case item.IsDir(mode):
+		return 'd'
+	case item.IsSymlink(mode):
+		return 's'
+	case mode&item.SIFMT == item.SIFBLK:
+		return 'b'
+	case mode&item.SIFMT == item.SIFCHR:
+		return 'c'
+	case mode&item.SIFMT == item.SIFIFO:
+		return 'f'
+	}
+	return '?'
 }
