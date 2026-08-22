@@ -245,8 +245,21 @@ organised so that an interruption is cheap:
 1. **One task at a time.** A task is finished when it builds, its tests pass, and it
    is committed. The tree is never left broken across a stop.
 2. **Git from the first commit.** Plan, docs and code in one repository at
-   `/home/renes/projects/borge`. Branch per stage (`stage-3-repository`), squash-merge
-   to `main` at the stage gate with the evidence bundle named in the merge commit.
+   `/home/renes/projects/borge`.
+
+   *Corrected 2026-08-22.* This item used to say "branch per stage
+   (`stage-3-repository`), squash-merge to `main` at the stage gate". None of that ever
+   happened: the work was 103 linear commits on `master`, and no `main` branch existed
+   at all. A working method nobody follows is worse than none, because it is read as a
+   description of the repository. The model from here, settled before the project goes
+   to GitHub:
+
+   - **`main`** holds released states. It is what a tag points into, and it is only
+     advanced by merging.
+   - **`develop`** is where work lands. Commits go here; `main` takes them by pull
+     request on GitHub, so that the merge is reviewable rather than a local fast-forward.
+   - The stage's evidence bundle is named in the merge that brings the stage into
+     `main`, and in the tag (see §2.4).
 3. **Every stage has an explicit gate.** The gate is a command that either passes or
    fails. No stage is "done" on inspection.
 4. **Evidence bundle per stage.** On passing a gate:
@@ -616,6 +629,59 @@ answered; asking to change one has not. borg exits 0 for both, so this is a deli
 divergence and the only one §2.3 has produced so far.
 
 ---
+
+### 2.4 Version tags — what each one claims
+
+A tag is a claim about a tree, and the claim has to be checkable. Each of these is cut only
+when the stage's evidence bundle is **clean**, and its message names that bundle and the
+bundle's sha256, so a reader can pair the tag with the evidence without being there.
+
+| Tag | Cut at | What it claims |
+| --- | --- | --- |
+| `v0.8.0` | stage 8's gate | The borg-compatible feature set: 33 of borg's 36 commands, every remote backend, both evidence gates at zero unexplained gaps, and the interoperability gate green in both directions. The three commands not implemented — `mount`, `umount`, `webdav` — are §0.6 non-goals, not shortfalls |
+| `v0.9.0` | stage 9's gate | Performance work only (§12). No format change, no interface change: a repository written by 0.9.0 is one 0.8.0 and borg both read. The claim rests on the baseline numbers in the bundle, so the bundle must carry benchmark JSON |
+| `v1.0.0` | stage 10's gate | The first version that may write something borg cannot read (§13). **A tag is not enough to make this safe** — see below |
+
+**Rules that apply to all of them.**
+
+- **Annotated, never lightweight.** The message carries the evidence bundle's file name and
+  sha256, and the commit the bundle was built at if the tag is not on it.
+- **The tag points at the tree the evidence describes.** Where documentation about the
+  release lands after the bundle was built, the tag may sit on that later commit, and the
+  message says which commit the bundle used and what changed since — which must be
+  documentation only, checkable with one `git diff`.
+- **The binary reports it.** `VERSION` comes from `git describe --tags --always --dirty`,
+  so `borge --version` says `v0.8.0` on the tag and `v0.8.0-12-gabcdef-dirty` off it. A
+  release the tool cannot identify is one no bug report can name.
+- **Patch tags** (`v0.8.1`) for fixes to a tagged line; they need a bundle too, and the
+  bundle may be a subset run when the fix's blast radius is small enough to state.
+- **Before 1.0.0, semver's 0.x rule applies**: no interface stability is promised, and the
+  plan's §0.6 non-goals are not promises to keep either.
+
+**Why `v1.0.0` needs more than a tag.** If stage 10 changes the format, a version number in
+git protects nobody: the *repository* has to announce it. Both tools refuse a repository
+whose stored version they do not know — borge's own message is `repository version %d is not
+supported` — so a format change must bump `config/version`, and that refusal must be
+**measured against borg** rather than assumed. Without it, borg meets what looks like a
+version 4 repository and fails somewhere worse than at the door.
+
+**Open questions, to be settled before `v1.0.0` is cut** (not now, but not silently either):
+
+1. **Does 1.0.0 still read format 4?** Recommendation: yes. Writing a new format while
+   keeping the old one readable is what makes an upgrade path exist at all.
+2. **Is the new format the default, or opt-in for a release?** Opt-in costs a flag and
+   buys the ability to change one's mind; default-on makes the break sharp and legible.
+3. **What does borg actually do** when it meets the new version — a clean refusal, or
+   something worse? §13 must answer this with a measurement, in both directions, before
+   the format lands.
+4. **Where do the evidence bundles live once the project is on GitHub?** They are outside
+   the repository today (`/home/renes/evidence/borge`) and are not in git. Either they
+   become release assets, or the tag's sha256 is the only link between a claim and its
+   evidence — which is enough to *verify* a bundle somebody has, and no help to somebody
+   who has none.
+5. **Are tags signed?** Unsigned tags are fine for a local repository and weak once a
+   project is public and its releases are backups people trust. Needs a key decision, not
+   a code decision.
 
 ## 3. Stage 0 — foundation
 
