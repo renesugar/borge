@@ -3,7 +3,10 @@
 SHELL       := /usr/bin/env bash
 MODULE      := github.com/renesugar/borge
 BIN         := bin/borge
-VERSION     ?= dev
+# From the tag, so a build can name itself: "v0.8.0" on the tag, "v0.8.0-12-gabcdef" off
+# it, "-dirty" with uncommitted changes, and the bare commit before the first tag. A
+# release the tool cannot identify is one no bug report can name (PORTING_PLAN §2.4).
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -X $(MODULE)/internal/version.Version=$(VERSION)
 
 # The pinned borg 2 reference interpreter; see tests/borg2/setup.sh.

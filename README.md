@@ -27,13 +27,26 @@ BSD licenses is in [`docs/LICENSING.md`](docs/LICENSING.md).
 
 ## Status
 
-Early. Nothing works yet. The staged plan, its acceptance gates and its current
-position are in [`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md).
+**Pre-release, and interoperable.** `v0.8.0` (2026-08-22) implements 33 of borg's 36
+commands and every repository backend borg has: local paths, `sftp:`, `s3:`/`b2:`,
+`rclone:`, and `rest://` served by `borge serve --rest`. The three commands that are
+missing — `mount`, `umount`, `webdav` — are deliberate non-goals, not gaps.
 
 The port targets the **borg 2.x repository format** (repository version 4), pinned to
 the upstream commit recorded in `docs/PORTING_PLAN.md`. Correctness is defined as
 bidirectional interoperability with that borg: an archive written by borg must restore
-identically with borge, and vice versa.
+identically with borge, and vice versa. That is a test suite rather than an intention —
+both tools write into one repository, over each backend, and each reads what the other
+wrote.
+
+**What "pre-release" means here.** No interface stability is promised before `v1.0.0`,
+performance work has not been done (stage 9), and borg 1.x repositories are not read at
+all. Differences from borg that are deliberate — and the ones that were bugs until they
+were found — are written down one by one in [`docs/DIVERGENCES.md`](docs/DIVERGENCES.md).
+
+Every stage gate has an evidence bundle: the commit, the full test log, the coverage
+gates, the pinned borg version and a sha256 manifest, named in the stage's row in
+[`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md) and in the release tag.
 
 ## Why
 

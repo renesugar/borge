@@ -1,6 +1,6 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-7 complete — the interoperability gate is green. Stage 8 in progress: `compact`, `check` (including `--repair`), `diff`, `export-tar`, `import-tar`, `prune`, `recreate`, `repo-compress`, `find`, `break-lock`, `with-lock`, `version`, `analyze`, `repo-space`, `debug *`, `benchmark`, `completion`, `key`, `repo-delete` and `help` done: **33 of borg's 36 commands**, with `tests/evidence/command-coverage.sh` as the gate. `transfer` (borg 2 to borg 2) done 2026-08-20. `serve` (its `--rest` mode) done 2026-08-21. The remote backends are all done (§11.5, 2026-08-21). What remains: the stage's evidence bundle. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified.** `mount`/`umount`/`webdav` are §0.6 non-goals.**
+Status: **Stages 0-8 complete.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified** - the work itself is not started. Stage 10 (format changes) is not started; §2.4 records what a `v1.0.0` tag would have to be accompanied by.**
 Last updated: 2026-08-17.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
@@ -1801,7 +1801,7 @@ a table at all.
 | 12 | ~~`--format` on `check` and `diff`~~ | §11.3 | **done 2026-08-19.** `check` formats with the archive key set and now announces each archive as borg does; `diff` needed the third key set, and matching borg's renderings turned its whole text output into borg's |
 | 13 | ~~Progress output on stderr, where borg puts it~~ | measured 2026-08-19 | **done.** `check`, `compact`, `repo-compress`, `break-lock`, `recreate`, `repo-create` and `extract --list` moved; `analyze`, `repo-space`, `repo-info`, `list` and `info` were already right, because their output *is* the data |
 | 14 | ~~`debug convert-profile`~~ | DIVERGENCES #14 | **done 2026-08-20.** msgpack in, CPython `marshal` out; compared against borg as loaded objects, since borg's bytes record CPython's refcounts. Neither gate could see it was missing — that is fixed too |
-| 15 | **Stage 8 evidence bundle** | §11 | last, and only once rows 1–14 are closed |
+| ~~15~~ | ~~**Stage 8 evidence bundle**~~ | §11 | **done 2026-08-22.** `borge-stage-8-20260822T003631Z.zip`, built at `50bef75` with a clean tree: both coverage gates inside the bundle, every package `ok` in the full pass and in the race pass, borg's pinned commit verified against the checkout. The *first* build of it was not clean, and that is what a bundle is for - its race pass caught a diagnostic that arrived only when the timing suited it (DIVERGENCES #59) |
 
 Closed since this section was first written, kept here because how each was *found* is
 worth more than the fix: argument permutation (#20), relative source paths (#21), the
@@ -3260,7 +3260,7 @@ than no tracker: it is the document a new reader trusts first.
 | 5 | Read path: manifest, archive, extract | **done** 2026-08-17 | `borge-stage-5-20260817T032303Z.zip` |
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
-| 8 | Remaining commands + remote backends | **in progress** — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`, so the command gate has no gaps left. Of the fifteen items tabled in §11 under "What stage 8 still owes", **only row 15 is open**: the stage's evidence bundle | not yet bundled, and not to be bundled until that table is empty but for its last row |
+| 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
