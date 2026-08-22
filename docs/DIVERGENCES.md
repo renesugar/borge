@@ -2676,6 +2676,16 @@ and the test for it asserts on the bytes of the response rather than on a round 
 round-trip test passes with the requirement violated, which is what the first version of it
 did.
 
+**The server's last words, which arrived only sometimes.** When a `rest://` server fails to
+start, the only thing that explains the failure is what it wrote to stderr - the client
+itself sees "the connection closed". That message was being read out of a buffer that
+`os/exec` fills from a goroutine of its own, joined only by `Wait`, so whether the
+explanation was there depended on whether the copy had happened yet. It usually had; under
+`-race`, which is where the stage 8 evidence bundle caught it, it usually had not. The
+stderr is now read through a pipe this file owns, and the message waits (briefly, and with a
+bound) for it to reach EOF. A diagnostic that is present on a fast machine and absent on a
+slow one is worse than none, because the absence looks like the server having said nothing.
+
 **Three directions, and how each tool is made to start the other.** Neither tool has an
 option for "serve with that program", but both build the same command for a `rest://` URL
 with a host: a remote shell, then `$BORG_REMOTE_PATH`, then `serve --rest --backend FILE:…`

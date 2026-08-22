@@ -44,6 +44,9 @@ import (
 const (
 	sshAliveInterval = 30
 	sshAliveCountMax = 3
+
+	// serverSaidWait bounds how long an error message waits for the server's stderr.
+	serverSaidWait = 2 * time.Second
 )
 
 // stdioTransport is one running server process and the pipes to it.
@@ -54,8 +57,10 @@ type stdioTransport struct {
 	closer io.Closer
 
 	// stderr is kept because it is where the server says why it failed: an error the
-	// client sees as "the connection closed" is usually explained there.
-	stderr *tailBuffer
+	// client sees as "the connection closed" is usually explained there. drained closes
+	// when the server's stderr has reached EOF, so a message can wait for it.
+	stderr  *tailBuffer
+	drained chan struct{}
 
 	// mu serialises requests. One pipe pair carries one conversation, so two callers
 	// writing at once would interleave two requests into one stream.
@@ -78,8 +83,16 @@ func newStdioTransport(command []string, extraEnv []string) (*stdioTransport, er
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
+	// Read with a pipe of our own rather than by handing exec a writer. exec's copier is
+	// joined only by Wait, so an error raised before Wait could format its message before
+	// the server's last words had been copied anywhere - which is how the one message
+	// that explains a failed connection came and went depending on timing. With a pipe,
+	// "the stderr is complete" is a channel that can be waited on.
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
 	stderr := &tailBuffer{limit: 10}
-	cmd.Stderr = stderr
 	// Its own process group, so that a Ctrl-C at a terminal does not tear the server down
 	// underneath a request this end is still waiting for - and Pdeathsig, so a borge that
 	// is killed outright does not leave it running.
@@ -87,13 +100,19 @@ func newStdioTransport(command []string, extraEnv []string) (*stdioTransport, er
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("store: could not start %q: %w", strings.Join(command, " "), err)
 	}
-	return &stdioTransport{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
-		closer: stdout,
-		stderr: stderr,
-	}, nil
+	t := &stdioTransport{
+		cmd:     cmd,
+		stdin:   stdin,
+		stdout:  bufio.NewReader(stdout),
+		closer:  stdout,
+		stderr:  stderr,
+		drained: make(chan struct{}),
+	}
+	go func() {
+		_, _ = io.Copy(stderr, stderrPipe)
+		close(t.drained)
+	}()
+	return t, nil
 }
 
 // roundTrip writes one request and reads its response.
@@ -117,7 +136,15 @@ func (t *stdioTransport) roundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // serverSaid is the last few lines the server wrote to stderr, for an error message.
+//
+// It waits, briefly, for the stderr to be complete. A server that failed has usually
+// already exited, so its pipe is at EOF and this returns at once; the bound is there for
+// the case where it has not, because an error message is not worth hanging for.
 func (t *stdioTransport) serverSaid() string {
+	select {
+	case <-t.drained:
+	case <-time.After(serverSaidWait):
+	}
 	lines := t.stderr.lines()
 	if len(lines) == 0 {
 		return ""
@@ -130,7 +157,11 @@ func (t *stdioTransport) Close() error {
 	t.closeOnce.Do(func() {
 		closeErr := t.stdin.Close()
 		done := make(chan error, 1)
-		go func() { done <- t.cmd.Wait() }()
+		go func() {
+			// The stderr pipe has to be read to the end before Wait, which closes it.
+			<-t.drained
+			done <- t.cmd.Wait()
+		}()
 		select {
 		case err := <-done:
 			if err != nil {
