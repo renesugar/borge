@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "project": "borge",
+  "catalogued_utc": "2026-08-25T02:08:01Z",
+  "integrity_algorithm": "sha256",
+  "default_local_directory": "/home/renes/evidence/borge",
+  "attestation": {
+    "status": "retrospective-unsigned",
+    "detached_signature_filename": null,
+    "rfc3161_timestamp_filename": null,
+    "note": "These historical ZIPs were catalogued after their stage runs. No detached signatures or RFC 3161 tokens existed at stage completion."
+  },
+  "artifacts": [
+    {
+      "filename": "borge-stage-0-20260816T163704Z.zip",
+      "size_bytes": 5680,
+      "sha256": "7940f8fcbee72b8e04f3eefbf135f0fdadfdc66a11c78248fc6c308618dfd5e1",
+      "stage_id": "stage-0",
+      "created_utc": "2026-08-16T16:37:04Z",
+      "git_commit": "f4b8fec4cab853c7e5a42af1285c9cf90f8da562",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-1.1-20260816T165938Z.zip",
+      "size_bytes": 13181,
+      "sha256": "c2b7e51d7b9617393b87ed2304b23b3f30d5a31d94bec0044b18187ed4a63d4e",
+      "stage_id": "stage-1.1",
+      "created_utc": "2026-08-16T16:59:38Z",
+      "git_commit": "b13bc7e5b96464ca139d391d2e51030e26cc06a4",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-1.2-20260816T174317Z.zip",
+      "size_bytes": 68578,
+      "sha256": "175140a43250b872ac10047f67b1d216f342212c3f46c547b841c10ad564e492",
+      "stage_id": "stage-1.2",
+      "created_utc": "2026-08-16T17:43:17Z",
+      "git_commit": "f30e50128ef294eec727076757baa7abeb8f7ed3",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-1.3-20260816T180131Z.zip",
+      "size_bytes": 92133,
+      "sha256": "e704300d0a0e7df74c0534341af6ed1907098e736f85c63fc0dd181c420d67f2",
+      "stage_id": "stage-1.3",
+      "created_utc": "2026-08-16T18:01:31Z",
+      "git_commit": "1fd2f81220605a15062e690df399d4a907c79665",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-1.4-20260816T181742Z.zip",
+      "size_bytes": 102258,
+      "sha256": "fdb48d45ad7c670643480740dad0c1b01b226a75e2dd09e51f4c1ee77786ba66",
+      "stage_id": "stage-1.4",
+      "created_utc": "2026-08-16T18:17:42Z",
+      "git_commit": "08c680658378080f79532c4f03955919406bbefc",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-1.5-20260816T205237Z.zip",
+      "size_bytes": 106501,
+      "sha256": "2277a93951b1dae344637562f94592af6a8ff2a82d5fcfa809be726066a9d953",
+      "stage_id": "stage-1.5",
+      "created_utc": "2026-08-16T20:52:37Z",
+      "git_commit": "371c206747918869c07d987da8006dd3ebfc60b5",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-1.6-20260816T210540Z.zip",
+      "size_bytes": 109623,
+      "sha256": "5b6b67b431d4b4f80a3704ea4f5f9e12311c454c227a516236c2dc947376c269",
+      "stage_id": "stage-1.6",
+      "created_utc": "2026-08-16T21:05:40Z",
+      "git_commit": "704f98ac4b63c52295aca8ec121b17467b0909a9",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-2-20260816T212000Z.zip",
+      "size_bytes": 113817,
+      "sha256": "919a6f08a77644a4d21a166875ddc81f42904ba6449a85ddd50df16cb12248f8",
+      "stage_id": "stage-2",
+      "created_utc": "2026-08-16T21:20:00Z",
+      "git_commit": "a8e7dd2a51e503157fb038f30c64446c45a81423",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-2-googledrive-20260816T212637Z.zip",
+      "size_bytes": 113290,
+      "sha256": "e3263398f039fd7b15c4ac9e4c614995f9e158026a7b2e5cd20d0572b41b6e94",
+      "stage_id": "stage-2-googledrive",
+      "created_utc": "2026-08-16T21:26:37Z",
+      "git_commit": "f92a8996db70381695e929c69af34e6563663582",
+      "tree_clean": true,
+      "disposition": "supplemental"
+    },
+    {
+      "filename": "borge-stage-3-20260816T215557Z.zip",
+      "size_bytes": 191278,
+      "sha256": "b50b71353dbf413817f237a3abdfab8e1b04c895693eb99c4505f33742a62594",
+      "stage_id": "stage-3",
+      "created_utc": "2026-08-16T21:55:57Z",
+      "git_commit": "621e6ea696c56fb3114c9ab31cc62c1a93f27978",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-4-20260817T021409Z.zip",
+      "size_bytes": 208935,
+      "sha256": "ddb0674e6abb973c0641a9d76c23dcded665fb5ffd70ca96d612f055f4f0560f",
+      "stage_id": "stage-4",
+      "created_utc": "2026-08-17T02:14:09Z",
+      "git_commit": "fff9d287cd247d06268894b756278e9515cb4b31",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-5-20260817T032303Z.zip",
+      "size_bytes": 225698,
+      "sha256": "f1b9e75acc2ee88a6a0db6b1037ec45c1f7c0af52f5ca09518f4c62c5ea1c9cb",
+      "stage_id": "stage-5",
+      "created_utc": "2026-08-17T03:23:03Z",
+      "git_commit": "64a3f8d661efc1d217c5cd5fb050fa6bdfc087c0",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-6-20260817T071719Z.zip",
+      "size_bytes": 222839,
+      "sha256": "5df16bbae511c1ed81db7dea18b7b43efe20a8ad82dfb111cd07c4df199ec2fc",
+      "stage_id": "stage-6",
+      "created_utc": "2026-08-17T07:17:19Z",
+      "git_commit": "673e7f6d55f8bd9dcd898e8fd3bf8545a709f1ac",
+      "tree_clean": true,
+      "disposition": "canonical"
+    },
+    {
+      "filename": "borge-stage-7-20260817T085724Z.zip",
+      "size_bytes": 232672,
+      "sha256": "f221ad5e057b27881e3b0a831c9c56bbe79481a5516273184df3f4e2aad015fe",
+      "stage_id": "stage-7",
+      "created_utc": "2026-08-17T08:57:24Z",
+      "git_commit": "5903d92b8a9a330eeed9160fa082a00bd12602e9",
+      "tree_clean": true,
+      "disposition": "superseded-failed",
+      "note": "Recorded a false ENOSPC failure after /tmp filled; retained as part of the chronology."
+    },
+    {
+      "filename": "borge-stage-7-rerun-20260817T120120Z.zip",
+      "size_bytes": 226706,
+      "sha256": "89cd7de25e27099f695ddae7c9ec4a4b967b6d6828c8d20d609a18eda06ff647",
+      "stage_id": "stage-7-rerun",
+      "created_utc": "2026-08-17T12:01:20Z",
+      "git_commit": "e01386e9631a1b70c22756677157159ad86f3751",
+      "tree_clean": true,
+      "disposition": "superseded-failed",
+      "note": "Recorded a false build failure after a Go edit landed during the run; retained as part of the chronology."
+    },
+    {
+      "filename": "borge-stage-7-clean-20260817T192652Z.zip",
+      "size_bytes": 247019,
+      "sha256": "e72cfda2cba535cb6615f7388c33896a88a2e51c9216d668e534ae7ce4b3bd3f",
+      "stage_id": "stage-7-clean",
+      "created_utc": "2026-08-17T19:26:52Z",
+      "git_commit": "ad7396a9cd9bf800f8da23ea4b764975adef74eb",
+      "tree_clean": true,
+      "disposition": "canonical",
+      "note": "The clean stage-7 bundle cited by PORTING_PLAN.md."
+    },
+    {
+      "filename": "borge-stage-8-20260821T222608Z.zip",
+      "size_bytes": 300420,
+      "sha256": "1d42a3c3ce11560306868e18ffde999198b613955cee4643457a1004b64a859d",
+      "stage_id": "stage-8",
+      "created_utc": "2026-08-21T22:26:08Z",
+      "git_commit": "39f279e6de642f9fdd3012d48ac4557aab9f0862",
+      "tree_clean": true,
+      "disposition": "superseded-failed",
+      "note": "The race pass exposed TestRESTStdioReportsWhatTheServerSaid; retained as the failed first stage-8 gate."
+    },
+    {
+      "filename": "borge-stage-8-20260822T003631Z.zip",
+      "size_bytes": 302464,
+      "sha256": "a7af6360bfb7a5ae1f9a4f8671308fa4ac5c5c9df340ac3913146525fcac5757",
+      "stage_id": "stage-8",
+      "created_utc": "2026-08-22T00:36:31Z",
+      "git_commit": "50bef75e40debc759366f05dade7946d7fdb49b8",
+      "tree_clean": true,
+      "disposition": "canonical",
+      "note": "The clean stage-8 bundle cited by v0.8.0 and PORTING_PLAN.md."
+    }
+  ]
+}

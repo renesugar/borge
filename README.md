@@ -63,4 +63,6 @@ Three things motivated the port, in priority order:
 ## Documentation
 
 - [`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md) — the staged plan and its gates
+- [`ROADMAP.md`](ROADMAP.md) — documentation, evidence preservation, and the future GUI
+- [`docs/EVIDENCE.md`](docs/EVIDENCE.md) — evidence catalog, ISO workflow, and limitations
 - [`docs/LICENSING.md`](docs/LICENSING.md) — license compatibility analysis

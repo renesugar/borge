@@ -1,7 +1,7 @@
 # borge — plan for porting `borg` to Go
 
 Status: **Stages 0-8 complete.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified** - the work itself is not started. Stage 10 (format changes) is not started; §2.4 records what a `v1.0.0` tag would have to be accompanied by.**
-Last updated: 2026-08-17.
+Last updated: 2026-08-24.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
 the repo, and on the working habits that have actually caught bugs here. Read it before
@@ -284,6 +284,12 @@ organised so that an interruption is cheap:
    starting the next one.
 
 ### 2.1 Doc anchors: tying help text to the code that implements it
+
+**Tracking moved 2026-08-24.** The design and the stage-8 findings stay here because they
+came out of the port. The unfinished implementation is non-porting documentation work and
+is now tracked in [`ROADMAP.md`](../ROADMAP.md) R2. The two documents must not maintain
+independent completion counts; the roadmap is the current tracker for the seven work items
+below.
 
 **The problem this solves.** Four documentation claims went false during stage 8 while the
 code around them was correct: the placeholders topic (twice, in opposite directions), the
@@ -674,14 +680,53 @@ version 4 repository and fails somewhere worse than at the door.
 3. **What does borg actually do** when it meets the new version — a clean refusal, or
    something worse? §13 must answer this with a measurement, in both directions, before
    the format lands.
-4. **Where do the evidence bundles live once the project is on GitHub?** They are outside
-   the repository today (`/home/renes/evidence/borge`) and are not in git. Either they
-   become release assets, or the tag's sha256 is the only link between a claim and its
-   evidence — which is enough to *verify* a bundle somebody has, and no help to somebody
-   who has none.
-5. **Are tags signed?** Unsigned tags are fine for a local repository and weak once a
-   project is public and its releases are backups people trust. Needs a key decision, not
-   a code decision.
+4. ~~**Where do the evidence bundles live once the project is on GitHub?**~~ **Partly
+   settled 2026-08-24.** The ZIPs remain outside git at
+   `/home/renes/evidence/borge`; every one, including failed superseded runs, is inventoried
+   by SHA-256 in `evidence/manifest.json`. A reserve ISO master on
+   `/media/renes/SEAGATE2TB` carries those ZIPs and a Git bundle of `v0.8.0` plus its
+   complete reachable history, so the commits they name are preserved before the first
+   GitHub push. That is preservation, not public availability: release assets or immutable
+   object storage remain a ROADMAP R1 item.
+5. ~~**Are tags signed?**~~ **Decision still required before the next release, but the
+   historical claim is settled.** No signing key is configured and the stage 0-8 ZIPs have
+   no contemporaneous signatures or RFC 3161 tokens. They are catalogued honestly as
+   retrospective and unsigned; generating a fresh anonymous key would add ceremony, not
+   identity. ROADMAP R1 owns the persistent-key and TSA-policy decision.
+
+### 2.5 Evidence preservation and optical masters — added 2026-08-24
+
+The stage bundles are evidence of engineering work and test results, **not evidence of a
+strict clean-room firewall**. This port read and translated borg source under its BSD
+license; `LICENSING.md` says so. Hashes demonstrate byte identity, signatures identify a
+key subject to key custody, and an RFC 3161 token binds a TSA assertion to a message
+imprint. None proves by itself that a test result is true or makes an artifact legally
+admissible. [`docs/EVIDENCE.md`](EVIDENCE.md) records the scope and authoritative sources.
+
+The preservation set created before the first GitHub push has three layers:
+
+1. `evidence/manifest.json` is checked into git and inventories all 18 historical ZIPs by
+   SHA-256, size, stage, commit, UTC creation time and disposition. Failed stage-7 and
+   stage-8 runs stay in the catalog; the clean successors are marked canonical.
+2. `scripts/verify-evidence.py` checks the outer bytes, ZIP CRCs, each internal manifest,
+   and `PROVENANCE.txt`. It rejects an unlisted ZIP by default, because an artifact that
+   falls between the directory and the catalog is exactly what the archive must expose.
+3. `scripts/build-evidence-isos.sh` creates a CD-sized ISO 9660/Rock Ridge master
+   containing the ZIPs, catalog, documentation and a Git bundle of the `v0.8.0` release
+   ref. It fixes image timestamps, extracts the finished ISO, verifies every payload hash,
+   and writes the ISO's own SHA-256 beside it. The sidecar is necessarily outside the image
+   whose bytes it hashes.
+
+The current collection is about 3 MB and fits one CD easily. The builder uses a
+650,000,000-byte ceiling and refuses an oversized collection; ZIPs are never split. When a
+future collection approaches the ceiling, partition it into numbered volumes and put the
+catalog plus Git bundle on each volume while they still fit.
+
+**What was not done at the original stage gates:** no historical ZIP has a detached
+signature or RFC 3161 token, and no claim to a contemporaneous attestation is made. The ISO
+timestamp is the date of preservation, not the date the tests ran. Physical CD-R copies,
+independent-location storage, burn/readback logs, signing identity, TSA policy, and public
+artifact hosting remain in ROADMAP R1.
 
 ## 3. Stage 0 — foundation
 
@@ -3264,6 +3309,7 @@ than no tracker: it is the document a new reader trusts first.
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
+| — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalog and ISO workflow implemented** 2026-08-24; first reserve master must be built and its SHA-256 recorded before the first GitHub push | `evidence/manifest.json`; ISO kept outside git |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see

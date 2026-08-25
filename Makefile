@@ -19,7 +19,8 @@ BORG2       := tests/borg2/borg2
 TIMEOUT     ?= -timeout 60m
 
 .PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage \
-        borg2 upstream-licenses msgpack-fixtures item-fixtures evidence clean help
+        borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
+        evidence-verify evidence-isos clean help
 
 all: check
 
@@ -130,6 +131,14 @@ option-coverage: build
 evidence:
 	@if [ -z "$(STAGE)" ]; then echo "usage: make evidence STAGE=stage-N"; exit 64; fi
 	./tests/evidence/mkbundle.sh $(STAGE)
+
+## evidence-verify: verify external evidence ZIPs against evidence/manifest.json
+evidence-verify:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 scripts/verify-evidence.py
+
+## evidence-isos: build and read back the reserve evidence ISO master
+evidence-isos:
+	./scripts/build-evidence-isos.sh
 
 ## clean: remove build and test output
 clean:
