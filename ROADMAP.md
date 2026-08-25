@@ -7,7 +7,7 @@ This file owns work that matters to the product but is not a porting stage.
 
 ### R1. Preserve the pre-GitHub evidence record
 
-State: **workflow implemented 2026-08-24; first ISO master to be verified before the first
+State: **first reserve ISO master built and verified 2026-08-25 UTC, before the first
 GitHub push.**
 
 - [x] Inventory all 18 stage ZIPs, including failed and superseded runs, in
@@ -17,8 +17,12 @@ GitHub push.**
 - [x] Add a reproducible ISO builder that includes the ZIPs, the catalog, and a complete
   Git bundle, then performs an extracted readback verification.
 - [x] Document what the archive proves and does not prove in `docs/EVIDENCE.md`.
-- [ ] Record the first ISO name and SHA-256 here after it is built on
-  `/media/renes/SEAGATE2TB`.
+- [x] First reserve master built at
+  `/media/renes/SEAGATE2TB/borge-evidence-isos/borge-evidence-stages-0-8-20260825.iso`
+  (4,714,496 bytes), with SHA-256
+  `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01`.
+  Its `.sha256` sidecar and `.contents.txt` listing are stored beside it; an extracted
+  readback verified every payload file and `git bundle verify` passed.
 - [ ] Before the next stage closes, choose a persistent signing identity and TSA policy.
   The historical ZIPs are explicitly retrospective and unsigned; do not backdate them.
 - [ ] Burn at least two CD-R copies from the verified master, verify each whole-disc

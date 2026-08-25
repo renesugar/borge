@@ -686,8 +686,11 @@ version 4 repository and fails somewhere worse than at the door.
    by SHA-256 in `evidence/manifest.json`. A reserve ISO master on
    `/media/renes/SEAGATE2TB` carries those ZIPs and a Git bundle of `v0.8.0` plus its
    complete reachable history, so the commits they name are preserved before the first
-   GitHub push. That is preservation, not public availability: release assets or immutable
-   object storage remain a ROADMAP R1 item.
+   GitHub push. The first master is
+   `borge-evidence-stages-0-8-20260825.iso` (4,714,496 bytes), SHA-256
+   `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01`.
+   That is preservation, not public availability: release assets or immutable object
+   storage remain a ROADMAP R1 item.
 5. ~~**Are tags signed?**~~ **Decision still required before the next release, but the
    historical claim is settled.** No signing key is configured and the stage 0-8 ZIPs have
    no contemporaneous signatures or RFC 3161 tokens. They are catalogued honestly as
@@ -721,6 +724,13 @@ The current collection is about 3 MB and fits one CD easily. The builder uses a
 650,000,000-byte ceiling and refuses an oversized collection; ZIPs are never split. When a
 future collection approaches the ceiling, partition it into numbered volumes and put the
 catalog plus Git bundle on each volume while they still fit.
+
+The first reserve master was built and extracted for readback on 2026-08-25 UTC at
+`/media/renes/SEAGATE2TB/borge-evidence-isos/borge-evidence-stages-0-8-20260825.iso`.
+It is 4,714,496 bytes and its SHA-256 is
+`913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01`.
+The sidecar and content listing are beside the image. The fixed `v0.8.0` Git ref prevents
+this after-the-fact documentation record from changing the preserved Git bundle.
 
 **What was not done at the original stage gates:** no historical ZIP has a detached
 signature or RFC 3161 token, and no claim to a contemporaneous attestation is made. The ISO
@@ -3309,7 +3319,7 @@ than no tracker: it is the document a new reader trusts first.
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
-| — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalog and ISO workflow implemented** 2026-08-24; first reserve master must be built and its SHA-256 recorded before the first GitHub push | `evidence/manifest.json`; ISO kept outside git |
+| — | **Evidence preservation** (§2.5, ROADMAP R1) | **first reserve master built and verified** 2026-08-25 UTC, before the first GitHub push; catalog and reproducible ISO workflow complete, signing/TSA and physical copies remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see
