@@ -1,14 +1,41 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": "borge",
   "catalogued_utc": "2026-08-25T02:08:01Z",
   "integrity_algorithm": "sha256",
   "default_local_directory": "/home/renes/evidence/borge",
   "attestation": {
-    "status": "retrospective-unsigned",
-    "detached_signature_filename": null,
-    "rfc3161_timestamp_filename": null,
-    "note": "These historical ZIPs were catalogued after their stage runs. No detached signatures or RFC 3161 tokens existed at stage completion."
+    "status": "retrospective-attested",
+    "policy_decided_utc": "2026-08-27T00:00:00Z",
+    "note": "Signatures and RFC 3161 tokens on these artifacts were made in August 2026, long after the stage runs they cover. A token binds these bytes to a time no later than the token's own; it says nothing about when the tests inside them ran. Nothing here is backdated.",
+    "paths_are_relative_to": "the directory holding this catalog",
+    "signing_key": {
+      "identity": "Rene Sugar (Evidence Identity) <rene.sugar@gmail.com>",
+      "primary_fingerprint": "AEE5F82F2C216D6D15992C8DC96A1C6039BC8098",
+      "primary_capability": "certify-only; secret half not present on the signing machine",
+      "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005",
+      "algorithm": "ed25519",
+      "subkey_created_utc": "2026-08-25T18:32:16Z",
+      "subkey_expires_utc": "2027-08-25T18:32:16Z",
+      "public_key_file": "keys/evidence-signing-public.asc",
+      "public_key_sha256": "7eb4dd124580572f202c8368ccc3685b9978abf4c6ff0d945cd073ae0c466952"
+    },
+    "timestamp_authorities": [
+      {
+        "id": "digicert",
+        "url": "http://timestamp.digicert.com",
+        "policy_oid": "2.16.840.1.114412.7.1",
+        "ca_file": "tsa/digicert-trusted-root-g4.pem",
+        "ca_sha256": "ce7d6b44f5d510391be98c8d76b18709400a30cd87659bfebe1c6f97ff5181ee"
+      },
+      {
+        "id": "sectigo",
+        "url": "http://timestamp.sectigo.com",
+        "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+        "ca_file": "tsa/usertrust-rsa-certification-authority.pem",
+        "ca_sha256": "8a3dbcb92ab1c6277647fe2ab8536b5c982abbfdb1f1df5728e01b906aba953a"
+      }
+    ]
   },
   "artifacts": [
     {
@@ -195,6 +222,20 @@
       "tree_clean": true,
       "disposition": "canonical",
       "note": "The clean stage-8 bundle cited by v0.8.0 and PORTING_PLAN.md."
+    }
+  ],
+  "iso_masters": [
+    {
+      "filename": "borge-evidence-stages-0-8-20260825.iso",
+      "directory": "/media/renes/SEAGATE2TB/borge-evidence-isos",
+      "size_bytes": 4714496,
+      "sha256": "913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01",
+      "collection": "stages-0-8",
+      "image_timestamp_utc": "2026-08-25T02:08:01Z",
+      "git_ref": "refs/tags/v0.8.0",
+      "git_commit": "e725e0fb6c025e765a775068877bfce693c4faa9",
+      "catalog_sha256_in_image": "8545a841647f477941af0034f92b0759f02f056ba913e1853077cd9e5ae3786b",
+      "note": "Built 2026-08-25 from the schema-1 catalog, whose SHA-256 is recorded above. The image is immutable and is not rebuilt to carry these attestations; its signature and tokens are sidecars beside it."
     }
   ]
 }

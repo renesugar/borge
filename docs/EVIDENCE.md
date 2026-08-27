@@ -108,24 +108,75 @@ catalog first approaches that bound; ZIPs are never split across volumes.
 
 ## Signing and timestamping policy
 
-No secret GPG key is currently configured on this machine, and no signing identity or TSA
-retention policy has been chosen. The historical catalog therefore says `null` for both
-attestations. The archive workflow must not generate an anonymous key merely to make the
-word "signed" true.
+Decided 2026-08-27, after the first reserve master and before the first GitHub push. The
+four questions this section used to leave open are answered here; the archive workflow
+still refuses to generate an anonymous key merely to make the word "signed" true.
 
-Before the next stage closes, decide and document:
+**1. Which identity signs.** `Rene Sugar (Evidence Identity) <rene.sugar@gmail.com>`, an
+Ed25519 OpenPGP key created 2026-08-25. The primary key
+`AEE5F82F2C216D6D15992C8DC96A1C6039BC8098` is certify-only and its secret half is not on
+this machine; artifacts are signed by the subkey
+`4ABEB98AF99C8321931BCF282C6A8A4568264005`, which expires 2027-08-25. Signing is
+non-interactive: the passphrase comes from the login keyring
+(`secret-tool lookup service gpg_evidence type passphrase`) and is passed to `gpg` on a
+file descriptor, so it is never an argument and never enters shell history.
 
-1. which long-lived signing identity controls the detached-signature key;
-2. where its public key and revocation material are preserved;
-3. which TSA and policy are acceptable, how its certificate chain and revocation data are
-   retained, and how verification works without network access;
-4. whether signatures and RFC 3161 tokens cover each stage ZIP, the ISO, or both.
+A signature identifies a key, not a person, and is worth exactly what the key's custody is
+worth. The custody claim here is narrow and checkable: the signing subkey is replaceable
+and expires; the primary secret key and the revocation certificate are kept offline, and
+where they are kept belongs in the custody log with the ISO masters, not in this
+repository.
 
-Per-artifact signatures are preferable because one damaged or disputed file does not
-invalidate an attestation over an unrelated file. A final ISO signature is still useful as
-an inventory seal, but does not replace per-ZIP attestations. A retrospective token must be
-labelled with its real timestamp; it says nothing about when the enclosed tests originally
-ran.
+**2. Where the public material lives.** [`evidence/keys/`](../evidence/keys) — the public
+key is checked in, so verification needs no keyserver and no network.
+`scripts/verify-evidence.py` builds a temporary keyring from that file alone, so a
+signature from an unrelated key already in the operator's keyring cannot pass.
+
+**3. Which authorities, and how their material is retained.** Two independent RFC 3161
+authorities, both requested for every artifact:
+
+| authority | endpoint | policy OID |
+| --- | --- | --- |
+| DigiCert | `http://timestamp.digicert.com` | `2.16.840.1.114412.7.1` |
+| Sectigo | `http://timestamp.sectigo.com` | `1.3.6.1.4.1.6449.2.1.1` |
+
+Two authorities rather than one because a single TSA is a single point of trust and of
+survival: an authority whose root is distrusted, or which stops publishing, should not be
+able to take the whole record's dating with it. Each token embeds its own certificate
+chain, and the roots those chains terminate in are pinned in
+[`evidence/tsa/`](../evidence/tsa) so verification works offline and does not drift with
+the machine's system trust store. The catalog records which pinned root belongs to which
+token, and verification uses that one alone.
+
+Revocation data is deliberately *not* fetched at verification time: an offline verifier
+cannot reach an OCSP responder or a CRL, and a check that silently passes when the network
+is absent is worse than no check. The residual risk is stated rather than hidden — a token
+verified here proves the chain and the imprint, not that the TSA certificate was
+unrevoked at the moment of use.
+
+**4. What is covered.** Every artifact in the curated catalog — the top-level release ZIPs
+and any screenshots — individually, plus each ISO master. Per-artifact attestation is the
+point: one damaged or disputed file must not invalidate an attestation over an unrelated
+file. The ISO signature is an inventory seal on top of that, not a replacement for it.
+
+**Every attestation on the historical record is retrospective.** The tokens were obtained
+in August 2026, long after the stage runs they cover. Each artifact's catalog entry carries
+`retrospective: true` and the UTC time it was attested. A token binds bytes to a time *no
+later than* the token's; it says nothing about when the tests inside those bytes ran, and
+the catalog never suggests otherwise.
+
+Attest and verify:
+
+```bash
+make evidence-attest        # sign and timestamp anything not yet attested
+make evidence-verify-full   # verify, and require every attestation to be present and good
+```
+
+`attest-evidence.py` refuses to attest a file whose SHA-256 disagrees with the catalog,
+verifies each token as soon as it arrives, and leaves existing sidecars alone unless
+`--force`. The sidecars live beside the artifacts, outside git; their own hashes are
+recorded in the checked-in catalog, so a replaced signature is as detectable as a replaced
+ZIP.
 
 ## Burning and custody
 
