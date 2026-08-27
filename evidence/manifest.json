@@ -46,7 +46,32 @@
       "created_utc": "2026-08-16T16:37:04Z",
       "git_commit": "f4b8fec4cab853c7e5a42af1285c9cf90f8da562",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:14Z",
+        "detached_signature": {
+          "filename": "borge-stage-0-20260816T163704Z.zip.asc",
+          "sha256": "99570ec81c1526f24e9cdf615db964a4ef3707b85d39d848448ab2739897431c",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-0-20260816T163704Z.zip.digicert.tsr",
+            "sha256": "23fab3a1b388eb0d8d4cd46c3b694c0cd103d4fb096a448d2660ddb3a1fe054b",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:14Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-0-20260816T163704Z.zip.sectigo.tsr",
+            "sha256": "15fcf32ea6ec82e51b2c6813b8ef40740b2c85f8a6646e757c04637793c83415",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:14Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-1.1-20260816T165938Z.zip",
@@ -56,7 +81,32 @@
       "created_utc": "2026-08-16T16:59:38Z",
       "git_commit": "b13bc7e5b96464ca139d391d2e51030e26cc06a4",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:17Z",
+        "detached_signature": {
+          "filename": "borge-stage-1.1-20260816T165938Z.zip.asc",
+          "sha256": "fce2d245e7e0fd10ec6a7f15b1592f60f5571c1bd563bbd17f5e5bbb32846e04",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-1.1-20260816T165938Z.zip.digicert.tsr",
+            "sha256": "25d4252898efa5200cc43d6da8ac2e3a911ea4c27de87e3a3cdc6dba4ee507f8",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:15Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-1.1-20260816T165938Z.zip.sectigo.tsr",
+            "sha256": "867935fb4bd0e0d177a9c1b424929bd2a531da3192aaa1f9520e901f3dea415a",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:17Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-1.2-20260816T174317Z.zip",
@@ -66,7 +116,32 @@
       "created_utc": "2026-08-16T17:43:17Z",
       "git_commit": "f30e50128ef294eec727076757baa7abeb8f7ed3",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:21Z",
+        "detached_signature": {
+          "filename": "borge-stage-1.2-20260816T174317Z.zip.asc",
+          "sha256": "9acfc6e0048cdb37bf177b99d2ee44d55d928c66fbaff422ba873973d5086c18",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-1.2-20260816T174317Z.zip.digicert.tsr",
+            "sha256": "746ca21e21c43b24b6b6d927864191ca96bd606779f1ed25b3a5a0b571154e20",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:18Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-1.2-20260816T174317Z.zip.sectigo.tsr",
+            "sha256": "8a1ae3a144207391091ab9498b091d0799dded67e0d3bfe6d4a9e99919494d3d",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:20Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-1.3-20260816T180131Z.zip",
@@ -76,7 +151,32 @@
       "created_utc": "2026-08-16T18:01:31Z",
       "git_commit": "1fd2f81220605a15062e690df399d4a907c79665",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:24Z",
+        "detached_signature": {
+          "filename": "borge-stage-1.3-20260816T180131Z.zip.asc",
+          "sha256": "8e13589bf50e7bd8b60e9dc3b3c666a767122a252b88931eedd95e25532ab895",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-1.3-20260816T180131Z.zip.digicert.tsr",
+            "sha256": "ca05e6a09774230856717e3070672144ce4862245d7bae2d8155093dd31b1509",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:21Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-1.3-20260816T180131Z.zip.sectigo.tsr",
+            "sha256": "e0d849c25c0d7969e3d5f395da1ce8a412c703bf95569ec991ed085c9166b267",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:24Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-1.4-20260816T181742Z.zip",
@@ -86,7 +186,32 @@
       "created_utc": "2026-08-16T18:17:42Z",
       "git_commit": "08c680658378080f79532c4f03955919406bbefc",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:27Z",
+        "detached_signature": {
+          "filename": "borge-stage-1.4-20260816T181742Z.zip.asc",
+          "sha256": "f07e3694519c9b1525458b396f14cec15ac81291f485f338e678a85045bb9895",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-1.4-20260816T181742Z.zip.digicert.tsr",
+            "sha256": "09d667c710ab12753240fbeedb23caaf87cc150fce7f3b45ba06a987e05c646a",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:24Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-1.4-20260816T181742Z.zip.sectigo.tsr",
+            "sha256": "ffb5d56d8004d708d5d064471f808088e8846d8d7a761e7ef65981942979a64c",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:27Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-1.5-20260816T205237Z.zip",
@@ -96,7 +221,32 @@
       "created_utc": "2026-08-16T20:52:37Z",
       "git_commit": "371c206747918869c07d987da8006dd3ebfc60b5",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:30Z",
+        "detached_signature": {
+          "filename": "borge-stage-1.5-20260816T205237Z.zip.asc",
+          "sha256": "ca02b6bf4485563cd2db88c6d0c7b55a8d2bd1af667fcb8120554b786bfcaf3c",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-1.5-20260816T205237Z.zip.digicert.tsr",
+            "sha256": "02f52478152589080ce0d9954673b17663af59a643df2c8cb03e00df7c011a06",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:27Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-1.5-20260816T205237Z.zip.sectigo.tsr",
+            "sha256": "83a5e9b1518bf84a1b54106a2c5452bcdaee730ef72d781cf5043e3aba0c9127",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:29Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-1.6-20260816T210540Z.zip",
@@ -106,7 +256,32 @@
       "created_utc": "2026-08-16T21:05:40Z",
       "git_commit": "704f98ac4b63c52295aca8ec121b17467b0909a9",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:32Z",
+        "detached_signature": {
+          "filename": "borge-stage-1.6-20260816T210540Z.zip.asc",
+          "sha256": "30cfd1ee48352c43647c507b2278882d370c32bfbbf871d8116e34770a6d4316",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-1.6-20260816T210540Z.zip.digicert.tsr",
+            "sha256": "018e3b97e7e582a98164e9437d923f1b0e04d96f8df444b9b57b02378bbbb1f1",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:30Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-1.6-20260816T210540Z.zip.sectigo.tsr",
+            "sha256": "0ed79120e7290d2b10e5f86ffb4aa070403798ff92f28daf8b9d300e6b67538d",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:32Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-2-20260816T212000Z.zip",
@@ -116,7 +291,32 @@
       "created_utc": "2026-08-16T21:20:00Z",
       "git_commit": "a8e7dd2a51e503157fb038f30c64446c45a81423",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:36Z",
+        "detached_signature": {
+          "filename": "borge-stage-2-20260816T212000Z.zip.asc",
+          "sha256": "ab93446ce2b02f3014e9fe3288052f2f828c7bc3b7f65622ac7c2fcad609bbb8",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-2-20260816T212000Z.zip.digicert.tsr",
+            "sha256": "0bc46274b28f3ee094dcec1f3c597cf0e2c25bc63687bcd53b15812ee7d20112",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:33Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-2-20260816T212000Z.zip.sectigo.tsr",
+            "sha256": "19bf28a42dbb9cdb134bf8b21bf1687a94c4dda4ab823947b027b1097eeff44a",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:35Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-2-googledrive-20260816T212637Z.zip",
@@ -126,7 +326,32 @@
       "created_utc": "2026-08-16T21:26:37Z",
       "git_commit": "f92a8996db70381695e929c69af34e6563663582",
       "tree_clean": true,
-      "disposition": "supplemental"
+      "disposition": "supplemental",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:39Z",
+        "detached_signature": {
+          "filename": "borge-stage-2-googledrive-20260816T212637Z.zip.asc",
+          "sha256": "58c5c42087c46f441e4d2e560fd9643d4edd3ee0b2ff59881adb8d98c1648b7a",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-2-googledrive-20260816T212637Z.zip.digicert.tsr",
+            "sha256": "2dbb1f6ac85fad92f95a4e468120232af5ea365f88827bf9e6e74cd194fd0a6c",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:36Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-2-googledrive-20260816T212637Z.zip.sectigo.tsr",
+            "sha256": "8e2da612ae7d523edd1479bfffc4b7d0d124d4f2a0c355962ad46fd446b6b04c",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:38Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-3-20260816T215557Z.zip",
@@ -136,7 +361,32 @@
       "created_utc": "2026-08-16T21:55:57Z",
       "git_commit": "621e6ea696c56fb3114c9ab31cc62c1a93f27978",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:41Z",
+        "detached_signature": {
+          "filename": "borge-stage-3-20260816T215557Z.zip.asc",
+          "sha256": "128930be9545cb986ee03f43eb72c22910f782fa89a290b8bf90f2f957c1012d",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-3-20260816T215557Z.zip.digicert.tsr",
+            "sha256": "c1800c0f9993c8ff66a26ff0a8fe1bdfa01da960f5b8b69ab48c2f522a922b0c",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:39Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-3-20260816T215557Z.zip.sectigo.tsr",
+            "sha256": "59e9a587e7f4d76d3c54e4f052464ebe47d66894e5b64ac35107e379e5793310",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:41Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-4-20260817T021409Z.zip",
@@ -146,7 +396,32 @@
       "created_utc": "2026-08-17T02:14:09Z",
       "git_commit": "fff9d287cd247d06268894b756278e9515cb4b31",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:45Z",
+        "detached_signature": {
+          "filename": "borge-stage-4-20260817T021409Z.zip.asc",
+          "sha256": "cb99e130bc70759e80b8b2c27dbc02d675995c16693da4c1396e911c4ee7f2e5",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-4-20260817T021409Z.zip.digicert.tsr",
+            "sha256": "f09f4efb4c76a05356a5fe90da0049fbfafef5de0fa4f5cfc5214ffe12c80893",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:42Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-4-20260817T021409Z.zip.sectigo.tsr",
+            "sha256": "593d7b8b1ec098b63b780ad26682e872cc366cffe738125ae912bf9b06b6d21a",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:45Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-5-20260817T032303Z.zip",
@@ -156,7 +431,32 @@
       "created_utc": "2026-08-17T03:23:03Z",
       "git_commit": "64a3f8d661efc1d217c5cd5fb050fa6bdfc087c0",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:48Z",
+        "detached_signature": {
+          "filename": "borge-stage-5-20260817T032303Z.zip.asc",
+          "sha256": "f738c9e80c1e31a48c4ece54e86f71cf13bc8523ac2e1aca8a8882beb7237157",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-5-20260817T032303Z.zip.digicert.tsr",
+            "sha256": "e9e9ce133dc1dedf2e18ff769d87b8cd71e4679b6c688def8f74467494f41211",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:45Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-5-20260817T032303Z.zip.sectigo.tsr",
+            "sha256": "a96c7a84b8c7b87888d79a34c5cdbf3db42c8d8e42ce40c47fce4ef596e5d34b",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:47Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-6-20260817T071719Z.zip",
@@ -166,7 +466,32 @@
       "created_utc": "2026-08-17T07:17:19Z",
       "git_commit": "673e7f6d55f8bd9dcd898e8fd3bf8545a709f1ac",
       "tree_clean": true,
-      "disposition": "canonical"
+      "disposition": "canonical",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:51Z",
+        "detached_signature": {
+          "filename": "borge-stage-6-20260817T071719Z.zip.asc",
+          "sha256": "0d3b0072c85acc880d66cc367f6960b8a594fffd8fc8b51d3317d44dd74abaf0",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-6-20260817T071719Z.zip.digicert.tsr",
+            "sha256": "51764dc701910bf61bf53de45f503ef7d3136bfe8228b88dcb2dc9f1a62536ee",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:48Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-6-20260817T071719Z.zip.sectigo.tsr",
+            "sha256": "82bd9b87ec87de8adcd6814cbba3ecea1e246694d1bef0c38e14c9562bb5b8b3",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:50Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-7-20260817T085724Z.zip",
@@ -177,7 +502,32 @@
       "git_commit": "5903d92b8a9a330eeed9160fa082a00bd12602e9",
       "tree_clean": true,
       "disposition": "superseded-failed",
-      "note": "Recorded a false ENOSPC failure after /tmp filled; retained as part of the chronology."
+      "note": "Recorded a false ENOSPC failure after /tmp filled; retained as part of the chronology.",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:54Z",
+        "detached_signature": {
+          "filename": "borge-stage-7-20260817T085724Z.zip.asc",
+          "sha256": "3f9d6c7a6d22ae3e9482e6ceb97c875c8ad7692779abaeefc84341b739c54722",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-7-20260817T085724Z.zip.digicert.tsr",
+            "sha256": "fb68023c64443d03100c6d1cd9a1faf5391e048cbee28240782d9439cd607ae1",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:51Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-7-20260817T085724Z.zip.sectigo.tsr",
+            "sha256": "1c11b835210ab2b25089a6e8d16384e39715c773812bcb7b5e4c79b245e526f5",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:53Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-7-rerun-20260817T120120Z.zip",
@@ -188,7 +538,32 @@
       "git_commit": "e01386e9631a1b70c22756677157159ad86f3751",
       "tree_clean": true,
       "disposition": "superseded-failed",
-      "note": "Recorded a false build failure after a Go edit landed during the run; retained as part of the chronology."
+      "note": "Recorded a false build failure after a Go edit landed during the run; retained as part of the chronology.",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:33:57Z",
+        "detached_signature": {
+          "filename": "borge-stage-7-rerun-20260817T120120Z.zip.asc",
+          "sha256": "65cc98af7ddbb8223ef8d582e6fa6c6f0c8ed1da0d6e8f334246caf74bb6b720",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-7-rerun-20260817T120120Z.zip.digicert.tsr",
+            "sha256": "d9d7b8cd38a2d71dd1c04f2b842be0b3c915f53dbe70e403d0e681eda6fafa5d",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:54Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-7-rerun-20260817T120120Z.zip.sectigo.tsr",
+            "sha256": "e106c6d8d3a61a455f1a37e2760a60f48249344cbfe57e34f5fa57ecf5191abd",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:57Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-7-clean-20260817T192652Z.zip",
@@ -199,7 +574,32 @@
       "git_commit": "ad7396a9cd9bf800f8da23ea4b764975adef74eb",
       "tree_clean": true,
       "disposition": "canonical",
-      "note": "The clean stage-7 bundle cited by PORTING_PLAN.md."
+      "note": "The clean stage-7 bundle cited by PORTING_PLAN.md.",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:34:00Z",
+        "detached_signature": {
+          "filename": "borge-stage-7-clean-20260817T192652Z.zip.asc",
+          "sha256": "d997e1ddf767da76f53f5d5e0b8a7f3ad2c5059b65eba170e47e1d9e1ccb45a3",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-7-clean-20260817T192652Z.zip.digicert.tsr",
+            "sha256": "a4494f11c7ec4880914c9d4bb3f147705d8a8d02994e464c3b97e83cb496e1fa",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:33:58Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-7-clean-20260817T192652Z.zip.sectigo.tsr",
+            "sha256": "ad4d28e897c70e11f8dc9cc2e5fde12891cc11c9d1ad868cccd5ad71fe8b1692",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:33:59Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-8-20260821T222608Z.zip",
@@ -210,7 +610,32 @@
       "git_commit": "39f279e6de642f9fdd3012d48ac4557aab9f0862",
       "tree_clean": true,
       "disposition": "superseded-failed",
-      "note": "The race pass exposed TestRESTStdioReportsWhatTheServerSaid; retained as the failed first stage-8 gate."
+      "note": "The race pass exposed TestRESTStdioReportsWhatTheServerSaid; retained as the failed first stage-8 gate.",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:34:03Z",
+        "detached_signature": {
+          "filename": "borge-stage-8-20260821T222608Z.zip.asc",
+          "sha256": "653eaa06126246a39e73451fdb06eee497869192da31c67686968a44e14f011f",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-8-20260821T222608Z.zip.digicert.tsr",
+            "sha256": "5076cba3b2ff5539425845489559a682d09d39189b57cfdd8dc6e78bf1ab08f0",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:34:00Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-8-20260821T222608Z.zip.sectigo.tsr",
+            "sha256": "811c0fd0bad551f6c4338dc81f5a7ed5ba03463ad898a3a48c992f68b696ec0e",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:34:03Z"
+          }
+        ]
+      }
     },
     {
       "filename": "borge-stage-8-20260822T003631Z.zip",
@@ -221,7 +646,32 @@
       "git_commit": "50bef75e40debc759366f05dade7946d7fdb49b8",
       "tree_clean": true,
       "disposition": "canonical",
-      "note": "The clean stage-8 bundle cited by v0.8.0 and PORTING_PLAN.md."
+      "note": "The clean stage-8 bundle cited by v0.8.0 and PORTING_PLAN.md.",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:34:06Z",
+        "detached_signature": {
+          "filename": "borge-stage-8-20260822T003631Z.zip.asc",
+          "sha256": "e914109c1d7f1a6b77bc95d407b942c490603e18c1d2e5f9291a1e4e6083b6a1",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-stage-8-20260822T003631Z.zip.digicert.tsr",
+            "sha256": "bbb575aa0b7d79ad9dc5ecc9323b72f787d3c85311061b50db166b0f07bcab99",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:34:04Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-stage-8-20260822T003631Z.zip.sectigo.tsr",
+            "sha256": "669a85493816120a298aee48f6d344854133c95efba5901d49cdb7ab69b98ab0",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:34:06Z"
+          }
+        ]
+      }
     }
   ],
   "iso_masters": [
@@ -235,7 +685,32 @@
       "git_ref": "refs/tags/v0.8.0",
       "git_commit": "e725e0fb6c025e765a775068877bfce693c4faa9",
       "catalog_sha256_in_image": "8545a841647f477941af0034f92b0759f02f056ba913e1853077cd9e5ae3786b",
-      "note": "Built 2026-08-25 from the schema-1 catalog, whose SHA-256 is recorded above. The image is immutable and is not rebuilt to carry these attestations; its signature and tokens are sidecars beside it."
+      "note": "Built 2026-08-25 from the schema-1 catalog, whose SHA-256 is recorded above. The image is immutable and is not rebuilt to carry these attestations; its signature and tokens are sidecars beside it.",
+      "attestations": {
+        "retrospective": true,
+        "attested_utc": "2026-08-27T23:34:09Z",
+        "detached_signature": {
+          "filename": "borge-evidence-stages-0-8-20260825.iso.asc",
+          "sha256": "372d2587df9d23a2d4a0cc991a1640dc1f4fb0498e593161de8c00f08ec2fb1f",
+          "signing_subkey_fingerprint": "4ABEB98AF99C8321931BCF282C6A8A4568264005"
+        },
+        "rfc3161_timestamps": [
+          {
+            "authority": "digicert",
+            "filename": "borge-evidence-stages-0-8-20260825.iso.digicert.tsr",
+            "sha256": "66b8d228c7e27368150fa3937d9146b8eee630acec2ecada725e5b401cdf1829",
+            "policy_oid": "2.16.840.1.114412.7.1",
+            "token_time_utc": "2026-08-27T23:34:07Z"
+          },
+          {
+            "authority": "sectigo",
+            "filename": "borge-evidence-stages-0-8-20260825.iso.sectigo.tsr",
+            "sha256": "88e29ac8aa445abb4ffcff110c2b570ef5b011c2a6671af8ae350156a8d7b759",
+            "policy_oid": "1.3.6.1.4.1.6449.2.1.1",
+            "token_time_utc": "2026-08-27T23:34:08Z"
+          }
+        ]
+      }
     }
   ]
 }

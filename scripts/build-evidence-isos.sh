@@ -33,7 +33,8 @@ cleanup() {
 trap cleanup EXIT
 STAGING=$WORK/staging
 READBACK=$WORK/readback
-mkdir -p "$STAGING/artifacts" "$STAGING/repository" "$STAGING/documentation" "$READBACK"
+mkdir -p "$STAGING/artifacts" "$STAGING/repository" "$STAGING/documentation" \
+    "$STAGING/keys" "$STAGING/tsa" "$READBACK"
 
 mapfile -t ARTIFACTS < <(
     PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 - "$MANIFEST" <<'PY'
@@ -47,11 +48,22 @@ for artifact in catalog["artifacts"]:
 PY
 )
 
+ATTESTED=0
 for filename in "${ARTIFACTS[@]}"; do
     cp -p "$EVIDENCE_DIR/$filename" "$STAGING/artifacts/$filename"
+    # The sidecars travel with the artifact they attest. An image holding a ZIP but not
+    # its signature would be an image nobody can verify offline, which is the whole
+    # reason the key and roots are on it as well.
+    for sidecar in "$EVIDENCE_DIR/$filename".asc "$EVIDENCE_DIR/$filename".*.tsr; do
+        [ -e "$sidecar" ] || continue
+        cp -p "$sidecar" "$STAGING/artifacts/$(basename "$sidecar")"
+        ATTESTED=1
+    done
 done
 cp -p "$MANIFEST" "$STAGING/MANIFEST.json"
 cp -p "$ROOT/docs/EVIDENCE.md" "$STAGING/documentation/EVIDENCE.md"
+cp -p "$ROOT/evidence/keys/"* "$STAGING/keys/"
+cp -p "$ROOT/evidence/tsa/"* "$STAGING/tsa/"
 
 # Multi-threaded pack generation can choose different deltas from one run to the next.
 # One thread makes the bundle stable, which in turn makes the whole ISO reproducible.
@@ -80,7 +92,15 @@ export SOURCE_DATE_EPOCH
     echo "Catalog: evidence/manifest.json in the named Git commit"
     echo
     echo "The ZIPs were created earlier and catalogued retrospectively."
-    echo "No detached signatures or RFC 3161 tokens are claimed."
+    if (( ATTESTED )); then
+        echo "Signatures and RFC 3161 tokens are beside each artifact in artifacts/."
+        echo "They were made when the catalog says, which is after the runs they cover:"
+        echo "a token dates the bytes, not the tests inside them."
+        echo "keys/ holds the signing identity's public key; tsa/ holds the pinned roots,"
+        echo "so verification needs nothing this image does not carry."
+    else
+        echo "No detached signatures or RFC 3161 tokens are claimed."
+    fi
     echo "See documentation/EVIDENCE.md for scope, verification, and custody policy."
 } >"$STAGING/README.txt"
 

@@ -44,20 +44,33 @@ and are part of the chronology. A `disposition` field identifies which bundle is
 to cite for a completed stage.
 
 The manifest records SHA-256, byte length, stage id, UTC creation time, commit, clean-tree
-claim, and disposition for each ZIP. It also records honestly that the historical ZIPs
-were catalogued retrospectively and have neither detached signatures nor RFC 3161 tokens.
-Creating those now could attest only to their existence now; it cannot manufacture a
-contemporaneous signature or timestamp for August 16-22.
+claim, and disposition for each ZIP, and since 2026-08-27 the attestations described
+below: a detached OpenPGP signature and one RFC 3161 token from each of two authorities,
+each recorded by filename and hash. Every one of them is marked `retrospective`, because
+that is what they are. Creating them now attests to the artifacts' existence now; it
+cannot manufacture a contemporaneous signature or timestamp for August 16-22, and the
+catalog does not pretend otherwise.
+
+The catalog also lists the ISO masters, so an image's hash is checked by the same tool as
+the ZIPs rather than living only in prose. A master on unmounted media is reported as
+unreachable, never as verified.
 
 Each ISO master contains:
 
-- the exact ZIPs listed in the checked-in manifest;
+- the exact ZIPs listed in the checked-in manifest, and, since 2026-08-27, each ZIP's
+  signature and timestamp tokens beside it;
+- the signing identity's public key in `keys/` and the pinned TSA roots in `tsa/`, so the
+  image verifies with nothing but itself and the tools;
 - a Git bundle containing `v0.8.0` and its complete reachable history, so every commit
   named by the stage 0-8 ZIPs survives even if no remote copy exists;
 - the checked-in evidence manifest and preservation documentation;
 - `ISO-CONTENTS.sha256`, covering every payload file in the image;
 - build information identifying the Git commit, xorriso version, fixed image timestamp,
   and command used.
+
+The 2026-08-25 master predates the attestations and does not contain them; it is immutable
+and is not rebuilt. Its own signature and tokens are sidecars beside it, and the next
+master carries everything inside.
 
 The ISO's own SHA-256 is a sidecar beside the ISO. It cannot be placed inside the image it
 hashes: doing so would change the image. For the same reason the checked-in ZIP manifest
@@ -73,7 +86,19 @@ make evidence-verify
 
 The verifier checks the outer size and SHA-256, ZIP CRCs, each ZIP's internal
 `MANIFEST.txt`, and the stage/commit/tree state in `PROVENANCE.txt`. It rejects unlisted
-ZIPs by default so that a bundle cannot fall between the catalog and the ISO unnoticed.
+ZIPs by default so that a bundle cannot fall between the catalog and the ISO unnoticed,
+and rejects an unlisted `.asc` or `.tsr` for the same reason.
+
+Prove the attestation checks can fail before trusting one that passed:
+
+```bash
+make evidence-negative
+```
+
+It copies part of the real set, damages it nine ways — the artifact, the signature, a
+token, a pinned root, an authority attributed to the other's token, a missing token, a
+missing record, an unaccounted-for sidecar, and a signature that is genuine but over
+different bytes — and requires each to be caught *and* caught by the check it is about.
 
 After committing the manifest and documentation, build the reserve ISO on the external
 disk:

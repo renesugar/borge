@@ -20,7 +20,8 @@ TIMEOUT     ?= -timeout 60m
 
 .PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
-        evidence-verify evidence-verify-full evidence-attest evidence-isos clean help
+        evidence-verify evidence-verify-full evidence-attest evidence-negative \
+        evidence-isos clean help
 
 all: check
 
@@ -144,6 +145,11 @@ evidence-verify-full:
 ## evidence-attest: sign and RFC 3161 timestamp anything not yet attested
 evidence-attest:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 scripts/attest-evidence.py
+
+## evidence-negative: prove the verifier's attestation checks can fail
+evidence-negative:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 \
+		tests/evidence/attestation-negative.py
 
 ## evidence-isos: build and read back the reserve evidence ISO master
 evidence-isos:

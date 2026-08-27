@@ -17,8 +17,9 @@ R2, in that order.
 
 ### R1. Preserve the pre-GitHub evidence record
 
-State: **first reserve ISO master built and verified 2026-08-25 UTC, before the first
-GitHub push.**
+State: **catalogued, attested and verified; one item open.** The first reserve ISO master
+was built and verified 2026-08-25 UTC and the record was signed and timestamped
+2026-08-27, both before the first GitHub push.
 
 - [x] Inventory all 18 stage ZIPs, including failed and superseded runs, in
   `evidence/manifest.json` with SHA-256 hashes and provenance.
@@ -33,14 +34,22 @@ GitHub push.**
   `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01`.
   Its `.sha256` sidecar and `.contents.txt` listing are stored beside it; an extracted
   readback verified every payload file and `git bundle verify` passed.
-- [ ] Before the next stage closes, choose a persistent signing identity and TSA policy.
-  The historical ZIPs are explicitly retrospective and unsigned; do not backdate them.
+- [x] Choose a persistent signing identity and TSA policy, and apply them (2026-08-27).
+  The identity is an offline-primary OpenPGP key signing through a subkey that expires
+  2027-08-25; the timestamps come from DigiCert and Sectigo, both requested for every
+  artifact, verified offline against roots pinned in `evidence/tsa/`. All 18 ZIPs and the
+  ISO master carry a signature and two tokens, recorded in `evidence/manifest.json` and
+  marked `retrospective`: nothing is backdated, and a token dates the bytes rather than
+  the tests inside them. `make evidence-negative` demonstrates that the checks fail when
+  the record is damaged.
 - [ ] Keep one independently backed-up digital copy of the ISO, sidecar, and burn/custody
   log. Optical media is an additional preservation copy, not the only copy.
 
-Acceptance: the checked-in catalog verifies against the local ZIP directory; the ISO
-extracts and its payload manifest verifies; `git bundle verify` passes; the ISO SHA-256 is
-recorded beside the image and here; no unlisted ZIP is omitted. Building the ISO masters in
+Acceptance: the checked-in catalog verifies against the local ZIP directory; every
+artifact carries a good signature from the named subkey and a good token from each
+authority (`make evidence-verify-full`); the ISO extracts and its payload manifest
+verifies; `git bundle verify` passes; the ISO SHA-256 is recorded beside the image and
+here; no unlisted ZIP or attestation file is omitted. Building the ISO masters in
 a directory on `/media/renes/SEAGATE2TB` satisfies this item; physical discs are
 preservation work and are tracked under *Later maintenance*, where they block nothing.
 

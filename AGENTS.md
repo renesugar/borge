@@ -65,6 +65,10 @@ make coverage       # the stage 8 gates: borge's commands and per-command option
 make option-coverage # just the per-command option comparison (docs/PORTING_PLAN.md 11.2)
 make interop        # the stage 7 gate: the real-corpus interoperability matrix
 make evidence STAGE=stage-N   # build an evidence bundle
+make evidence-verify          # check the evidence catalog against the ZIPs on disk
+make evidence-verify-full     # the same, and require every signature and token
+make evidence-attest          # sign and timestamp anything not yet attested
+make evidence-negative        # prove the attestation checks can fail
 ```
 
 Every source file needs an SPDX header; `scripts/check-spdx.sh` enforces it. A file ported
