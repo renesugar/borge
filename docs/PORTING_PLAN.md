@@ -1,7 +1,7 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-8 complete.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified** - the work itself is not started. Stage 10 (format changes) is not started; §2.4 records what a `v1.0.0` tag would have to be accompanied by.**
-Last updated: 2026-08-24.
+Status: **Stages 0-8 complete.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified** - the work itself is not started. Stage 10 became ROADMAP R0 on 2026-08-27 and is not started; §2.4 records what a `v1.0.0` tag would have to be accompanied by.**
+Last updated: 2026-08-27.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
 the repo, and on the working habits that have actually caught bugs here. Read it before
@@ -10,6 +10,16 @@ touching anything; read this plan for why the code is the shape it is.
 This is the working plan. It is versioned in git alongside the code and is expected to
 be edited as facts are learned — when a stage's reality diverges from what is written
 here, the plan is wrong and gets fixed, not the record.
+
+**Scope, and where this plan ends.** This document owns the port itself: stages 0 through
+9, from an empty repository to a Go borge that reads and writes borg 2 repositories at a
+measured speed. It does not own work that only begins once the port is done. That work
+lives in [`ROADMAP.md`](../ROADMAP.md): format and indexing changes (R0, which was stage
+10 until 2026-08-27), evidence preservation (R1, whose design record is §2.5), the
+documentation system (R2, whose design record is §2.1), and the GUI (R3). When stage 9
+closes, this plan is archived in `plans/` and the current documents become `ROADMAP.md`
+plus a `PLAN.md` for the roadmap item being implemented. `AGENTS.md` describes that
+workflow.
 
 ---
 
@@ -132,7 +142,7 @@ analysis in [`LICENSING.md`](LICENSING.md). Settled; not revisited per stage.
   performance-critical. A drop-in substitute (e.g. `github.com/restic/chunker`, which
   is a *different* Rabin chunker with different parameters) would produce different
   chunk boundaries and destroy dedup compatibility. Substitutes get considered only
-  in Stage 10, when the format is allowed to change.
+  in ROADMAP R0, when the format is allowed to change.
 - **Every dependency addition is a commit of its own** with a one-line rationale in
   the message, so the dependency set stays auditable.
 
@@ -142,7 +152,7 @@ Three surfaces, and they are *not* equally binding:
 
 | Surface | Binding? | Rule |
 | --- | --- | --- |
-| On-disk format | **Hard** | Byte-for-byte until Stage 10. Interop gate enforces it. |
+| On-disk format | **Hard** | Byte-for-byte until ROADMAP R0. Interop gate enforces it. |
 | CLI (command names, options, output) | **Soft** | Match borg where it costs nothing; diverge where borg is awkward, and record every divergence in `docs/CLI_DIFFERENCES.md`. |
 | Environment variables | **Soft, dual-read** | borge reads `BORGE_*` first, then falls back to `BORG_*`. Both are documented. This avoids surprising a user who has `BORG_PASSPHRASE` exported, without squatting on borg's namespace. |
 
@@ -646,7 +656,7 @@ bundle's sha256, so a reader can pair the tag with the evidence without being th
 | --- | --- | --- |
 | `v0.8.0` | stage 8's gate | The borg-compatible feature set: 33 of borg's 36 commands, every remote backend, both evidence gates at zero unexplained gaps, and the interoperability gate green in both directions. The three commands not implemented — `mount`, `umount`, `webdav` — are §0.6 non-goals, not shortfalls |
 | `v0.9.0` | stage 9's gate | Performance work only (§12). No format change, no interface change: a repository written by 0.9.0 is one 0.8.0 and borg both read. The claim rests on the baseline numbers in the bundle, so the bundle must carry benchmark JSON |
-| `v1.0.0` | stage 10's gate | The first version that may write something borg cannot read (§13). **A tag is not enough to make this safe** — see below |
+| `v1.0.0` | the format gate | The first version that may write something borg cannot read (ROADMAP R0). **A tag is not enough to make this safe** — see below |
 
 **Rules that apply to all of them.**
 
@@ -664,7 +674,7 @@ bundle's sha256, so a reader can pair the tag with the evidence without being th
 - **Before 1.0.0, semver's 0.x rule applies**: no interface stability is promised, and the
   plan's §0.6 non-goals are not promises to keep either.
 
-**Why `v1.0.0` needs more than a tag.** If stage 10 changes the format, a version number in
+**Why `v1.0.0` needs more than a tag.** If ROADMAP R0 changes the format, a version number in
 git protects nobody: the *repository* has to announce it. Both tools refuse a repository
 whose stored version they do not know — borge's own message is `repository version %d is not
 supported` — so a format change must bump `config/version`, and that refusal must be
@@ -678,7 +688,7 @@ version 4 repository and fails somewhere worse than at the door.
 2. **Is the new format the default, or opt-in for a release?** Opt-in costs a flag and
    buys the ability to change one's mind; default-on makes the break sharp and legible.
 3. **What does borg actually do** when it meets the new version — a clean refusal, or
-   something worse? §13 must answer this with a measurement, in both directions, before
+   something worse? ROADMAP R0 must answer this with a measurement, in both directions, before
    the format lands.
 4. ~~**Where do the evidence bundles live once the project is on GitHub?**~~ **Partly
    settled 2026-08-24.** The ZIPs remain outside git at
@@ -1064,7 +1074,7 @@ it is a filesystem, and it is where naive per-object I/O will show up first.
 > | one object-header read, cached | **115 µs** (**25×** faster) |
 >
 > **A single object write costs 2.7 seconds on this mount.** That is the number that
-> matters for stage 10, and it is far worse than the 5 ms per operation the simulated
+> matters for ROADMAP R0, and it is far worse than the 5 ms per operation the simulated
 > test assumed. It says the restore-side problem the whole project is aimed at is
 > dominated by *operation count*, not bandwidth: 118,866 files in one directory at
 > anything like this cost is hopeless no matter how fast the chunker is. Pack-oriented
@@ -1390,7 +1400,7 @@ of a borge-created archive matches the source tree under the strict comparator.
 
 ## 10. Stage 7 — the interoperability gate  ⭐
 
-**This is the gate the whole project turns on.** Nothing in Stage 10 starts until it
+**This is the gate the whole project turns on.** Nothing in ROADMAP R0 starts until it
 is green. It is automated in `tests/interop/` and re-run on every commit thereafter.
 
 The matrix, for each corpus × each key mode × each compression setting:
@@ -3181,122 +3191,21 @@ listed with an explanation, not hidden.
 
 ---
 
-## 13. Stage 10 — format and indexing changes
+## 13. Stage 10 — format and indexing changes — moved 2026-08-27
 
-Only after Stages 7 and 9. Everything here **breaks format compatibility**, so it goes
-behind an explicit repository version bump and a documented migration.
+**Moved to [`ROADMAP.md`](../ROADMAP.md) R0.** Stage 10 was always work that begins after
+the port is complete: it breaks format compatibility, so nothing in it can start until the
+interoperability gate (stage 7) and the performance baseline (stage 9) are closed. It is
+therefore not a porting stage and does not belong in a plan that is archived when porting
+ends.
 
-1. **Large-directory packing.** borg 2's `PackWriter` already packs *chunks*. The
-   remaining problem is the restore side: extracting 118,866 files from one directory
-   means 118,866 `create`+`write`+`close`+`utimes`+`chown` sequences, and on a slow or
-   high-latency filesystem that, not I/O bandwidth, is the wall. Investigate:
-   restore-side batching by pack (sort extraction order by `(pack_id, obj_offset)` so
-   each pack is read once and sequentially), deferred metadata application (write all
-   content, then apply modes/times/xattrs in a second pass), and parallel writers per
-   directory. **Note this is measurable and possibly deliverable without any format
-   change at all** — try it in Stage 9 first, and only change the format if Stage 9
-   proves it is not enough.
-2. **`blugelabs/bluge` for indexing.** Evaluate as a replacement for the chunk index
-   and/or as a new capability (content/metadata search across archives — `borg find`
-   is currently a linear scan). Bluge worked well in `movenotes-v3`. Be honest about
-   the fit: bluge is an inverted-index search engine, and the chunk index is a
-   256-bit-key hash table with a 48-byte value — a different data structure for a
-   different job. The likely outcome is **bluge for archive/file search, borghash
-   retained for the chunk index**, but measure before concluding.
-3. **zstd as the default compression** (borg #10085) once the benchmark supports it —
-   the reference numbers give zstd `SpeedFastest` a better ratio *and* comparable
-   speed versus lz4-class options.
-4. Any further on-disk changes the Stage 9 profiles justify.
+What moved, unchanged: the four work items (restore-side batching, `bluge` for indexing,
+zstd as the default compression, and whatever the stage 9 profiles justify), the list of
+borg quirks that are reproduced deliberately and may be corrected once compatibility is
+lifted (now R0.1), the large-directory restore requirement and its gate (now R0.2), and the
+migration gate.
 
-### 13.1 borg quirks to fix once compatibility is lifted
-
-Until this stage, borge reproduces borg's behaviour including its bugs — a port that
-"fixes" one silently is a port whose output no longer matches, which is the one thing the
-interop gate exists to prevent. Each of these is a place where the compatible behaviour is
-worse than the obvious one. The list is collected here so that lifting the constraint is a
-review of known items rather than a fresh audit.
-
-**Reproduced bugs, to be corrected:**
-
-- **`shellpattern.translate`'s vacuous guard.** borg's `(`, `|` and `)` passthrough checks
-  `pat[i-1] != "\\"` *after* `i` has already advanced, so the guard always passes and
-  `\(` becomes a backslash plus a group opener rather than a literal parenthesis. borge
-  reproduces it (see §6 and `internal/patterns`). A user cannot currently match a filename
-  containing a literal `(` with an `sh:` pattern. Fixing it changes which files a pattern
-  selects, which is why it waits.
-- **`stat.filemode` renders an unknown file type as `?`.** borg's C `_stat` and its
-  pure-Python fallback disagree on that character; borge reproduces the C one because that
-  is the one that runs. Cosmetic, but it is a difference between borge's output and its own
-  documentation.
-
-**Already fixed, recorded so they are not "corrected" back:**
-
-- **borg's `RobustUnpacker` is quadratic.** It rescans its whole buffer on every `feed`,
-  so resynchronising after damage costs O(n²) in the buffered bytes. borge keeps a scan
-  offset and is careful at the buffer's end instead — a provisional rejection near the end
-  is re-examined when more data arrives rather than skipped — and stays linear. See
-  `internal/archive/robust.go`. This is the quadratic behaviour worth naming: it is in the
-  *repair* path rather than the ordinary restore path, and borge does not have it.
-- **borge's `debug search-repo-objs` clamps two negative slice indices** that Python reads
-  as offsets from the end, so it does not blank the context before a hit or double-report
-  one-byte terms. DIVERGENCES #13.
-
-**Not bugs, but constraints worth revisiting:**
-
-- **Restore is lossy in borg's own terms.** The stage 5 gate compares borge's extraction
-  against *borg's*, not against the original tree, because borg's restore does not
-  reproduce everything it stored: `--sparse` restores holes only at chunk granularity
-  (DIVERGENCES #9). Once compatibility is lifted, "restore reproduces the source" becomes
-  an achievable gate rather than an aspiration.
-
-  **Corrected 2026-08-19.** This entry used to name `bsdflags` here too — "read and
-  preserved but never applied" — which is borge's gap and not borg's. borg captures them
-  with `FS_IOC_GETFLAGS` and applies them with `FS_IOC_SETFLAGS`, last of all attribute
-  restoration (`archive.py:1112`). The same wrong sentence stood in DIVERGENCES #8 and in
-  §11's work list; this was the third copy, and all three are now fixed. It belongs in
-  stage 8 as a fidelity gap, not here as a constraint of compatibility.
-- **Item decoding is lossy for unknown keys** at the `Item` struct boundary, which is why
-  `debug dump-archive` reads the raw msgpack instead. A format borge owns can make the
-  round trip total.
-- **Every item carries an empty `xattrs` dict and a zero `bsdflags`.** borg writes both on
-  every item it examined, and the *presence* of each key is what says it looked: with
-  `--noxattrs` or `--noflags` the key is absent instead. That is a real distinction —
-  "checked, found none" against "not recorded" — and borge reproduces it as of stage 8
-  (DIVERGENCES #8), because a borge archive that could not express it would be
-  indistinguishable from one taken with the option.
-
-  What a format borge owns could do is carry the distinction without paying per item: it
-  costs roughly 9 to 18 bytes on every item, so a backup of a million files spends 10 to
-  18 MB of item stream saying "nothing here". An archive-level "these attributes were
-  examined" flag plus per-item values only where non-empty says the same thing in a few
-  bytes. Recorded here rather than acted on because the question can only be asked from a
-  faithful baseline: until borge records the fields, any measurement of the saving is
-  measuring the bug.
-
-### 13.2 Large directories must not slow restore down
-
-This is the requirement the project brief opens with, restated as a gate rather than an
-aspiration: **restoring a directory of 118,866 files must not cost more per file than
-restoring a directory of 100.**
-
-borg reads a backup sequentially and recreates the tree as it goes, the way `tar -x` does.
-Anything worse than linear in that path defeats the intent. What is known so far:
-
-- The **directory-attribute stack** in `internal/archive/extract.go` is O(1) amortised: it
-  pops a directory when the next path leaves it, rather than searching. It does allocate a
-  string per item for the prefix comparison, which is 118,866 allocations on the
-  pathological corpus and trivially removable.
-- The **chunker-per-file construction** (§12.1) is a per-file millisecond cost on the
-  *create* side, worth ~3.5 minutes on that corpus alone.
-- **Restore-side ordering** is item 1 above and is the one with real headroom.
-
-Stage 9 measures all three before anything here changes the format. The point of writing
-them down together is that only one of them needs a format change, and it is not the
-expensive one.
-
-**Gate:** a migration path exists and is tested (borge reads the old format, converts,
-verifies); the change is justified by benchmark JSON in the evidence bundle; and the
-pathological-directory scenario shows per-file restore cost flat against directory size.
+References elsewhere in this plan to "§13" mean ROADMAP R0.
 
 ---
 
@@ -3317,8 +3226,8 @@ than no tracker: it is the document a new reader trusts first.
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
-| 10 | Format / indexing changes | not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
+| 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2 | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **first reserve master built and verified** 2026-08-25 UTC, before the first GitHub push; catalog and reproducible ISO workflow complete, signing/TSA and physical copies remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
@@ -3367,7 +3276,7 @@ harness §12 describes has not been built.
 | Surrogate-escaped path encoding | Silent path corruption on non-UTF-8 filenames | Fuzz round-trip in Stage 1.5; synthetic corpus in Stage 7 |
 | `PackWriter` concurrency ported wrong | Rare, load-dependent repository corruption | Preserve the "index touched only by the calling goroutine" invariant; `-race` in CI |
 | Chunker boundary drift | Total dedup loss, invisible until the repo is huge | Byte-exact boundary differential test (Stage 1.4) |
-| Scope creep across 10 stages | Never finishing | Explicit non-goals (§0.6); one stage at a time; ask before advancing |
+| Scope creep across the stages | Never finishing | Explicit non-goals (§0.6); one stage at a time; ask before advancing |
 | Usage limits interrupting work | Lost context, broken tree | Stage/task granularity, always-committable state, evidence bundles (§2) |
 | **Pure-Go performance shortfall** | Pressure to take a cgo dependency, which would forfeit the `CGO_ENABLED=0` cross-compilation that §12.3's mobile case depends on | Measured 2026-08-17 (§12.2): three of the four largest gaps are borge's own bugs and cost nothing to fix. Take those and the pipeline first, re-measure, and only then consider `avo`-generated assembly — which is still pure Go. A C library is the last resort, not the first. |
 | **A stale plan** | The tracker said stages 4–10 were "not started" while 4–7 had shipped evidence bundles; a new reader trusts that table first | The tracker (§14) is part of finishing a stage, not a postscript. AGENTS.md says so. |

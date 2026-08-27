@@ -4,27 +4,53 @@
 writes the same repositories as `borg`, and that constraint is the reason for most of what
 follows.
 
-Read `docs/PORTING_PLAN.md` first. It is the working plan, it is versioned alongside the
-code, and it is expected to be **corrected when reality disagrees with it** — a stage note
-that no longer matches the code is a bug in the plan, not a historical record to preserve.
+Read the current plan first — see the next section for which document that is. A plan is
+versioned alongside the code and is expected to be **corrected when reality disagrees with
+it**: a note that no longer matches the code is a bug in the plan, not a historical record
+to preserve.
 
 ---
 
-## The three documents
+## How work is planned and tracked
+
+There is exactly **one current plan** at a time, and one long-lived roadmap.
 
 | file | what it is |
 |---|---|
-| `docs/PORTING_PLAN.md` | the plan and the running record of what each stage actually did |
+| `ROADMAP.md` | the numbered items of work that are not porting stages, and their state |
+| `docs/PORTING_PLAN.md` | the current plan **while the port is open**: stages 0-9, and the running record of what each stage actually did |
+| `PLAN.md` | the current plan for one roadmap item, once the port is closed |
+| `plans/` | plans that are finished or superseded, archived unmodified |
 | `docs/DIVERGENCES.md` | every place borge deliberately differs from borg, numbered, with the reason |
 | `docs/FORMAT.md` | the on-disk format, with citations into borg's source |
 
+The workflow:
+
+1. **While the port is open** (through stage 9), `docs/PORTING_PLAN.md` is the plan and
+   `ROADMAP.md` holds everything the port does not own.
+2. **When stage 9 closes**, move `docs/PORTING_PLAN.md` to `plans/` unmodified and stop
+   editing it. Anything in it that describes unfinished non-porting work must already have
+   been moved into `ROADMAP.md` or a document under `docs/` before it is archived — an
+   archive is a record, not a place to look up what to do next.
+3. **After that**, pick an item from `ROADMAP.md`, write `PLAN.md` for it — what the item
+   is, how it is broken into committable tasks, and the gate that decides it is done — and
+   implement it one task at a time.
+4. **When the item is finished**, record the outcome in its `ROADMAP.md` entry, move
+   `PLAN.md` to `plans/<item>-<YYYYMMDD>.md`, and write the next one. Two plans are never
+   current at once, and `plans/` is never edited after the fact.
+
+Whichever plan is current, the same rules hold: a task is finished when it builds, its
+tests pass, and it is committed; the tree is never left broken across a stop; and after a
+gate passes, **stop and ask before starting the next task**.
+
 If you change behaviour that borg also has, you owe an entry in `DIVERGENCES.md`. If you
-finish a piece of a stage, you owe a note in `PORTING_PLAN.md` saying what you found — not
-just what you built — **and an update to the stage tracker in its §14**.
+finish a piece of work, you owe a note in the current plan saying what you found — not
+just what you built — **and an update to its tracker** (`PORTING_PLAN.md` §14 for stages,
+the item's own checklist in `ROADMAP.md` otherwise).
 
 The tracker is the table a new reader trusts before anything else, which is exactly why it
 has to be right: it once claimed stages 4 through 10 were "not started" while four of them
-had shipped evidence bundles. Updating it is part of finishing a stage, not a postscript.
+had shipped evidence bundles. Updating it is part of finishing the work, not a postscript.
 
 ---
 
