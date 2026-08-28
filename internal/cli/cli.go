@@ -77,6 +77,14 @@ func (e *Env) lookup(name string) (string, bool) {
 	return os.LookupEnv(name)
 }
 
+// Every variable is read as BORGE_<NAME> first and BORG_<NAME> second, so an existing borg
+// setup works unchanged and a machine running both can tell them apart.
+//
+//borge:doc user
+//borge:help environment/intro
+//borge:claim environment/prefix-fallback
+var _ = helpText
+
 // lookupBorg reads BORGE_<name>, falling back to BORG_<name> (docs/PORTING_PLAN.md §0.5).
 func (e *Env) lookupBorg(name string) (string, bool) {
 	if v, ok := e.lookup("BORGE_" + name); ok {

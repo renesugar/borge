@@ -133,21 +133,17 @@ func envVarsReadBySource(t *testing.T) []string {
 	return out
 }
 
-// TestHelpTopicsCoverTheCode checks the lists the topics still write out by hand.
+// TestHelpTopicsCoverTheCode checks the one list the topics still write out by hand.
 //
-// Shortened on 2026-08-27. The pattern styles and the compression specifications used to
-// be checked here against a list written in this test; both are now generated from
-// patterns.Styles and compress.SpecDocs, so the topic cannot omit one and a test that it
-// does not omit one cannot fail. The checks that survive are the ones whose lists are
-// still prose: the archive selectors and sort keys of the match-archives topic, which are
-// the next candidates for //borge:enumerates.
+// It had four checks on 2026-08-26 and has one now, which is the point: the pattern
+// styles, the compression specifications and the archive selectors are generated from
+// patterns.Styles, compress.SpecDocs and manifest.Selectors, so a topic cannot omit one
+// and a test that it does not omit one cannot fail. Each of those is now checked where it
+// can fail - the table against the parser that reads it.
+//
+// The sort keys are what is left: they appear in prose, in the fragment beside
+// ListOptions, and nothing but this compares them with the sorter.
 func TestHelpTopicsCoverTheCode(t *testing.T) {
-	// Every archive selector.
-	for _, sel := range []string{"aid:", "tags:", "user:", "host:", "sh:", "re:", "name:"} {
-		if !strings.Contains(helpMatchArchives, sel) {
-			t.Errorf("the match-archives topic does not document the %q selector", sel)
-		}
-	}
 	for _, key := range []string{"timestamp", "name", "id", "host", "user", "tags"} {
 		if !strings.Contains(helpMatchArchives, key) {
 			t.Errorf("the match-archives topic does not document the %q sort key", key)
@@ -157,10 +153,10 @@ func TestHelpTopicsCoverTheCode(t *testing.T) {
 
 // TestTopicsRenderTheirLists is what makes the generated lists safe to rely on.
 //
-// Rendering happens once, at package initialisation, so a broken marker would panic
-// before any of this runs - but only if something reads the topics. This reads them, and
-// then checks the three things a marker can get wrong and still produce output: a marker
-// left in the text, a list rendered empty, and a list that no topic asks for.
+// The topics are generated at build time now, so a marker naming nothing fails docgen
+// rather than reaching a user. What this adds is the failure generation cannot see: a
+// list that rendered, and rendered something no topic contains, which is what a
+// mis-ordered template or a stale generated file looks like.
 func TestTopicsRenderTheirLists(t *testing.T) {
 	for _, topic := range helpTopics() {
 		if strings.Contains(topic.body, "{{enum:") {

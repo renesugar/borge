@@ -74,9 +74,7 @@ type TopicReport struct {
 	// Sections counts the fragments anchored to a named section (//borge:help
 	// topic/section) rather than to the topic as a whole. A topic with none is graded in
 	// one lump, which flatters it: see the topic-anchored-as-a-whole finding.
-	Sections int
-	// Enumerations counts the generated lists this topic embeds.
-	Enumerations     int
+	Sections         int
 	ByGrade          map[Grade]int
 	ExamplesExecuted bool
 }
@@ -148,6 +146,7 @@ func Audit(set *Set, topics, enumerations []string) Report {
 	for _, t := range topics {
 		known[t] = true
 	}
+	anchoredHelp := map[string]Block{}
 	knownEnum := map[string]bool{}
 	for _, e := range enumerations {
 		knownEnum[e] = true
@@ -211,6 +210,19 @@ func Audit(set *Set, topics, enumerations []string) Report {
 				})
 				continue
 			}
+			if first, dup := anchoredHelp[anchor]; dup {
+				// Two fragments claiming one place in a document is exactly the
+				// ambiguity the templates exist to remove: the generator would have to
+				// pick one, and it would pick by source order.
+				report.Findings = append(report.Findings, Finding{
+					Severity: SeverityError, Rule: "duplicate-help-anchor",
+					Message: fmt.Sprintf("//borge:help %s is also anchored at %s:%d; a section has one source",
+						anchor, first.File, first.Line),
+					File: b.File, Line: b.Line,
+				})
+				continue
+			}
+			anchoredHelp[anchor] = b
 			if b.Audience == "" {
 				// A help fragment with no audience is invisible to the generator, which
 				// emits the "user" subset. It would vanish from the topic in silence.
@@ -267,7 +279,10 @@ func Audit(set *Set, topics, enumerations []string) Report {
 					File: b.File, Line: b.Line,
 				})
 			}
-			if b.Audience == "" {
+			if b.Audience == "" && len(b.Enumerates) == 0 {
+				// A block carrying //borge:enumerates is user-facing whether or not it
+				// says so: its entries are rendered verbatim into a topic. Anything else
+				// with a claim and no audience is prose the checkers will never read.
 				report.Findings = append(report.Findings, Finding{
 					Severity: SeverityWarning, Rule: "claim-without-audience",
 					Message: fmt.Sprintf("claim %s is on a comment with no //borge:doc, so the prose checkers will not read it",
@@ -353,7 +368,6 @@ func topicReports(set *Set, topics []string, checked map[string]bool) []TopicRep
 			}
 			seen[name] = true
 			report.Fragments++
-			report.Enumerations += len(b.Enumerates)
 			if strings.Contains(anchor, "/") {
 				report.Sections++
 			}
@@ -409,8 +423,8 @@ func (r Report) Format() string {
 		if t.Sections == 0 {
 			granularity = "whole-topic grade"
 		}
-		fmt.Fprintf(&b, "  %-16s %2d fragment(s)  %-18s %d generated list(s)  %s  %s\n",
-			t.Topic, t.Fragments, granularity, t.Enumerations, gradeLine(t.ByGrade), examples)
+		fmt.Fprintf(&b, "  %-16s %2d fragment(s)  %-18s %s  %s\n",
+			t.Topic, t.Fragments, granularity, gradeLine(t.ByGrade), examples)
 	}
 	fmt.Fprintf(&b, "\n%d anchored fragment(s) in %d file(s): %s\n",
 		r.Blocks, r.Files, gradeLine(r.ByGrade))

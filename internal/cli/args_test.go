@@ -142,6 +142,8 @@ func TestPermutedArgumentsParse(t *testing.T) {
 // The assertion is about the archive rather than about borge's own reporting of it: borg
 // and borge are given the same command, with the option in the position borg has always
 // accepted, and have to produce the same contents.
+//
+//borge:checks patterns/option-order
 func TestExcludeAfterPositionalsMatchesBorg(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 	t.Setenv("BORGE_CACHE_DIR", t.TempDir())

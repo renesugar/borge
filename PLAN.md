@@ -41,7 +41,7 @@ Sized so the first is useful alone. Each is committable; the tree is never left 
   `TestHelpEnvironmentTopicListsEveryVariable` and `TestHelpTopicsCoverTheCode` in favour
   of one mechanism — a generated list cannot drift, so a test that it did not drift is
   dead weight.
-- [ ] **T3 — `docgen --help`.** Per-topic templates naming the fragments they want, in the
+- [x] **T3 — `docgen --help`.** Done 2026-08-27; notes at the end. Per-topic templates naming the fragments they want, in the
   order they want them (concatenation in source order would make the document's shape
   depend on file order), generation into `internal/cli/help_generated.go`, and
   `TestDocsAreCurrent` re-running the extraction in memory and diffing. Migrate the five
@@ -136,3 +136,46 @@ Not done here, deliberately: the match-archives topic still writes its selectors
 keys out by hand, and its test still compares them against a list in the test. They are the
 obvious next `//borge:enumerates`, and they belong with T3's section anchors rather than
 with this batch.
+
+## T3, done 2026-08-27
+
+The five topics are gone from `help.go` as text. Each paragraph is a doc comment on the
+declaration that implements it - the prompting paragraph on `unlockWithPrompt`, the style
+prefixes on `ParsePattern`, the keyfile search on `KeysDirs`, the not-ours variables on the
+remote-shell code - and `helptemplate.go` says which fragments each topic wants, in order.
+`make docgen` writes `help_generated.go`; `TestDocsAreCurrent` regenerates in memory and
+diffs, naming the first line that differs.
+
+The audit finally says something true. Five topics anchored one lump each reported
+"unverified share: 0%"; thirty-one fragments report **39%**, with per-topic breakdowns and
+no warnings outstanding. That number is the deliverable - not because 39% is good, but
+because it is a measurement rather than an assumption, and it is now a number that can be
+driven down one claim at a time.
+
+Four things this turned up:
+
+- **gofmt owns doc comments, and it edits them.** It moves `//borge:` directives to the
+  bottom of a comment, so the design of "rationale above the directive, user text below"
+  was impossible - a comment is one audience or the other, which is what the plan said in
+  the first place. It rewrites a line beginning with `-`, `+` or `*` into a list, which
+  silently changed `+ PATTERN include` into `- PATTERN include`; the fix is to quote the
+  character. And it strips the indentation off a code block that *starts* a comment, so a
+  fragment that is only example commands cannot carry its own indentation - the template
+  indents it instead.
+- **`id:NAME` was an accepted archive selector documented nowhere.** Writing the check that
+  compares `manifest.Selectors` against what actually accepts a selector found it: the
+  name-pattern styles reach `patterns.CompileName` through `applyMatch`'s default branch,
+  so `sh:`, `re:` and `id:` are accepted there rather than in the switch. It is documented
+  now. This is the second undocumented behaviour the R2 work has surfaced.
+- **One topic, one column.** Each generated list measured its own width, so the environment
+  topic's six sections indented their descriptions differently and read as six unrelated
+  tables. A list that serves several places now measures across all of them.
+- **A quoted command inside a generated list breaks the examples inventory.** The `aid:`
+  description said `"borge repo-list --short" prints ids`, and the wrap put a newline
+  inside the quotes, so `TestHelpExamplesRun` could no longer find the command it had an
+  entry for. Reworded: a table cell is not a good place to quote a command, because where
+  it wraps is not up to the author.
+
+The text a user sees is unchanged except where it was meant to change: the three quoted
+action characters, the selector list gaining `id:` and losing its blank lines, and the
+environment topic's single column. Every topic was diffed against the previous build.

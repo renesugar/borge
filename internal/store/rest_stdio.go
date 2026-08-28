@@ -227,6 +227,31 @@ func (b *tailBuffer) lines() []string {
 	return out
 }
 
+// helpText marks a declaration that exists only to carry user-facing documentation.
+//
+// The doc comment above such a declaration is help text and nothing else: docgen renders
+// it into "borge help", so a maintainer's note in it would be printed at a user. Notes
+// belong in the code below it.
+const helpText = "user-facing help text"
+
+// Several variables here are not borge's own and are read under their own names, because the
+// tools on the far end and the libraries in between already use them: BORGSTORE_RSH is
+// honoured before BORGE_RSH and BORG_RSH, so a remote shell configured for borg works
+// unchanged; BORGSTORE_REST_USERNAME and BORGSTORE_REST_PASSWORD authenticate an http(s)://
+// repository whose URL carries no credentials; and RCLONE_BINARY names the rclone to run for
+// an rclone: repository.
+//
+// An s3: or b2: repository takes its credentials from the URL, or from AWS_ACCESS_KEY_ID,
+// AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN, or from the profile named by AWS_PROFILE in
+// AWS_SHARED_CREDENTIALS_FILE (~/.aws/credentials by default) - the order boto3 uses, so a
+// machine set up for borg needs no second setup. AWS_REGION and AWS_DEFAULT_REGION choose the
+// region, which is part of the signature rather than only an address: signing for the wrong
+// one is refused rather than redirected.
+//
+//borge:doc user
+//borge:help environment/remote-not-ours
+var _ = helpText
+
 // SSHCommand builds the ssh prefix borgstore builds, honouring the same environment.
 //
 // BORGSTORE_RSH replaces the whole command, options included, because a user who sets it

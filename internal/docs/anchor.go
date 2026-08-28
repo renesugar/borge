@@ -283,3 +283,29 @@ func collectBlock(set *Set, fset *token.FileSet, doc *ast.CommentGroup, file, de
 	}
 	set.Blocks = append(set.Blocks, block)
 }
+
+// Fragment returns the block anchored to one //borge:help value, which is a topic name or
+// a "topic/section".
+//
+// The generator asks for fragments by name rather than walking the set in source order:
+// assembling a document from whatever order the files happened to be read in makes its
+// shape depend on the filesystem, which is neither reviewable nor stable.
+func (s *Set) Fragment(name string) (Block, bool) {
+	for _, b := range s.Blocks {
+		for _, anchor := range b.Topics {
+			if anchor == name {
+				return b, true
+			}
+		}
+	}
+	return Block{}, false
+}
+
+// HelpAnchors lists every //borge:help value in the set, in source order.
+func (s *Set) HelpAnchors() []string {
+	var out []string
+	for _, b := range s.Blocks {
+		out = append(out, b.Topics...)
+	}
+	return out
+}

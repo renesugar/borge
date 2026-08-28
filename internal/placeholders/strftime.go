@@ -9,6 +9,25 @@ import (
 	"time"
 )
 
+// {now} and {utcnow} take strftime directives: %Y year, %m month, %d day, %H hour,
+// %M minute, %S second, %f microseconds, %j day of year, %U and %W week number, %V and %G
+// the ISO week and its year, %a %A %b %B the day and month names, %p AM/PM, %z and %Z the
+// zone, %s the epoch seconds. %F, %T, %D and %R are the usual composites. A literal percent
+// is %%.
+//
+// %c, %x and %X are refused. They format a date the way the machine's locale prefers, and an
+// archive name is an identifier: it is matched by scripts and sorted by retention rules, so
+// it must not change with LC_TIME. For the same reason the day and month names are always
+// English here, where borg follows the locale.
+//
+// An unknown directive is an error rather than being copied through, so a typo in a crontab
+// is caught the first time rather than baked into a year of archive names.
+//
+//borge:doc user
+//borge:help placeholders/formats
+//borge:claim placeholders/locale-independent-formats
+var _ = helpText
+
 // strftime formats a time with C/Python strftime directives.
 //
 // # Why not time.Format

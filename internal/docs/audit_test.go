@@ -228,6 +228,15 @@ func TestAuditDetects(t *testing.T) {
 			"topic-anchored-as-a-whole",
 		},
 		{
+			"two fragments anchored to one section",
+			func(f map[string]string) {
+				f["help.go"] = strings.Replace(f["help.go"],
+					"//borge:help environment/passphrases",
+					"//borge:help patterns/styles", 1)
+			},
+			"duplicate-help-anchor",
+		},
+		{
 			"an anchor naming a generated list the code does not define",
 			func(f map[string]string) {
 				f["help.go"] = strings.Replace(f["help.go"],
@@ -288,7 +297,7 @@ func TestAuditGradesFragments(t *testing.T) {
 // Generated lists what the code defines.
 //
 //borge:doc user
-//borge:help patterns/styles
+//borge:help patterns/prefixes
 //borge:enumerates pattern-styles
 const Generated = "..."
 

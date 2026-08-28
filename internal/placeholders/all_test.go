@@ -85,3 +85,45 @@ func TestAllCoversWhatExpands(t *testing.T) {
 		}
 	}
 }
+
+// TestOnePassSeesOneInstant checks the claim the placeholders topic makes about time: every
+// placeholder in one command sees the same instant, so a name built from {now} and
+// {unixtime} cannot straddle a second boundary.
+//
+// The mechanism is that Values carries the instants and Expand never reads the clock. That
+// is what this asserts - two expansions of the same Values agree, and they agree with the
+// instant the caller put in - because a Values built once per command is what the sentence
+// actually promises.
+//
+//borge:checks placeholders/one-instant
+func TestOnePassSeesOneInstant(t *testing.T) {
+	instant := time.Date(2026, 8, 27, 23, 59, 59, 0, time.UTC)
+	values := testValues()
+	values.Now = instant
+	values.UTCNow = instant
+
+	got, err := values.Expand("{now:%Y-%m-%dT%H:%M:%S}-{unixtime}-{utcnow:%s}")
+	if err != nil {
+		t.Fatalf("expanding: %v", err)
+	}
+	want := "2026-08-27T23:59:59-1787875199-1787875199"
+	if got != want {
+		t.Fatalf("expanded to %q, want %q", got, want)
+	}
+
+	// The same Values used later still yields the same text: nothing in the path reads
+	// the clock, which is what makes "one command, one instant" true rather than likely.
+	again, err := values.Expand("{now:%Y-%m-%dT%H:%M:%S}-{unixtime}-{utcnow:%s}")
+	if err != nil {
+		t.Fatalf("expanding again: %v", err)
+	}
+	if again != got {
+		t.Errorf("a second expansion gave %q, want %q; something read the clock", again, got)
+	}
+
+	// And the fixture is not accidentally the zero time, which would make both
+	// comparisons above vacuous.
+	if instant.Unix() == 0 {
+		t.Fatal("the test instant is the epoch, so this proves nothing")
+	}
+}

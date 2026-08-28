@@ -149,6 +149,8 @@ func TestPruneKeepInterval(t *testing.T) {
 
 // TestPruneNeverTouchesProtected: the protected tag is what a retention policy must not be
 // able to override.
+//
+//borge:checks match-archives/protected-tag
 func TestPruneNeverTouchesProtected(t *testing.T) {
 	base := time.Date(2026, 3, 10, 12, 0, 0, 0, time.Local)
 	var archives []Info

@@ -552,22 +552,6 @@ var matchArchivesExamples = map[string]exampleCheck{
 		},
 	},
 
-	// From "\"borge repo-list --short\" prints ids".
-	`borge repo-list --short`: {
-		wantExit: ExitOK,
-		check: func(t *testing.T, f *helpFixture, stdout, stderr string) {
-			lines := nonEmptyLines(stdout)
-			if len(lines) < 4 {
-				t.Fatalf("expected the fixture's archives, got %d lines:\n%s", len(lines), stdout)
-			}
-			for _, line := range lines {
-				if !archiveIDLine.MatchString(line) {
-					t.Errorf("--short printed something that is not an id: %q", line)
-				}
-			}
-		},
-	},
-
 	// From "tag one with \"borge tag --add @PROT ARCHIVE\"".
 	`borge tag --add @PROT ARCHIVE`: {
 		wantExit: ExitOK,

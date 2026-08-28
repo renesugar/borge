@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/renesugar/borge/internal/compress"
+	"github.com/renesugar/borge/internal/manifest"
 	"github.com/renesugar/borge/internal/patterns"
 	"github.com/renesugar/borge/internal/placeholders"
 )
@@ -42,6 +43,9 @@ type envVar struct {
 // The sections are presentation, and they are here rather than in the topic because the
 // topic is generated from this: a variable added without a section would have nowhere to
 // appear, which is a mistake worth making impossible rather than catching later.
+//
+//borge:enumerates environment-variables
+//borge:claim environment/other-passphrase-no-fallback
 func envVars() []envVar {
 	return []envVar{
 		// REPOSITORY AND KEYS
@@ -112,6 +116,10 @@ type enumeration struct {
 	// args are the accepted {{enum:name:argument}} values. Empty means the list takes no
 	// argument.
 	args []string
+	// sharedWidth lays every part of a multi-part list out in one column. Without it each
+	// part is measured on its own and the environment topic's six sections indent their
+	// descriptions differently, which reads as six unrelated tables rather than one.
+	sharedWidth bool
 	// entries renders the list, given one of args (or "" when there are none).
 	entries func(arg string) []enumEntry
 }
@@ -133,6 +141,17 @@ func enumerations() []enumeration {
 						argument = "PATH"
 					}
 					out = append(out, enumEntry{s.Prefix + ":" + argument, s.Description})
+				}
+				return out
+			},
+		},
+		{
+			name:   "archive-selectors",
+			source: "manifest.Selectors",
+			entries: func(string) []enumEntry {
+				var out []enumEntry
+				for _, sel := range manifest.Selectors() {
+					out = append(out, enumEntry{sel.Syntax, sel.Description})
 				}
 				return out
 			},
@@ -160,9 +179,10 @@ func enumerations() []enumeration {
 			},
 		},
 		{
-			name:   "environment-variables",
-			source: "cli.envVars",
-			args:   envSections(),
+			name:        "environment-variables",
+			source:      "cli.envVars",
+			args:        envSections(),
+			sharedWidth: true,
 			entries: func(section string) []enumEntry {
 				var out []enumEntry
 				for _, v := range envVars() {
@@ -243,7 +263,14 @@ func renderEnumerations(body string) (string, error) {
 			failure = fmt.Errorf("help: %s rendered nothing", marker)
 			return marker
 		}
-		return renderEnumEntries(entries)
+		measured := entries
+		if e.sharedWidth {
+			measured = nil
+			for _, other := range e.args {
+				measured = append(measured, e.entries(other)...)
+			}
+		}
+		return renderEnumEntries(entries, enumColumn(measured))
 	})
 	if failure != nil {
 		return "", failure
@@ -263,8 +290,8 @@ const (
 	enumWrap     = 88
 )
 
-// renderEnumEntries lays out one list.
-func renderEnumEntries(entries []enumEntry) string {
+// enumColumn is the column the descriptions start in for a set of entries.
+func enumColumn(entries []enumEntry) int {
 	width := enumMinWidth
 	for _, e := range entries {
 		if n := len("  " + e.Term + " "); n > width {
@@ -274,6 +301,11 @@ func renderEnumEntries(entries []enumEntry) string {
 	if width > enumMaxWidth {
 		width = enumMaxWidth
 	}
+	return width
+}
+
+// renderEnumEntries lays out one list in the given column.
+func renderEnumEntries(entries []enumEntry, width int) string {
 	var b strings.Builder
 	for i, e := range entries {
 		if i > 0 {

@@ -358,6 +358,8 @@ func TestBorgeWritesBorgReads(t *testing.T) {
 // compression is worthwhile, which shows up as unexplained repository size
 // differences. Where they legitimately differ (zstd's level mapping is approximate,
 // see zstdLevel) the case is reported rather than failed.
+//
+//borge:checks compression/incompressible-stored-plain
 func TestDecisionsMatchBorg(t *testing.T) {
 	o := startOracle(t)
 	data := corpus(t)

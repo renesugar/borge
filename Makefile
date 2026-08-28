@@ -26,7 +26,7 @@ BORG2       := tests/borg2/borg2
 # leaves room for the work.
 TIMEOUT     ?= -timeout 120m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit \
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit docgen \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
         evidence-verify evidence-verify-full evidence-attest evidence-negative \
         evidence-isos clean help
@@ -79,6 +79,11 @@ lint:
 	else \
 		echo "lint: golangci-lint not installed, skipping (go vet still runs via 'make vet')"; \
 	fi
+
+## docgen: regenerate the help topics from the anchored documentation
+docgen:
+	go run ./cmd/docgen -root .
+	gofmt -w internal/cli/help_generated.go
 
 ## docaudit: report how the user-facing documentation is verified (ROADMAP R2)
 docaudit:

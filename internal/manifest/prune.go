@@ -39,6 +39,17 @@ import (
 // means one per local day, and a user in UTC+13 whose backups run at 20:00 would otherwise
 // find them all landing in the next UTC day and being pruned as duplicates.
 
+// An archive tagged @PROT is never pruned and never counts against a retention rule's
+// quota. Tag one with "borge tag --add @PROT ARCHIVE".
+//
+// It does not appear in prune's listing either: it is set aside before the rules run, so
+// "--list" shows only the archives the policy actually decided about.
+//
+//borge:doc user
+//borge:help match-archives/protected-tag
+//borge:claim match-archives/protected-tag
+var _ = helpText
+
 // ProtectedTag marks an archive that no pruning may ever remove.
 //
 // It exists because a retention policy is a blunt instrument and some archives are not

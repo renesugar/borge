@@ -148,6 +148,8 @@ sys.stdout.write(dt.strftime(sys.argv[9]))
 }
 
 // TestStrftimeRefusesWhatItCannotDoRight.
+//
+//borge:checks placeholders/locale-independent-formats
 func TestStrftimeRefusesWhatItCannotDoRight(t *testing.T) {
 	when := time.Now()
 

@@ -14,6 +14,43 @@ import (
 	"strings"
 )
 
+// helpText marks a declaration that exists only to carry user-facing documentation.
+//
+// The doc comment above such a declaration is help text and nothing else: docgen renders
+// it into "borge help", so a maintainer's note in it would be printed at a user. Notes
+// belong in the code below it.
+const helpText = "user-facing help text"
+
+// Compression applies to each chunk as it is stored, and is chosen with -C or
+// --compression. A chunk's id is the hash of its *plaintext*, so compression sits below
+// deduplication: changing it does not change which chunks exist, only how large they are.
+// That is why "borge recreate --compression" cannot work and "borge repo-compress" exists.
+//
+//borge:doc user
+//borge:help compression/intro
+var _ = helpText
+
+// A chunk that does not get smaller is stored uncompressed whatever the setting, so a
+// high level costs time and never costs space.
+//
+//borge:doc user
+//borge:help compression/incompressible
+//borge:claim compression/incompressible-stored-plain
+var _ = helpText
+
+// borge compresses with a pure-Go zstd implementation whose encoder has four levels where
+// libzstd has twenty-two. Levels are mapped onto those four, so "zstd,16" and "zstd,22"
+// produce identical output, as do "lzma,0", "lzma,6" and "lzma,9".
+//
+// This costs no interoperability - the level is metadata, borg reads borge's chunks and
+// the stored level records what was asked for - but a high level does not compress as hard
+// as borg's would. "borge benchmark cpu --compressing" shows the ratio each level actually
+// achieves on this machine. See docs/DIVERGENCES.md #16.
+//
+//borge:doc user
+//borge:help compression/levels
+var _ = helpText
+
 // Spec is a parsed --compression argument.
 //
 // The accepted grammar, from borg:
@@ -208,6 +245,8 @@ type SpecDoc struct {
 // This is the source the help topic renders. TestSpecDocsCoverTheParser checks it against
 // parseSpec in both directions, so a codec cannot be added without appearing here and a
 // line here cannot describe something the parser rejects.
+//
+//borge:enumerates compression-specs
 func SpecDocs() []SpecDoc {
 	return []SpecDoc{
 		{"none", "none", "store the chunk as it is"},

@@ -77,6 +77,20 @@ func (e *Env) terminalFD() (int, bool) {
 	return fd, term.IsTerminal(fd)
 }
 
+// When the environment does not supply a working passphrase, borge asks at the terminal,
+// with echo off, up to three times. It asks only after the environment has been tried and
+// only for a repository that actually has a passphrase, so the unencrypted modes never
+// prompt - and a wrong BORGE_PASSPHRASE gets a prompt rather than a bare refusal.
+//
+// With no terminal - a cron job, a pipeline - there is nothing to ask at, so the command
+// says which variable to set and stops rather than hanging. The prompt is written to stderr,
+// so redirecting a command's output still captures only its output.
+//
+//borge:doc user
+//borge:help environment/passphrases
+//borge:claim environment/passphrase-prompt
+var _ = helpText
+
 // unlockWithPrompt opens a repository's key, asking for the passphrase if the environment
 // did not supply a working one.
 func (e *Env) unlockWithPrompt(repo *repository.Repository) (key.Key, *key.Unlocked, error) {

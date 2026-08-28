@@ -70,6 +70,7 @@ make evidence-verify-full     # the same, and require every signature and token
 make evidence-attest          # sign and timestamp anything not yet attested
 make evidence-negative        # prove the attestation checks can fail
 make docaudit                 # report how the user-facing documentation is verified
+make docgen                   # regenerate the help topics from the anchored source
 ```
 
 Every source file needs an SPDX header; `scripts/check-spdx.sh` enforces it. A file ported
@@ -218,11 +219,28 @@ the source. The grades, best first: **executed** (the suite runs the prose's own
 examples), **generated**, **claimed**, **unverified** — the last is permitted and counted,
 because the point is that the untested share is a number rather than an assumption.
 
-The topics are still anchored one lump each, which the audit says out loud
-(`topic-anchored-as-a-whole`) rather than reporting a flattering 0% unverified; `docgen`
-splits them into sections (`ROADMAP.md` R2). Until then the rule for prose is still partly
-manual: **if you change behaviour, grep the help topics for what you just made false.**
-`borge help <topic>` renders them; `internal/cli/help.go` holds them.
+**The help topics are generated.** `internal/cli/help_generated.go` is written by
+`make docgen` and must not be edited: each paragraph lives in a doc comment beside the
+code that implements it — the prompting paragraph on `unlockWithPrompt`, the pattern
+styles on `ParsePattern` — and `internal/cli/helptemplate.go` says which fragments each
+topic wants and in what order. `TestDocsAreCurrent` fails when the checked-in file no
+longer matches, so editing a fragment without regenerating is a test failure rather than a
+shipped inconsistency. To change help text, change the comment beside the code and run
+`make docgen`.
+
+A fragment's doc comment is user-facing text **and nothing else** — docgen prints it at a
+user, so maintainer notes go in the code below it. Fragments that describe nothing in
+particular (a topic's introduction, its examples) sit on `var _ = helpText` carriers in
+`help.go`, next to the templates.
+
+Two constraints come from gofmt, and both bite silently:
+
+- **A line in a fragment must not begin with `-`, `+`, or `*`.** gofmt rewrites it into a
+  doc-comment list, changing the characters a user reads. Where the text needs a literal
+  bullet, quote it: `"+" PATTERN` rather than `+ PATTERN`.
+- **A fragment must not begin with an indented block.** gofmt strips the indentation off
+  it. A block of example commands is written unindented and the template indents it with
+  `block(...)` instead of `fragment(...)`.
 
 The *examples* in those topics are no longer manual. `TestHelpExamplesRun`
 (`internal/cli/help_examples_test.go`) runs every command in every topic against a scratch

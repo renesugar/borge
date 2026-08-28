@@ -18,6 +18,8 @@ import (
 // literal path beginning with the characters "sh:" - which matches nothing. Not an error,
 // not a warning: an empty result from list, extract, diff and export-tar alike, which
 // looks exactly like a correct answer of "no such file".
+//
+//borge:checks patterns/prefix-on-positionals
 func TestPositionalPatternStylesMatchBorg(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 	t.Setenv("BORGE_CACHE_DIR", t.TempDir())
