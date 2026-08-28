@@ -404,6 +404,18 @@ sentence into the diff of the change that falsifies it.
    (environment variables, pattern styles, compression specs, placeholders,
    `TestHelpEnvironmentTopicListsEveryVariable` and `TestHelpTopicsCoverTheCode`) into
    generated fragments. Deletes those bespoke tests in favour of one mechanism.
+
+   **Done 2026-08-27**, third of the seven. "Deletes those bespoke tests" turned out to be
+   half right, and the half it got wrong is the useful part: generation removes the drift
+   between a *table and the text*, not between a table and the *code*. Which environment
+   variables borge reads can only be answered by the source, so that scan stays — it now
+   checks `cli.envVars` instead of the rendered topic. What the bespoke tests really were
+   is checks written in the wrong place, comparing the topic against a list inside the
+   test; each is now a check of the table against the behaviour, living beside the
+   behaviour: `patterns.Styles` against the pattern parser, `compress.SpecDocs` against
+   `parseSpec`, `placeholders.All` against the expander. `placeholders.Names()` was itself
+   a second list beside the expander's switch and is now derived from the documented
+   table.
 3. **`docgen --help`** plus per-topic templates and `TestDocsAreCurrent`; move the five
    topics out of `help.go` string constants and into anchored comments.
 4. **`docgen --api`** → `docs/INTERNALS.md`. Lowest value of the four: borge has no exported
@@ -3240,7 +3252,7 @@ than no tracker: it is the document a new reader trusts first.
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **2 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18, item 1 `docaudit` 2026-08-27; items 2–5 and 7 not started. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **3 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18, item 1 `docaudit` and item 2 `//borge:enumerates` 2026-08-27; items 3–5 and 7 not started. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was

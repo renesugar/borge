@@ -191,3 +191,31 @@ func FromSpec(s string) (Compressor, error) {
 	}
 	return spec.Compressor()
 }
+
+// SpecDoc describes one accepted --compression specification for the documentation.
+type SpecDoc struct {
+	// Syntax is what a user writes, with the optional parts shown: "zstd[,LEVEL]".
+	Syntax string
+	// Name is the first comma-separated field, which is what parseSpec switches on.
+	Name string
+	// Description is the user-facing explanation, as "borge help compression" prints it.
+	Description string
+}
+
+// SpecDocs lists the compression specifications borge accepts, in the order the
+// documentation presents them: cheapest first, then the two that nest.
+//
+// This is the source the help topic renders. TestSpecDocsCoverTheParser checks it against
+// parseSpec in both directions, so a codec cannot be added without appearing here and a
+// line here cannot describe something the parser rejects.
+func SpecDocs() []SpecDoc {
+	return []SpecDoc{
+		{"none", "none", "store the chunk as it is"},
+		{"lz4", "lz4", "very fast, modest ratio. borge's default."},
+		{"zstd[,LEVEL]", "zstd", "level -128 to 22, default 3"},
+		{"zlib[,LEVEL]", "zlib", "level 0 to 9, default 6"},
+		{"lzma[,LEVEL]", "lzma", "level 0 to 9, default 6"},
+		{"auto,SPEC", "auto", "try lz4 first, and use SPEC only if it compresses meaningfully better"},
+		{"obfuscate,N,SPEC", "obfuscate", "compress with SPEC, then pad the result to hide its true size"},
+	}
+}

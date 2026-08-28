@@ -55,7 +55,7 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 ### R2. Complete the documentation system
 
-State: **2 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
+State: **3 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
 the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
 and what stage 8 found. Execution is tracked here because it is documentation
 infrastructure, not part of the borg port.
@@ -66,8 +66,11 @@ infrastructure, not part of the borg port.
   `TestDocAuditIsClean` gates it; twelve findings, each with a case that damages a clean
   fixture and requires that rule. It also reports when a topic is anchored in one piece,
   so the grade breakdown cannot read as reassurance it has not earned.
-- [ ] Generate enumerations already checked ad hoc: environment variables, pattern styles,
-  compression specs, and placeholders.
+- [x] Generate enumerations already checked ad hoc: environment variables, pattern styles,
+  compression specs, and placeholders (2026-08-27). The topics render `{{enum:...}}`
+  markers from `patterns.Styles`, `compress.SpecDocs`, `placeholders.All` and
+  `cli.envVars`; each table is checked against the behaviour beside it rather than against
+  a list inside a test. The match-archives selectors are the remaining hand-written list.
 - [ ] Build `docgen --help`, topic templates, and `TestDocsAreCurrent`; migrate the five
   hand-written help topics.
 - [ ] Decide whether `docgen --api` adds enough over `go doc ./internal/...` to justify an

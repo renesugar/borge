@@ -35,7 +35,8 @@ Sized so the first is useful alone. Each is committable; the tree is never left 
   the current tests already verify. No generation yet. This alone would have caught the
   passphrase-prompting claim, because the sentence would have carried a claim id with
   nothing behind it.
-- [ ] **T2 — `//borge:enumerates`.** Generate the lists that are checked ad hoc today:
+- [x] **T2 — `//borge:enumerates`.** Done 2026-08-27; notes at the end. Generate the
+  lists that are checked ad hoc today:
   environment variables, pattern styles, compression specs, placeholders. Delete
   `TestHelpEnvironmentTopicListsEveryVariable` and `TestHelpTopicsCoverTheCode` in favour
   of one mechanism — a generated list cannot drift, so a test that it did not drift is
@@ -100,3 +101,38 @@ What the work turned up:
   package and must not know what borge's topics are; the caller asks the code. A list
   inside the auditor would be a second place for the topics to disagree, which is the bug
   the whole mechanism exists to remove.
+
+## T2, done 2026-08-27
+
+Four lists are now generated: pattern styles, compression specifications, placeholders,
+and environment variables. A topic writes `{{enum:name}}` — `{{enum:name:part}}` where one
+table serves six sections of one topic — and `renderEnumerations` fills it in when the
+package initialises. `docaudit` is given the registry's names, so `//borge:enumerates`
+naming a list the code does not define is an error, and a list no topic anchors is a
+warning.
+
+What this changed about the tests, which is the part worth recording:
+
+- **The check moved to where the data is.** `TestHelpTopicsCoverTheCode` used to compare
+  the topic text against a list written inside the test — a third copy. The tables are now
+  checked against the *behaviour* instead, beside it: `patterns.Styles` against the pattern
+  parser, `compress.SpecDocs` against `parseSpec`, `placeholders.All` against the expander.
+  Each asks the code the reverse question too, by scanning the source for the cases the
+  parser switches on, because only the code can say what it accepts.
+- **One direction cannot be generated away.** Which environment variables borge *reads* is
+  knowable only from the source, so `TestHelpEnvironmentTopicListsEveryVariable` stays; it
+  now checks `cli.envVars` rather than the rendered text. Generation removed the drift
+  between the table and the topic, not the drift between the table and the code.
+- **`placeholders.Names()` was a second list** beside the `switch` in `field()`, and is now
+  derived from the documented table, so the error message a user sees when they mistype a
+  placeholder cannot list a different set from the one the help topic prints.
+- **The renderer refuses rather than degrades.** An unknown list, an argument where none is
+  taken, and a missing or unknown argument are all errors, and rendering happens at
+  startup: a topic that cannot be rendered stops the binary rather than printing
+  `{{enum:...}}` at a user or, worse, printing the surrounding prose with the list silently
+  missing.
+
+Not done here, deliberately: the match-archives topic still writes its selectors and sort
+keys out by hand, and its test still compares them against a list in the test. They are the
+obvious next `//borge:enumerates`, and they belong with T3's section anchors rather than
+with this batch.

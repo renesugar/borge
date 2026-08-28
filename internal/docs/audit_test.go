@@ -12,6 +12,9 @@ import (
 // package is a leaf and must not know what borge's topics are.
 var testTopics = []string{"patterns", "environment"}
 
+// The generated lists the fixtures anchor, supplied by the test for the same reason.
+var testEnums = []string{"pattern-styles"}
+
 // clean is a source set with nothing wrong: every claim checked, every topic anchored,
 // examples executed. Every case below starts from it and breaks exactly one thing, so a
 // finding can only come from what the case did.
@@ -30,7 +33,7 @@ const Patterns = "..."
 //
 //borge:doc user
 //borge:help patterns/styles
-//borge:enumerates a.Styles
+//borge:enumerates pattern-styles
 const PatternStyles = "..."
 
 // Environment is the environment topic.
@@ -67,7 +70,7 @@ func TestPrompting() {}
 
 func auditFiles(t *testing.T, files map[string]string) Report {
 	t.Helper()
-	return Audit(parse(t, files), testTopics)
+	return Audit(parse(t, files), testTopics, testEnums)
 }
 
 // findingRules is the multiset of rules a report produced, for comparison.
@@ -225,6 +228,22 @@ func TestAuditDetects(t *testing.T) {
 			"topic-anchored-as-a-whole",
 		},
 		{
+			"an anchor naming a generated list the code does not define",
+			func(f map[string]string) {
+				f["help.go"] = strings.Replace(f["help.go"],
+					"//borge:enumerates pattern-styles", "//borge:enumerates patern-styles", 1)
+			},
+			"unknown-enumeration",
+		},
+		{
+			"a generated list no documentation anchors",
+			func(f map[string]string) {
+				f["help.go"] = strings.Replace(f["help.go"],
+					"//borge:enumerates pattern-styles\n", "", 1)
+			},
+			"enumeration-not-anchored",
+		},
+		{
 			"a claim on a comment with no audience, which the prose checkers will not read",
 			func(f map[string]string) {
 				f["help.go"] += `
@@ -270,7 +289,7 @@ func TestAuditGradesFragments(t *testing.T) {
 //
 //borge:doc user
 //borge:help patterns/styles
-//borge:enumerates a.Styles
+//borge:enumerates pattern-styles
 const Generated = "..."
 
 // Claimed says something a test checks.

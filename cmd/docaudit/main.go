@@ -35,7 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	report := docs.Audit(set, cli.HelpTopicNames())
+	report := docs.Audit(set, cli.HelpTopicNames(), cli.EnumerationNames())
 
 	if *asJSON {
 		encoder := json.NewEncoder(os.Stdout)

@@ -74,7 +74,9 @@ type TopicReport struct {
 	// Sections counts the fragments anchored to a named section (//borge:help
 	// topic/section) rather than to the topic as a whole. A topic with none is graded in
 	// one lump, which flatters it: see the topic-anchored-as-a-whole finding.
-	Sections         int
+	Sections int
+	// Enumerations counts the generated lists this topic embeds.
+	Enumerations     int
 	ByGrade          map[Grade]int
 	ExamplesExecuted bool
 }
@@ -134,18 +136,23 @@ func gradeOf(b Block, checked map[string]bool) Grade {
 	return GradeUnverified
 }
 
-// Audit checks a parsed set against the topics that actually exist.
+// Audit checks a parsed set against the topics and generated lists that actually exist.
 //
-// The topic list is passed in rather than read here: the topics live in the command layer
-// and this package is a leaf, so the caller - the tool, or a test in that layer - asks the
-// code itself what the topics are. A list written here would be a second place for them to
-// disagree, which is the class of bug this whole package exists to remove.
-func Audit(set *Set, topics []string) Report {
+// Both lists are passed in rather than read here: they live in the command layer and this
+// package is a leaf, so the caller - the tool, or a test in that layer - asks the code
+// itself what exists. A list written here would be a second place for them to disagree,
+// which is the class of bug this whole package exists to remove.
+func Audit(set *Set, topics, enumerations []string) Report {
 	report := Report{ByGrade: map[Grade]int{}, Blocks: len(set.Blocks), Files: set.Files}
 	known := map[string]bool{}
 	for _, t := range topics {
 		known[t] = true
 	}
+	knownEnum := map[string]bool{}
+	for _, e := range enumerations {
+		knownEnum[e] = true
+	}
+	anchoredEnum := map[string]bool{}
 
 	for _, d := range set.Malformed {
 		report.Findings = append(report.Findings, Finding{
@@ -215,6 +222,25 @@ func Audit(set *Set, topics []string) Report {
 				})
 			}
 		}
+		for _, name := range b.Enumerates {
+			if name == "" {
+				report.Findings = append(report.Findings, Finding{
+					Severity: SeverityError, Rule: "directive-missing-argument",
+					Message: "//borge:enumerates names no list", File: b.File, Line: b.Line,
+				})
+				continue
+			}
+			if !knownEnum[name] {
+				report.Findings = append(report.Findings, Finding{
+					Severity: SeverityError, Rule: "unknown-enumeration",
+					Message: fmt.Sprintf("//borge:enumerates %s names a list the code does not define (on %s)",
+						name, b.Decl),
+					File: b.File, Line: b.Line,
+				})
+				continue
+			}
+			anchoredEnum[name] = true
+		}
 		for _, claim := range b.Claims {
 			if claim == "" {
 				report.Findings = append(report.Findings, Finding{
@@ -267,6 +293,18 @@ func Audit(set *Set, topics []string) Report {
 		}
 	}
 
+	for _, name := range enumerations {
+		if !anchoredEnum[name] {
+			// The list is generated, so it cannot be wrong - but nothing says which
+			// documentation it appears in, so the audit cannot report it under a topic.
+			report.Findings = append(report.Findings, Finding{
+				Severity: SeverityWarning, Rule: "enumeration-not-anchored",
+				Message: fmt.Sprintf("the %s list is generated but no //borge:enumerates names it, "+
+					"so no topic is credited with it", name),
+			})
+		}
+	}
+
 	report.Topics = topicReports(set, topics, checked)
 	for _, t := range report.Topics {
 		if t.Fragments == 0 {
@@ -315,6 +353,7 @@ func topicReports(set *Set, topics []string, checked map[string]bool) []TopicRep
 			}
 			seen[name] = true
 			report.Fragments++
+			report.Enumerations += len(b.Enumerates)
 			if strings.Contains(anchor, "/") {
 				report.Sections++
 			}
@@ -370,8 +409,8 @@ func (r Report) Format() string {
 		if t.Sections == 0 {
 			granularity = "whole-topic grade"
 		}
-		fmt.Fprintf(&b, "  %-16s %2d fragment(s)  %-18s %s  %s\n",
-			t.Topic, t.Fragments, granularity, gradeLine(t.ByGrade), examples)
+		fmt.Fprintf(&b, "  %-16s %2d fragment(s)  %-18s %d generated list(s)  %s  %s\n",
+			t.Topic, t.Fragments, granularity, t.Enumerations, gradeLine(t.ByGrade), examples)
 	}
 	fmt.Fprintf(&b, "\n%d anchored fragment(s) in %d file(s): %s\n",
 		r.Blocks, r.Files, gradeLine(r.ByGrade))

@@ -467,3 +467,31 @@ func LoadExcludeFile(r io.Reader) ([]Pattern, error) {
 	}
 	return out, nil
 }
+
+// Style describes one file-pattern style for the documentation.
+type Style struct {
+	// Prefix is the two letters a user writes, without the colon.
+	Prefix string
+	// Description is the user-facing explanation, as "borge help patterns" prints it.
+	Description string
+}
+
+// Styles lists the file-pattern styles, in the order the documentation presents them:
+// the two defaults first, then the rest.
+//
+// This is the source. The help topic renders this list rather than restating it, so a
+// style added here appears in the documentation and a style removed here disappears from
+// it - neither can be forgotten, because there is nowhere to forget it.
+func Styles() []Style {
+	return []Style{
+		{StyleFnmatch, "fnmatch. * matches anything including /, ? matches one character, " +
+			"[abc] matches a character class. This is the default for --exclude."},
+		{StyleShellPath, "shell style. * stops at a directory separator, ** crosses them, " +
+			"? matches one character, and {a,b} alternates."},
+		{StyleRegexPath, "a regular expression, matched against the whole path (Go's regexp " +
+			"syntax, which is RE2 - no backreferences and no lookaround)."},
+		{StylePathPrefix, "path prefix. Matches PATH and everything under it. This is the " +
+			"default for a positional PATH argument."},
+		{StylePathFull, "path full. Matches that one path exactly and nothing under it."},
+	}
+}

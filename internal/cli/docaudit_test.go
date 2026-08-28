@@ -38,7 +38,7 @@ func TestDocAuditIsClean(t *testing.T) {
 		t.Fatal("the audit found no registered checks at all")
 	}
 
-	report := docs.Audit(set, HelpTopicNames())
+	report := docs.Audit(set, HelpTopicNames(), EnumerationNames())
 	for _, finding := range report.Errors() {
 		t.Errorf("%s", finding)
 	}

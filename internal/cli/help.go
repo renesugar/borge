@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 )
 
 // The help topics.
@@ -33,6 +32,31 @@ import (
 // So each topic is written here and pinned by a test that checks it against the code -
 // TestHelpTopicsCoverTheCode fails when a variable, a pattern style or a codec exists in
 // the source and not in the text.
+
+// The rendered topics: the templates above with their generated lists filled in.
+//
+// Rendering at package initialisation rather than per call means a template naming a list
+// that does not exist stops the binary at startup instead of printing a topic with a
+// marker in it. TestTopicsRenderTheirLists is the test that never lets it get that far.
+var (
+	helpPatterns      = mustRenderTopic(helpPatternsTemplate)
+	helpMatchArchives = mustRenderTopic(helpMatchArchivesTemplate)
+	helpPlaceholders  = mustRenderTopic(helpPlaceholdersTemplate)
+	helpCompression   = mustRenderTopic(helpCompressionTemplate)
+	helpEnvironment   = mustRenderTopic(helpEnvironmentTemplate)
+)
+
+// mustRenderTopic fills in a topic's generated lists, or refuses to start.
+//
+// A help topic that cannot be rendered is a programming mistake, not a runtime condition:
+// there is no input that causes it and nothing a user could do about it.
+func mustRenderTopic(body string) string {
+	out, err := renderEnumerations(body)
+	if err != nil {
+		panic(err)
+	}
+	return out
+}
 
 // helpTopic is one topic of "borge help".
 type helpTopic struct {
@@ -146,7 +170,8 @@ func helpTopicNames() []string {
 //borge:doc user
 //borge:help patterns
 //borge:claim patterns/examples
-const helpPatterns = `borge help patterns
+//borge:enumerates pattern-styles
+const helpPatternsTemplate = `borge help patterns
 
 Which files a command acts on is decided by patterns. They appear as --exclude and
 --pattern options, in a --patterns-from or --exclude-from file, and as the positional
@@ -158,19 +183,7 @@ A pattern may carry a two-letter style prefix. Without one, the style depends on
 the pattern appears: --exclude and --pattern default to "fm", and a positional PATH
 defaults to "pp".
 
-  fm:PATTERN   fnmatch. * matches anything including /, ? matches one character,
-               [abc] matches a character class. This is the default for --exclude.
-
-  sh:PATTERN   shell style. * stops at a directory separator, ** crosses them, ? matches
-               one character, and {a,b} alternates.
-
-  re:PATTERN   a regular expression, matched against the whole path (Go's regexp syntax,
-               which is RE2 - no backreferences and no lookaround).
-
-  pp:PATH      path prefix. Matches PATH and everything under it. This is the default
-               for a positional PATH argument.
-
-  pf:PATH      path full. Matches that one path exactly and nothing under it.
+{{enum:pattern-styles}}
 
 The prefix is recognised on positional PATH arguments too, not only on --pattern. borge
 got this wrong once - a positional "sh:**/*.txt" was read as a literal path beginning
@@ -221,7 +234,7 @@ EXAMPLES
 //borge:doc user
 //borge:help match-archives
 //borge:claim match-archives/examples
-const helpMatchArchives = `borge help match-archives
+const helpMatchArchivesTemplate = `borge help match-archives
 
 Commands that act on archives take a selector, as -a or --match-archives, or as a
 positional archive name. A selector is one of:
@@ -281,23 +294,13 @@ EXAMPLES
 //borge:help placeholders
 //borge:claim placeholders/examples
 //borge:claim placeholders/substituted
-const helpPlaceholders = `borge help placeholders
+//borge:enumerates placeholders
+const helpPlaceholdersTemplate = `borge help placeholders
 
 An archive name, a comment, an archive selector (-a) and the repository path may contain
 placeholders, which borge substitutes before using them.
 
-  {now}            the current local time, as YYYY-MM-DDTHH:MM:SS
-  {utcnow}         the same instant in UTC
-  {now:FORMAT}     the current local time in a chosen format
-  {utcnow:FORMAT}  the same in UTC
-  {unixtime}       seconds since the epoch
-  {hostname}       this machine's hostname (BORGE_HOSTNAME overrides it)
-  {fqdn}           its fully qualified name
-  {reverse-fqdn}   the same with the components reversed
-  {user}           the current user (BORGE_USERNAME overrides it)
-  {pid}            this process's id
-  {uuid4}          a random UUID
-  {borgversion}    borge's version, and {borgmajor} {borgminor} {borgpatch} its parts
+{{enum:placeholders}}
 
 Every placeholder in one command sees the same instant, so a name built from {now} and
 {unixtime} cannot straddle a second boundary.
@@ -339,7 +342,8 @@ EXAMPLES
 //borge:doc user
 //borge:help compression
 //borge:claim compression/examples
-const helpCompression = `borge help compression
+//borge:enumerates compression-specs
+const helpCompressionTemplate = `borge help compression
 
 Compression applies to each chunk as it is stored, and is chosen with -C or
 --compression. A chunk's id is the hash of its *plaintext*, so compression sits below
@@ -348,13 +352,7 @@ That is why "borge recreate --compression" cannot work and "borge repo-compress"
 
 SPECIFICATIONS
 
-  none             store the chunk as it is
-  lz4              very fast, modest ratio. borge's default.
-  zstd[,LEVEL]     level -128 to 22, default 3
-  zlib[,LEVEL]     level 0 to 9, default 6
-  lzma[,LEVEL]     level 0 to 9, default 6
-  auto,SPEC        try lz4 first, and use SPEC only if it compresses meaningfully better
-  obfuscate,N,SPEC compress with SPEC, then pad the result to hide its true size
+{{enum:compression-specs}}
 
 A chunk that does not get smaller is stored uncompressed whatever the setting, so a
 high level costs time and never costs space.
@@ -388,25 +386,15 @@ EXAMPLES
 //borge:claim environment/prefix-fallback
 //borge:claim environment/passphrase-prompt
 //borge:claim environment/other-passphrase-no-fallback
-const helpEnvironment = `borge help environment
+//borge:enumerates environment-variables
+const helpEnvironmentTemplate = `borge help environment
 
 Every variable is read as BORGE_<NAME> first and BORG_<NAME> second, so an existing borg
 setup works unchanged and a machine running both can tell them apart.
 
 REPOSITORY AND KEYS
 
-  BORGE_REPO                 the repository to act on, when -r is not given
-  BORGE_PASSPHRASE           the passphrase that unlocks the key
-  BORGE_NEW_PASSPHRASE       the passphrase to set, for "key change-passphrase" and
-                             "key add"
-  BORGE_KEYS_DIR             where keyfiles are kept. Set, it pins the search to that
-                             one directory: a user who says where the keys are is not
-                             asking for a search.
-  BORGE_KEY_FILE             one specific keyfile, overriding the search entirely
-  BORGE_CONFIG_DIR           a configuration directory; its keys/ subdirectory joins the
-                             keyfile search path
-  BORGE_BASE_DIR             a home-like directory; its .config/borge/keys joins the
-                             search path
+{{enum:environment-variables:repository and keys}}
 
 With none of those set, keyfiles are looked for in the user configuration directory,
 under borge/keys and then borg/keys - so a borg installation's keys are found without
@@ -423,46 +411,15 @@ so redirecting a command's output still captures only its output.
 
 CACHE
 
-  BORGE_CACHE_DIR            where the files cache lives
-  BORGE_FILES_CACHE_TTL      how many backups an unused cache entry survives
+{{enum:environment-variables:cache}}
 
 BEHAVIOUR
 
-  BORGE_FIND_FORMAT          the default --format for "find", when it is not given
-  BORGE_LIST_FORMAT          the default --format for "list", when it is not given
-  BORGE_PRUNE_FORMAT         the default --format for "prune", when it is not given
-  BORGE_REPO_LIST_FORMAT     the default --format for "repo-list", when it is not given
-  BORGE_UNITS                si (default), iec or raw, for how sizes are printed
-  BORGE_OTHER_REPO           the source repository for "transfer" and
-                             "repo-create --other-repo", when --other-repo is not given
-  BORGE_OTHER_PASSPHRASE     the passphrase for that source repository. It does NOT fall
-                             back to BORGE_PASSPHRASE, because borg's does not: two
-                             repositories are open at once and need not share one
-  BORGE_ZSTD_MT_WORKERS      how many threads compress a .tar.zst tarball. Unset means
-                             one per CPU, where borg's default is one thread; the bytes
-                             a decompressor sees are the same either way
-  BORGE_HOST_ID              this machine's lock identity, when the derived one is wrong
-  BORGE_DELETE_I_KNOW_WHAT_I_AM_DOING
-                             set to YES to answer repo-delete's confirmation
-  BORGE_ASSERT_ID            where chunk ids are verified: a comma-separated subset of
-                             read, repair, transfer, rechunk. The default is
-                             repair,transfer,rechunk - verifying on the read path costs
-                             a full extra hash pass over everything restored.
+{{enum:environment-variables:behaviour}}
 
 REMOTE REPOSITORIES
 
-  BORGE_RSH                  the remote shell for a rest:// repository with a host,
-                             replacing "ssh" and its options entirely
-  BORGE_REMOTE_PATH          the borge to run on the far end, when a rest:// URL names a
-                             host. Placeholders are expanded, so one setting can serve a
-                             fleet of differently-laid-out machines
-  BORGE_REPO_PERMISSIONS     what a serve --rest process allows its client to do: all
-                             (default), no-delete, write-only or read-only. The option
-                             --permissions overrides it
-  BORGE_KNOWN_HOSTS          the known_hosts file an sftp: repository's host key must be
-                             in, instead of ~/.ssh/known_hosts. There is no option to
-                             accept an unknown key: borge refuses a host it has not seen,
-                             so first contact is made with ssh or sftp and verified there
+{{enum:environment-variables:remote repositories}}
 
 Several variables here are not borge's own and are read under their own names, because the
 tools on the far end and the libraries in between already use them: BORGSTORE_RSH is
@@ -480,15 +437,11 @@ one is refused rather than redirected.
 
 TUNING
 
-  BORGE_PACK_MAX_COUNT       how many objects one pack file holds
-  BORGE_PACK_MAX_SIZE        how large one pack file may become
-  BORGE_PACK_ASYNC           set to "no" to write packs on the calling goroutine
+{{enum:environment-variables:tuning}}
 
 TESTING
 
-  BORGE_TESTONLY_WEAKEN_KDF  weakens the passphrase KDF so tests are fast. Never set
-                             this for a real repository: it makes the passphrase
-                             cheap to attack.
+{{enum:environment-variables:testing}}
 
 NOT BORGE'S
 
@@ -505,16 +458,8 @@ EXAMPLES
 // compare them against the ones the code actually reads.
 func helpEnvVarNames() []string {
 	var out []string
-	for _, line := range strings.Split(helpEnvironment, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if name, ok := strings.CutPrefix(fields[0], "BORGE_"); ok {
-			// An examples line starts with an assignment: BORGE_UNITS=iec borge ...
-			name, _, _ = strings.Cut(name, "=")
-			out = append(out, name)
-		}
+	for _, v := range envVars() {
+		out = append(out, v.Name)
 	}
 	sort.Strings(out)
 	return out

@@ -207,7 +207,14 @@ sentence carries a directive naming what verifies it, and `make docaudit` (gated
 ```
 
 A claim whose check disappears fails the audit, and so does a check whose claim
-disappears. The grades, best first: **executed** (the suite runs the prose's own
+disappears. The lists in the help topics — pattern styles, compression specifications,
+placeholders, environment variables — are **generated** from the code that defines them:
+a topic writes `{{enum:name}}` (or `{{enum:name:part}}`) and `renderEnumerations` fills it
+in at startup, so there is no second list to keep in step. What still needs checking is
+each *table* against the behaviour, and that check lives beside the behaviour:
+`patterns.Styles` against the pattern parser, `compress.SpecDocs` against `parseSpec`,
+`placeholders.All` against the expander, and `cli.envVars` against every `BORGE_` name in
+the source. The grades, best first: **executed** (the suite runs the prose's own
 examples), **generated**, **claimed**, **unverified** — the last is permitted and counted,
 because the point is that the untested share is a number rather than an assumption.
 
@@ -327,10 +334,11 @@ the place to fix them is stage 10, when the compatibility constraint is lifted.
 ## Environment variables
 
 Every one is read as `BORGE_<NAME>` first and `BORG_<NAME>` second, so an existing borg
-setup works unchanged. `borge help environment` is the list, and
-`TestHelpEnvironmentTopicListsEveryVariable` scans the source to keep it honest in both
-directions — a variable the code reads and the topic omits fails, and so does a variable the
-topic documents and nothing reads.
+setup works unchanged. `cli.envVars` is the list and `borge help environment` renders it,
+so a variable documented in one place and not the other is not possible. What is still
+checked is the direction only the source can answer:
+`TestHelpEnvironmentTopicListsEveryVariable` scans for every `BORGE_` name the code reads
+and fails when the table omits one — or documents one nothing reads.
 
 `BORGE_TESTONLY_WEAKEN_KDF=1` makes the passphrase KDF cheap so tests are fast. It must
 never be set for a real repository.

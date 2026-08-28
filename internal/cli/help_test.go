@@ -27,6 +27,10 @@ import (
 
 // TestHelpEnvironmentTopicListsEveryVariable scans the source for the variables the code
 // reads and requires each to be documented.
+//
+// The topic is generated from envVars() since 2026-08-27, so this checks that table
+// rather than the rendered text. The direction that matters is unchanged and cannot be
+// generated away: only the source can say which variables borge actually reads.
 func TestHelpEnvironmentTopicListsEveryVariable(t *testing.T) {
 	read := envVarsReadBySource(t)
 	if len(read) < 10 {
@@ -129,16 +133,15 @@ func envVarsReadBySource(t *testing.T) []string {
 	return out
 }
 
-// TestHelpTopicsCoverTheCode checks the other lists the topics make.
+// TestHelpTopicsCoverTheCode checks the lists the topics still write out by hand.
+//
+// Shortened on 2026-08-27. The pattern styles and the compression specifications used to
+// be checked here against a list written in this test; both are now generated from
+// patterns.Styles and compress.SpecDocs, so the topic cannot omit one and a test that it
+// does not omit one cannot fail. The checks that survive are the ones whose lists are
+// still prose: the archive selectors and sort keys of the match-archives topic, which are
+// the next candidates for //borge:enumerates.
 func TestHelpTopicsCoverTheCode(t *testing.T) {
-	// Every pattern style has to be in the patterns topic. A style a user cannot discover
-	// is a style that does not exist as far as they are concerned.
-	for _, style := range []string{"fm:", "sh:", "re:", "pp:", "pf:"} {
-		if !strings.Contains(helpPatterns, style) {
-			t.Errorf("the patterns topic does not document the %q style", style)
-		}
-	}
-
 	// Every archive selector.
 	for _, sel := range []string{"aid:", "tags:", "user:", "host:", "sh:", "re:", "name:"} {
 		if !strings.Contains(helpMatchArchives, sel) {
@@ -150,14 +153,79 @@ func TestHelpTopicsCoverTheCode(t *testing.T) {
 			t.Errorf("the match-archives topic does not document the %q sort key", key)
 		}
 	}
+}
 
-	// Every compression codec, checked by asking the compressor factory rather than by a
-	// list written here - a new codec would be missed by a second hand-written list just
-	// as it would by the topic.
-	for _, spec := range []string{"none", "lz4", "zstd", "zlib", "lzma", "auto", "obfuscate"} {
-		if !strings.Contains(helpCompression, spec) {
-			t.Errorf("the compression topic does not mention %q", spec)
+// TestTopicsRenderTheirLists is what makes the generated lists safe to rely on.
+//
+// Rendering happens once, at package initialisation, so a broken marker would panic
+// before any of this runs - but only if something reads the topics. This reads them, and
+// then checks the three things a marker can get wrong and still produce output: a marker
+// left in the text, a list rendered empty, and a list that no topic asks for.
+func TestTopicsRenderTheirLists(t *testing.T) {
+	for _, topic := range helpTopics() {
+		if strings.Contains(topic.body, "{{enum:") {
+			t.Errorf("the %s topic still contains a marker:\n%s", topic.name, topic.body)
 		}
+	}
+
+	// Every registered list has to appear in some topic, or it is generated for nobody.
+	rendered := ""
+	for _, topic := range helpTopics() {
+		rendered += topic.body
+	}
+	for _, e := range enumerations() {
+		args := e.args
+		if len(args) == 0 {
+			args = []string{""}
+		}
+		for _, arg := range args {
+			entries := e.entries(arg)
+			if len(entries) == 0 {
+				t.Errorf("the %s list renders nothing for %q", e.name, arg)
+				continue
+			}
+			for _, entry := range entries {
+				if entry.Term == "" {
+					t.Errorf("the %s list has an entry with no term", e.name)
+				}
+				if !strings.Contains(rendered, entry.Term) {
+					t.Errorf("the %s list renders %q, which appears in no topic",
+						e.name, entry.Term)
+				}
+			}
+		}
+	}
+}
+
+// TestRenderEnumerationsRefusesABadMarker. The renderer is what stands between a mistyped
+// marker and a help topic printed with "{{enum:...}}" in it, so it has to fail rather than
+// pass the marker through - and each way of being wrong has to be one it notices.
+func TestRenderEnumerationsRefusesABadMarker(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"an unknown list", "x\n{{enum:not-a-list}}\n", "names no generated list"},
+		{"an argument where none is taken", "x\n{{enum:placeholders:cache}}\n", "takes no argument"},
+		{"a missing argument", "x\n{{enum:environment-variables}}\n", "is not one of"},
+		{"an unknown argument", "x\n{{enum:environment-variables:nowhere}}\n", "is not one of"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := renderEnumerations(tc.body)
+			if err == nil {
+				t.Fatalf("rendered %q without error:\n%s", tc.body, out)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("the error is %q, which does not say %q", err, tc.want)
+			}
+		})
+	}
+
+	// And the shape it is supposed to accept, so the cases above are not passing because
+	// the renderer rejects everything.
+	out, err := renderEnumerations("x\n{{enum:pattern-styles}}\n")
+	if err != nil {
+		t.Fatalf("a valid marker failed: %v", err)
+	}
+	if !strings.Contains(out, "sh:PATTERN") {
+		t.Errorf("the rendered list does not contain the shell style:\n%s", out)
 	}
 }
 
@@ -198,11 +266,15 @@ func TestHelpPlaceholdersTopicIsTrue(t *testing.T) {
 		t.Errorf("the archive is called %q, want %q", stored, want)
 	}
 
-	// Every placeholder the topic lists has to work, or the topic promises something the
-	// tool does not do.
+	// The topic's list is generated from placeholders.All since 2026-08-27, and
+	// TestAllCoversWhatExpands checks that table against the expander in both
+	// directions. What is left to check here is that the generated list reached the
+	// topic at all: a marker that rendered nothing would leave a topic describing
+	// substitution and listing none of it.
 	for _, name := range placeholders.Names() {
 		if !strings.Contains(helpPlaceholders, "{"+name+"}") {
-			t.Errorf("the placeholders topic does not document {%s}", name)
+			t.Errorf("the placeholders topic does not contain {%s}, so its generated "+
+				"list did not reach the text", name)
 		}
 	}
 
