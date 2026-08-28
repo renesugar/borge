@@ -36,6 +36,7 @@ var _ = helpText
 //borge:doc user
 //borge:help compression/incompressible
 //borge:claim compression/incompressible-stored-plain
+//borge:about decideCompress
 var _ = helpText
 
 // borge compresses with a pure-Go zstd implementation whose encoder has four levels where
@@ -49,6 +50,7 @@ var _ = helpText
 //
 //borge:doc user
 //borge:help compression/levels
+//borge:about parseSpec
 var _ = helpText
 
 // Spec is a parsed --compression argument.

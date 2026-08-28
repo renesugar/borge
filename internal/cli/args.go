@@ -100,6 +100,7 @@ func (fs *flagSet) Parse(args []string) error {
 //borge:doc user
 //borge:help patterns/option-order
 //borge:claim patterns/option-order
+//borge:about permute
 var _ = helpText
 
 // permute returns args with the options ahead of the positionals.

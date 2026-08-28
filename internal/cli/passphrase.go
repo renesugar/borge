@@ -89,6 +89,7 @@ func (e *Env) terminalFD() (int, bool) {
 //borge:doc user
 //borge:help environment/passphrases
 //borge:claim environment/passphrase-prompt
+//borge:about Env.unlockWithPrompt
 var _ = helpText
 
 // unlockWithPrompt opens a repository's key, asking for the passphrase if the environment

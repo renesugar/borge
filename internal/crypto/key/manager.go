@@ -145,6 +145,7 @@ const helpText = "user-facing help text"
 //
 //borge:doc user
 //borge:help environment/keyfile-search
+//borge:about KeysDirs
 var _ = helpText
 
 // KeysDirs returns the keyfile search path: where borge writes first, then the places it

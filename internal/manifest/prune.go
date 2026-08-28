@@ -48,6 +48,7 @@ import (
 //borge:doc user
 //borge:help match-archives/protected-tag
 //borge:claim match-archives/protected-tag
+//borge:about hasProtectedTag
 var _ = helpText
 
 // ProtectedTag marks an archive that no pruning may ever remove.

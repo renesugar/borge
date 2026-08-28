@@ -4,6 +4,7 @@ package docs
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -134,6 +135,29 @@ func gradeOf(b Block, checked map[string]bool) Grade {
 	return GradeUnverified
 }
 
+// isExamplesFragment reports whether a block is a topic's examples.
+//
+// Those are exempt from needing code to point at. An examples block is a list of commands
+// with no single implementation, and it is already the best-verified kind of fragment
+// there is: TestHelpExamplesRun executes every line of it. Asking a model whether a reading
+// of some function contradicts a command line would add nothing to that.
+func isExamplesFragment(b Block) bool {
+	for _, topic := range b.Topics {
+		if strings.HasSuffix(topic, ExamplesClaimSuffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// blockName is the fragment's help anchor, or its declaration when it has none.
+func blockName(b Block) string {
+	if len(b.Topics) > 0 {
+		return "//borge:help " + b.Topics[0]
+	}
+	return b.Decl
+}
+
 // Audit checks a parsed set against the topics and generated lists that actually exist.
 //
 // Both lists are passed in rather than read here: they live in the command layer and this
@@ -261,6 +285,40 @@ func Audit(set *Set, topics, enumerations []string) Report {
 				continue
 			}
 			anchoredEnum[name] = true
+		}
+		for _, about := range b.About {
+			if about == "" {
+				report.Findings = append(report.Findings, Finding{
+					Severity: SeverityError, Rule: "directive-missing-argument",
+					Message: "//borge:about names no declaration", File: b.File, Line: b.Line,
+				})
+				continue
+			}
+			// A Set built by hand rather than by Parse has no declaration index, and a
+			// check that cannot resolve a name must not invent a finding about it.
+			dir := filepath.Dir(b.File)
+			if decls, indexed := set.Decls[dir]; indexed && !decls[about] {
+				report.Findings = append(report.Findings, Finding{
+					Severity: SeverityError, Rule: "unknown-declaration",
+					Message: fmt.Sprintf("//borge:about %s names no function in %s; a "+
+						"pointer at nothing is worse than none, because it reads as a link",
+						about, dir),
+					File: b.File, Line: b.Line,
+				})
+			}
+		}
+		// A user-facing fragment that neither sits on a function nor names one is prose
+		// the contradiction checker cannot reach: it has no code to read. That is a gap
+		// rather than a break, so it is a warning - but an unreported one would make
+		// doccheck silently check nothing, which is what it did until 2026-08-28.
+		if b.Audience == "user" && !b.IsFunc && len(b.About) == 0 && !isExamplesFragment(b) {
+			report.Findings = append(report.Findings, Finding{
+				Severity: SeverityWarning, Rule: "fragment-without-code",
+				Message: fmt.Sprintf("%s is user-facing prose on %s, which is not a "+
+					"function and names none with //borge:about; nothing can check it "+
+					"against code", blockName(b), b.Decl),
+				File: b.File, Line: b.Line,
+			})
 		}
 		for _, claim := range b.Claims {
 			if claim == "" {

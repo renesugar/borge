@@ -49,6 +49,7 @@ const helpText = "user-facing help text"
 //borge:doc user
 //borge:help placeholders/intro
 //borge:claim placeholders/substituted
+//borge:about Values.Expand
 var _ = helpText
 
 // Every placeholder in one command sees the same instant, so a name built from {now} and
@@ -57,6 +58,7 @@ var _ = helpText
 //borge:doc user
 //borge:help placeholders/one-instant
 //borge:claim placeholders/one-instant
+//borge:about Default
 var _ = helpText
 
 // Values are the substitutions available to a template.
@@ -180,6 +182,7 @@ func Names() []string {
 //
 //borge:doc user
 //borge:help placeholders/braces
+//borge:about Values.Expand
 var _ = helpText
 
 // Expand substitutes the placeholders in text.

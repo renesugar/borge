@@ -29,6 +29,17 @@
 //	//borge:enumerates expr       the list here is generated from the set the code defines
 //	//borge:claim id              this prose makes a behavioural claim checked by id
 //	//borge:checks id             this function is the registered check for that claim
+//	//borge:about Decl            this prose describes that function, in the same package
+//
+// # Why //borge:about exists
+//
+// gofmt relocates directives to the end of a doc comment, so a fragment cannot mix
+// maintainer rationale with user prose. borge's user-facing fragments therefore live on
+// "var _ = helpText" carriers beside the code rather than on the functions themselves,
+// and a carrier records the file but not the function. //borge:about restores the link
+// the arrangement lost. It was added in R2 T5, when doccheck was found to be checking
+// nothing: every user fragment was on a carrier, so a checker that looked only at
+// functions had an empty list and reported a clean tree.
 //
 // docs/PORTING_PLAN.md 2.1 has the design and the findings that produced it.
 package docs
@@ -52,6 +63,16 @@ const (
 	DirectiveEnumerates = "enumerates"
 	DirectiveClaim      = "claim"
 	DirectiveChecks     = "checks"
+	// DirectiveAbout names the declaration a fragment describes.
+	//
+	// It exists because of the carriers. A doc comment on the function that implements a
+	// sentence needs no such directive - the attachment is the link. But gofmt moves
+	// //borge: directives to the end of a comment, which made "rationale above, user
+	// prose below" impossible, so user-facing fragments live on "var _ = helpText"
+	// declarations beside the code instead (see internal/cli/helptemplate.go). That put
+	// the prose in the right file and lost which function it is about, and doccheck has
+	// nothing to read without it.
+	DirectiveAbout = "about"
 )
 
 var knownDirectives = map[string]bool{
@@ -60,6 +81,7 @@ var knownDirectives = map[string]bool{
 	DirectiveEnumerates: true,
 	DirectiveClaim:      true,
 	DirectiveChecks:     true,
+	DirectiveAbout:      true,
 }
 
 // directiveRE matches a borge directive line. It follows Go's own rule for what counts as
@@ -90,6 +112,7 @@ type Block struct {
 	Topics     []string // //borge:help values, e.g. "environment/passphrases"
 	Enumerates []string // //borge:enumerates values
 	Claims     []string // //borge:claim ids
+	About      []string // //borge:about declarations, e.g. "Env.unlockWithPrompt"
 	Prose      string   // the comment with the directives removed, as Go renders it
 	IsFunc     bool
 	IsTest     bool // the block is in a _test.go file
@@ -111,6 +134,10 @@ type Set struct {
 	// Malformed holds directives that are not part of the vocabulary, and near-misses
 	// that Go would not treat as directives at all.
 	Malformed []Directive
+	// Decls maps a directory to the function declarations it defines, so a
+	// //borge:about naming something that does not exist is a finding rather than a
+	// pointer nobody follows.
+	Decls map[string]map[string]bool
 	// Files counts the Go files parsed, so a caller can refuse to trust a run that
 	// scanned nothing. A parser that silently matched no files reports a clean audit.
 	Files int
@@ -127,7 +154,7 @@ func skipDir(name string) bool {
 
 // Parse reads every Go file under root, including tests, and returns its anchors.
 func Parse(root string) (*Set, error) {
-	set := &Set{}
+	set := &Set{Decls: map[string]map[string]bool{}}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -152,6 +179,7 @@ func Parse(root string) (*Set, error) {
 			rel = path
 		}
 		collectFile(set, fset, file, rel)
+		collectDecls(set, file, filepath.Dir(rel))
 		return nil
 	})
 	if err != nil {
@@ -187,6 +215,23 @@ func collectFile(set *Set, fset *token.FileSet, file *ast.File, name string) {
 					add(s.Doc, s.Name.Name, false)
 				}
 			}
+		}
+	}
+}
+
+// collectDecls records the functions a directory's files declare.
+//
+// Test files are included: a fragment may name a helper, and refusing to resolve it would
+// turn a working pointer into a finding.
+func collectDecls(set *Set, file *ast.File, dir string) {
+	names := set.Decls[dir]
+	if names == nil {
+		names = map[string]bool{}
+		set.Decls[dir] = names
+	}
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok {
+			names[funcName(fd)] = true
 		}
 	}
 }
@@ -272,6 +317,8 @@ func collectBlock(set *Set, fset *token.FileSet, doc *ast.CommentGroup, file, de
 			block.Enumerates = append(block.Enumerates, arg)
 		case DirectiveClaim:
 			block.Claims = append(block.Claims, arg)
+		case DirectiveAbout:
+			block.About = append(block.About, arg)
 		case DirectiveChecks:
 			set.Checks = append(set.Checks, Check{
 				Claim: arg, File: file, Line: line, Func: decl, IsFun: isFunc,
@@ -283,7 +330,7 @@ func collectBlock(set *Set, fset *token.FileSet, doc *ast.CommentGroup, file, de
 	}
 	// A comment that only registers checks is not a documentation block.
 	if block.Audience == "" && len(block.Topics) == 0 &&
-		len(block.Enumerates) == 0 && len(block.Claims) == 0 {
+		len(block.Enumerates) == 0 && len(block.Claims) == 0 && len(block.About) == 0 {
 		return
 	}
 	set.Blocks = append(set.Blocks, block)

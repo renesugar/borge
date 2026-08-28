@@ -147,6 +147,7 @@ func (e *Env) openRepoRaw(loc *location.Location, exclusive bool) (*openedRaw, e
 //
 //borge:doc user
 //borge:help environment/not-borges
+//borge:about cmdDebugInfo
 var _ = helpText
 
 // cmdDebugInfo prints what a bug report needs.

@@ -55,7 +55,7 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 ### R2. Complete the documentation system
 
-State: **5 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
+State: **6 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
 the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
 and what stage 8 found. Execution is tracked here because it is documentation
 infrastructure, not part of the borg port.
@@ -63,8 +63,9 @@ infrastructure, not part of the borg port.
 - [x] Build `docaudit`: parse `//borge:*` anchors, report verification grades per topic,
   and fail on dangling help anchors or claims without registered checks (2026-08-27).
   `internal/docs` parses, `cmd/docaudit` reports, `make docaudit` runs it and
-  `TestDocAuditIsClean` gates it; twelve findings, each with a case that damages a clean
-  fixture and requires that rule. It also reports when a topic is anchored in one piece,
+  `TestDocAuditIsClean` gates it; every rule has a case that damages a clean fixture and
+  requires that rule, and `TestEveryRuleHasADamageCase` reads the audit for rules no case
+  produces — a count in prose could not check itself, and had gone stale by 2026-08-28. It also reports when a topic is anchored in one piece,
   so the grade breakdown cannot read as reassurance it has not earned.
 - [x] Generate enumerations already checked ad hoc: environment variables, pattern styles,
   compression specs, and placeholders (2026-08-27). The topics render `{{enum:...}}`
@@ -72,8 +73,10 @@ infrastructure, not part of the borg port.
   `cli.envVars`; each table is checked against the behaviour beside it rather than against
   a list inside a test. The match-archives selectors are the remaining hand-written list.
 - [x] Build `docgen --help`, topic templates, and `TestDocsAreCurrent`; migrate the five
-  hand-written help topics (2026-08-27). Every paragraph now lives on the declaration that
-  implements it; `make docgen` assembles them and the freshness test diffs. The audit's
+  hand-written help topics (2026-08-27). Every paragraph now lives in the file that
+  implements it, on a carrier declaration beside the code — and, since 2026-08-28, naming
+  that code with `//borge:about`, because "beside" turned out not to be a link anything
+  could follow; `make docgen` assembles them and the freshness test diffs. The audit's
   grade breakdown went from a flattering 0% unverified over five lumps to 39% over
   thirty-one fragments, which is the number the exercise existed to produce.
 - [x] Decide whether `docgen --api` adds enough over `go doc ./internal/...` to justify an
@@ -81,7 +84,20 @@ infrastructure, not part of the borg port.
   under `internal/`, three `package main`s outside it — and `go doc` already renders all
   ~794 exported declarations from the same comments. `//borge:doc api` is now an error
   naming this decision, so nobody can mark a comment for a subset nothing renders.
-- [ ] Build the calibrated, advisory contradiction checker over user-facing anchored prose.
+- [x] Build the calibrated, advisory contradiction checker over user-facing anchored prose
+  (2026-08-28). `internal/doccheck` reads a declaration and its direct callees with the doc
+  comment withheld, then asks a local model whether that reading contradicts the prose;
+  `make doccheck` runs it, `make doccalibrate` scores it, and it is deliberately absent
+  from `make check`. **The checker is built and calibrated; the 1.5B model available here
+  fails the calibration** — 4 of 13 against a 5 of 13 constant-answer baseline — so its
+  verdicts are recorded as noise rather than acted on. Building the labelled set first
+  found three documentation defects: two of the five calibration cases §2.1.1 named never
+  happened; a comment inside `newFlagSet` had been false for nine days after the divergence
+  entry beside it was corrected; and the checker's own first run over the tree found no
+  blocks at all, because every user fragment sits on a `var _ = helpText` carrier. That
+  third one is closed by `//borge:about`, which names the function a fragment describes,
+  with an audit error for a name nothing answers to and a warning for a fragment with
+  neither.
 - [x] Execute every help example and assert its effect (`TestHelpExamplesRun`, 2026-08-18).
 - [ ] Build `docactionable`: generate a command from each topic and run it against the
   existing scratch-repository harness; keep it advisory.
@@ -266,5 +282,11 @@ no repository-format code is duplicated in the frontend.
   or media become unreliable.
 - Publish evidence ZIPs as release assets or in immutable object storage once hosting and
   retention are chosen; the Git manifest is an index, not a substitute for the artifacts.
+- Re-run `make doccalibrate` whenever the model or the hardware changes. `doccheck` is
+  built and its thirteen labelled cases are checked into the tree; the 1.5B model a GTX
+  1650 can hold scores below the constant-answer baseline, so the tool is dormant rather
+  than useful. A larger model may cross it, and the score is the only thing that decides.
+  If cases are added, add them *before* touching the prompts — seven designs were already
+  tried against these thirteen, and that is as much selection pressure as they will bear.
 - Revisit this roadmap at every release. Work moved into the porting plan must be removed
   here so two trackers cannot disagree silently.

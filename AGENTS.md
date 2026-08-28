@@ -71,6 +71,8 @@ make evidence-attest          # sign and timestamp anything not yet attested
 make evidence-negative        # prove the attestation checks can fail
 make docaudit                 # report how the user-facing documentation is verified
 make docgen                   # regenerate the help topics from the anchored source
+make doccalibrate             # score the contradiction checker against the cases from git
+make doccheck                 # ask a local model whether the code contradicts the prose
 ```
 
 Every source file needs an SPDX header; `scripts/check-spdx.sh` enforces it. A file ported
@@ -79,6 +81,33 @@ from borg carries `Apache-2.0 AND BSD-3-Clause` and names the borg file it came 
 `scripts/check-layering.sh` enforces the import direction: a package may import its own
 rank or lower, never higher. Ranks are in that script. A new helper package needs no edit
 (rank 0 is the default); a new domain package does.
+
+### doccheck needs a local model, and is advisory
+
+`make doccheck` asks a model whether a reading of the code contradicts the prose anchored
+to it. It is **not** in `make check` and never will be: the verdicts move when the model
+does, and a build cannot fail on that honestly. What it produces is a triage list.
+
+The model runs locally — the input is this repository's source, and sending it to a service
+to be told whether its comments are accurate is a poor trade.
+
+```
+/home/renes/projects/llama.cpp/build/bin/llama-server \
+  -m /home/renes/projects/llama.cpp/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  --port 8081 --ctx-size 8192 --flash-attn on --chat-template qwen2 --no-kv-unified
+```
+
+`make doccalibrate` scores that model against thirteen labelled cases taken out of this
+repository's history — prose that was true, went false, and was corrected, plus rationale
+that no code can confirm. **Run it before believing a doccheck report.** A checker with no
+known-answer set is a checker whose silence means nothing, and this one is silent most of
+the time. The score to beat is the constant-answer baseline printed beside it; the 1.5B
+model above does not beat it, so its verdicts on this tree are noise. `PLAN.md` records the
+measurements.
+
+The cases are verified against git by `TestCalibrationMatchesGit`, so one cannot be edited
+into agreeing with the checker. Rebuild them with
+`python3 scripts/build-doccheck-calibration.py`.
 
 ### Tests need a real borg
 
@@ -205,6 +234,7 @@ sentence carries a directive naming what verifies it, and `make docaudit` (gated
 //borge:enumerates expr          the list here is generated from what the code defines
 //borge:claim id                 this prose asserts something the check with that id verifies
 //borge:checks id                this function is that check
+//borge:about Decl               this prose describes that function, in the same package
 ```
 
 A claim whose check disappears fails the audit, and so does a check whose claim
@@ -221,17 +251,24 @@ because the point is that the untested share is a number rather than an assumpti
 
 **The help topics are generated.** `internal/cli/help_generated.go` is written by
 `make docgen` and must not be edited: each paragraph lives in a doc comment beside the
-code that implements it — the prompting paragraph on `unlockWithPrompt`, the pattern
-styles on `ParsePattern` — and `internal/cli/helptemplate.go` says which fragments each
-topic wants and in what order. `TestDocsAreCurrent` fails when the checked-in file no
-longer matches, so editing a fragment without regenerating is a test failure rather than a
-shipped inconsistency. To change help text, change the comment beside the code and run
+code that implements it and names that code with `//borge:about` — the prompting paragraph
+about `unlockWithPrompt`, the pattern styles about `ParsePattern` — and
+`internal/cli/helptemplate.go` says which fragments each topic wants and in what order.
+`TestDocsAreCurrent` fails when the checked-in file no longer matches, so editing a
+fragment without regenerating is a test failure rather than a shipped inconsistency. To change help text, change the comment beside the code and run
 `make docgen`.
 
 A fragment's doc comment is user-facing text **and nothing else** — docgen prints it at a
-user, so maintainer notes go in the code below it. Fragments that describe nothing in
-particular (a topic's introduction, its examples) sit on `var _ = helpText` carriers in
-`help.go`, next to the templates.
+user, so maintainer notes go in the code below it. Every user fragment sits on a
+`var _ = helpText` carrier for that reason; the ones that describe nothing in particular
+(a topic's examples) live on carriers in `help.go`, next to the templates.
+
+**A carrier needs `//borge:about`.** gofmt moves directives to the end of a comment, which
+is why the prose sits on a carrier rather than on the function itself — and a carrier says
+nothing about which function it describes. `//borge:about ParsePattern` restores that link;
+the audit errors on a name no function in the directory has, and warns on a user fragment
+that neither sits on a function nor names one. That warning is not cosmetic: without it,
+`doccheck` had nothing to check and reported a clean tree by checking none of it.
 
 Two constraints come from gofmt, and both bite silently:
 

@@ -1,0 +1,22 @@
+{
+  "id": "prompting-passphrase-doc-before",
+  "verdict": "contradicted",
+  "why": "\"Only the environment is consulted\" is denied by the function's own first statement, which returns a passphrase typed at a prompt.",
+  "claim": {
+    "commit": "094e7b44def97381eb6b2747caaaf2df54a922cb~1",
+    "file": "internal/cli/cli.go",
+    "first_line": 252,
+    "last_line": 255,
+    "text": "// passphrase resolves the repository passphrase.\n//\n// Only the environment is consulted. borg also prompts, reads a file descriptor and runs\n// a command; those arrive with the write path, because a read-only command that hangs\n"
+  },
+  "code": [
+    {
+      "commit": "094e7b44def97381eb6b2747caaaf2df54a922cb",
+      "file": "internal/cli/cli.go",
+      "first_line": 258,
+      "last_line": 269,
+      "text": "// borg also reads a file descriptor and runs a command to obtain a passphrase; borge does\n// not do either yet.\nfunc (e *Env) passphrase() string {\n\tif e.prompted != nil {\n\t\treturn *e.prompted\n\t}\n\tif v, ok := e.lookupBorg(\"PASSPHRASE\"); ok {\n\t\treturn v\n\t}\n\treturn \"\"\n}\n\n"
+    }
+  ],
+  "unit": "Env.passphrase"
+}

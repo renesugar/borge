@@ -1,0 +1,29 @@
+{
+  "id": "logjson-divergence-after",
+  "verdict": "supported",
+  "why": "The corrected entry names the three groups as the exception.",
+  "claim": {
+    "commit": "6d14209ff03d0e463dece2fa13f9b221aa4eff3b",
+    "file": "docs/DIVERGENCES.md",
+    "first_line": 1310,
+    "last_line": 1318,
+    "text": "Registered in `newFlagSet` rather than in `commonFlags`, because borg has it on commands\nborge builds without a repository \u2014 `version`, `help`, `completion`. Every borge command\nthat builds a FlagSet does so through that one function, which makes it borge's equivalent\nof borg's common parser.\n\n**Except the three that build no FlagSet at all**, which the first version of this entry\nclaimed were covered and were not. `debug`, `key` and `benchmark` dispatch straight to a\nsubcommand, so they never reach `newFlagSet`: their subcommands had the option and the\ngroups did not. borg accepts it in both places and honours it \u2014\n"
+  },
+  "code": [
+    {
+      "commit": "6d14209ff03d0e463dece2fa13f9b221aa4eff3b~1",
+      "file": "internal/cli/cli.go",
+      "first_line": 228,
+      "last_line": 243,
+      "text": "func newFlagSet(e *Env, name string) *flagSet {\n\tinner := flag.NewFlagSet(\"borge \"+name, flag.ContinueOnError)\n\tinner.SetOutput(e.Stderr)\n\tif e.captureFlags != nil {\n\t\te.captureFlags(inner)\n\t}\n\tfs := &flagSet{FlagSet: inner, env: e, name: name}\n\t// Registered here rather than in commonFlags because borg's --log-json is on every\n\t// command, including the six that take no repository: version, help, completion, and\n\t// the key, debug and benchmark parents. Every borge command builds its options through\n\t// this function, so this is the one place that reaches all of them - borge's\n\t// equivalent of borg's common parser.\n\tinner.BoolVar(&fs.logJSON, \"log-json\", false,\n\t\t\"write stderr as one JSON object per line instead of text\")\n\treturn fs\n}\n"
+    },
+    {
+      "commit": "6d14209ff03d0e463dece2fa13f9b221aa4eff3b~1",
+      "file": "internal/cli/debug.go",
+      "first_line": 72,
+      "last_line": 86,
+      "text": "func cmdDebug(e *Env, args []string) int {\n\tif len(args) == 0 {\n\t\tprintDebugUsage(e.Stdout)\n\t\treturn ExitOK\n\t}\n\tname := args[0]\n\tfor _, c := range debugCommands() {\n\t\tif c.name == name {\n\t\t\treturn c.run(e, args[1:])\n\t\t}\n\t}\n\te.errorf(\"unknown debug command %q\", name)\n\tprintDebugUsage(e.Stderr)\n\treturn ExitError\n}\n"
+    }
+  ],
+  "unit": "newFlagSet"
+}

@@ -250,6 +250,7 @@ const helpText = "user-facing help text"
 //
 //borge:doc user
 //borge:help environment/remote-not-ours
+//borge:about firstEnv
 var _ = helpText
 
 // SSHCommand builds the ssh prefix borgstore builds, honouring the same environment.

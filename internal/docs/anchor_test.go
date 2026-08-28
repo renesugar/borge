@@ -266,3 +266,69 @@ func keysOfBool(m map[string]bool) []string {
 	}
 	return out
 }
+
+// TestParseReadsAboutAndTheDeclarationsItPointsAt.
+//
+// //borge:about is what lets a fragment on a carrier name the function it describes, and
+// the declaration index is what lets the audit reject a name nothing answers to. Both are
+// needed: an about that resolved to nothing would read as a link and be one only in the
+// author's head, which is the exact failure the anchors exist to remove.
+func TestParseReadsAboutAndTheDeclarationsItPointsAt(t *testing.T) {
+	set := parse(t, map[string]string{
+		"a.go": `package a
+
+// Prose about the matcher.
+//
+//borge:doc user
+//borge:help patterns/intro
+//borge:about Matcher.Match
+var _ = helpText
+
+type Matcher struct{}
+
+func (m *Matcher) Match(p string) bool { return true }
+`,
+	})
+	if len(set.Blocks) != 1 {
+		t.Fatalf("parsed %d block(s), want 1", len(set.Blocks))
+	}
+	if got := set.Blocks[0].About; len(got) != 1 || got[0] != "Matcher.Match" {
+		t.Errorf("About = %v, want [Matcher.Match]", got)
+	}
+	decls, ok := set.Decls["."]
+	if !ok {
+		t.Fatalf("no declarations recorded; keys are %v", keysOfDecls(set.Decls))
+	}
+	if !decls["Matcher.Match"] {
+		t.Errorf("the method the fragment names was not indexed: %v", keysOfBool(decls))
+	}
+}
+
+// TestAnAboutOnlyCommentIsStillABlock. A comment whose only anchor is //borge:about says
+// "this prose is about that function", which is a documentation block even without a
+// //borge:doc - and dropping it would lose the pointer silently.
+func TestAnAboutOnlyCommentIsStillABlock(t *testing.T) {
+	set := parse(t, map[string]string{
+		"a.go": `package a
+
+// Prose.
+//
+//borge:about Thing
+var _ = 1
+
+func Thing() {}
+`,
+	})
+	if len(set.Blocks) != 1 {
+		t.Fatalf("parsed %d block(s), want 1", len(set.Blocks))
+	}
+}
+
+// keysOfDecls names the directories the declaration index holds.
+func keysOfDecls(m map[string]map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}

@@ -1,0 +1,22 @@
+{
+  "id": "rationale-retry-not-first-step",
+  "verdict": "not-determinable",
+  "why": "Why the prompt is a retry: the reason lives in the repository format, not in the function being read.",
+  "claim": {
+    "commit": "094e7b44def97381eb6b2747caaaf2df54a922cb",
+    "file": "internal/cli/passphrase.go",
+    "first_line": 26,
+    "last_line": 28,
+    "text": "// A repository's key type is not known until its manifest has been read, and the none-*\n// and authenticated-* modes have no passphrase at all. Asking before opening would mean\n// prompting for repositories that have nothing to unlock.\n"
+  },
+  "code": [
+    {
+      "commit": "094e7b44def97381eb6b2747caaaf2df54a922cb",
+      "file": "internal/cli/passphrase.go",
+      "first_line": 41,
+      "last_line": 127,
+      "text": "// passphraseTries is how many times a prompt is offered before giving up. borg's number.\nconst passphraseTries = 3\n\n// promptPassphrase reads a passphrase from the terminal with echo disabled.\n//\n// ok is false when there is no terminal to ask at - a cron job, a pipeline, a test - in\n// which case the caller must fail with a message about the environment variable rather\n// than hang.\nfunc (e *Env) promptPassphrase(prompt string) (pass string, ok bool, err error) {\n\tfd, isTTY := e.terminalFD()\n\tif !isTTY {\n\t\treturn \"\", false, nil\n\t}\n\tfmt.Fprint(e.Stderr, prompt)\n\tline, err := term.ReadPassword(fd)\n\t// ReadPassword leaves the cursor after the (invisible) input, so the newline the user\n\t// typed has to be echoed or the next output continues on the prompt's line.\n\tfmt.Fprintln(e.Stderr)\n\tif err != nil {\n\t\treturn \"\", true, fmt.Errorf(\"cannot read the passphrase: %w\", err)\n\t}\n\treturn string(line), true, nil\n}\n\n// terminalFD reports the file descriptor to prompt on.\n//\n// The process's standard input is used rather than Env.Stdin: Env.Stdin is an io.Reader\n// so that the whole CLI is testable, and in a test it is a buffer with no terminal behind\n// it - which is exactly the \"no terminal, do not prompt\" answer wanted there. When Env is\n// wired to the real process, the two are the same file.\nfunc (e *Env) terminalFD() (int, bool) {\n\tf, isFile := e.Stdin.(*os.File)\n\tif !isFile {\n\t\treturn 0, false\n\t}\n\tfd := int(f.Fd())\n\treturn fd, term.IsTerminal(fd)\n}\n\n// unlockWithPrompt opens a repository's key, asking for the passphrase if the environment\n// did not supply a working one.\nfunc (e *Env) unlockWithPrompt(repo *repository.Repository) (key.Key, *key.Unlocked, error) {\n\tk, u, err := repo.Unlock(e.passphrase())\n\tif !errors.Is(err, key.ErrPassphraseWrong) {\n\t\treturn k, u, err\n\t}\n\n\tfor try := 0; try < passphraseTries; try++ {\n\t\tpass, ok, promptErr := e.promptPassphrase(\"Enter passphrase for \" + repo.Path() + \": \")\n\t\tif promptErr != nil {\n\t\t\treturn nil, nil, promptErr\n\t\t}\n\t\tif !ok {\n\t\t\t// No terminal: the original error, with the way out.\n\t\t\treturn nil, nil, fmt.Errorf(\"%w (set BORGE_PASSPHRASE or BORG_PASSPHRASE)\", err)\n\t\t}\n\t\tk, u, err = repo.Unlock(pass)\n\t\tif err == nil {\n\t\t\t// Remembered for the rest of this command, so a second unlock - key\n\t\t\t// change-location does two - does not ask twice.\n\t\t\te.rememberPassphrase(pass)\n\t\t\treturn k, u, nil\n\t\t}\n\t\tif !errors.Is(err, key.ErrPassphraseWrong) {\n\t\t\treturn nil, nil, err\n\t\t}\n\t\tif try < passphraseTries-1 {\n\t\t\te.errorf(\"wrong passphrase, try again\")\n\t\t}\n\t}\n\treturn nil, nil, fmt.Errorf(\"%w after %d attempts\", key.ErrPassphraseWrong, passphraseTries)\n}\n\n// unlockKeyManagerWithPrompt is unlockWithPrompt for the key commands, which work through\n// the key manager rather than the repository.\nfunc (e *Env) unlockKeyManagerWithPrompt(mgr *key.Manager, repoPath string) (*key.Unlocked, error) {\n\tu, err := mgr.Unlock(e.passphrase())\n\tif !errors.Is(err, key.ErrPassphraseWrong) {\n\t\treturn u, err\n\t}\n\n\tfor try := 0; try < passphraseTries; try++ {\n\t\tpass, ok, promptErr := e.promptPassphrase(\"Enter passphrase for \" + repoPath + \": \")\n\t\tif promptErr != nil {\n\t\t\treturn nil, promptErr\n\t\t}\n\t\tif !ok {\n"
+    }
+  ],
+  "unit": "Env.unlockWithPrompt"
+}

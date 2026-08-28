@@ -3,6 +3,8 @@
 package docs
 
 import (
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,7 @@ func cleanFiles() map[string]string {
 //borge:doc user
 //borge:help patterns
 //borge:claim patterns/examples
+//borge:about Match
 const Patterns = "..."
 
 // PatternStyles is one section of it.
@@ -34,6 +37,7 @@ const Patterns = "..."
 //borge:doc user
 //borge:help patterns/styles
 //borge:enumerates pattern-styles
+//borge:about Match
 const PatternStyles = "..."
 
 // Environment is the environment topic.
@@ -42,6 +46,7 @@ const PatternStyles = "..."
 //borge:help environment
 //borge:claim environment/examples
 //borge:claim prompts-only-on-tty
+//borge:about Unlock
 const Environment = "..."
 
 // EnvironmentPassphrases is one section of it.
@@ -49,7 +54,14 @@ const Environment = "..."
 //borge:doc user
 //borge:help environment/passphrases
 //borge:claim passphrase-prompted-once
+//borge:about Unlock
 const EnvironmentPassphrases = "..."
+
+// Match is the code the pattern fragments describe.
+func Match() {}
+
+// Unlock is the code the environment fragments describe.
+func Unlock() {}
 `,
 		"help_test.go": `package a
 
@@ -262,6 +274,24 @@ func TestAuditDetects(t *testing.T) {
 			"enumeration-not-anchored",
 		},
 		{
+			"an about naming a function that does not exist",
+			func(f map[string]string) {
+				f["help.go"] = strings.Replace(f["help.go"],
+					"//borge:about Unlock", "//borge:about Unlok", 1)
+			},
+			"unknown-declaration",
+		},
+		{
+			"user prose with no code behind it, which nothing can check",
+			func(f map[string]string) {
+				// The fragment stays; only the pointer to the code goes. That is the
+				// state every fragment in borge was in until 2026-08-28, and doccheck
+				// reported nothing at all because of it.
+				f["help.go"] = strings.Replace(f["help.go"], "//borge:about Unlock\n", "", 1)
+			},
+			"fragment-without-code",
+		},
+		{
 			"a claim on a comment with no audience, which the prose checkers will not read",
 			func(f map[string]string) {
 				f["help.go"] += `
@@ -308,6 +338,7 @@ func TestAuditGradesFragments(t *testing.T) {
 //borge:doc user
 //borge:help patterns/prefixes
 //borge:enumerates pattern-styles
+//borge:about Match
 const Generated = "..."
 
 // Claimed says something a test checks.
@@ -315,12 +346,14 @@ const Generated = "..."
 //borge:doc user
 //borge:help patterns/paths
 //borge:claim paths-are-relative
+//borge:about Match
 const Claimed = "..."
 
 // Unverified is rationale in the user subset: true, useful, and checked by nothing.
 //
 //borge:doc user
 //borge:help patterns/why
+//borge:about Match
 const Unverified = "..."
 `
 	files["more_test.go"] = `package a
@@ -362,6 +395,40 @@ func TestReportFormatSaysWhatItFound(t *testing.T) {
 	for _, want := range []string{"patterns", "environment", "unverified share", "0 error(s)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the report does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestEveryRuleHasADamageCase reads audit.go for the rules it can emit and requires each
+// to appear in the table above.
+//
+// Without it the count of rules and the count of cases drift apart silently, which is how
+// a rule ships that has never been seen to fire. Two rules were added on 2026-08-28 and
+// the documentation still said "twelve findings"; a number in prose cannot check itself,
+// so this checks it instead.
+func TestEveryRuleHasADamageCase(t *testing.T) {
+	source, err := os.ReadFile("audit.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := regexp.MustCompile(`Rule:\s*"([a-z-]+)"`).FindAllStringSubmatch(string(source), -1)
+	if len(rules) < 10 {
+		t.Fatalf("found %d rules in audit.go, which is not this file", len(rules))
+	}
+	cases, err := os.ReadFile("audit_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The table's rule column, which is the only place a bare quoted rule name sits on a
+	// line of its own.
+	covered := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^\t{3}"([a-z-]+)",$`).FindAllStringSubmatch(string(cases), -1) {
+		covered[m[1]] = true
+	}
+	for _, m := range rules {
+		if !covered[m[1]] {
+			t.Errorf("audit.go can report %q and no case in TestAuditDetects produces it, "+
+				"so nothing has ever seen it fire", m[1])
 		}
 	}
 }

@@ -594,6 +594,14 @@ read" is not entailed by any code and never will be. Checking it produces perman
 *not determinable* noise that trains everyone to ignore the report. Only blocks marked
 `//borge:doc user` are checked; rationale stays unmarked and unchecked.
 
+**Which code a fragment is about has to be recorded** (added 2026-08-28). This section
+assumes the prose sits on the declaration that implements it. It mostly does not: gofmt
+relocates `//borge:` directives to the end of a doc comment, so user-facing fragments live
+on `var _ = helpText` carriers beside the code instead. `//borge:about Decl` names the
+function, the audit rejects a name nothing answers to, and it warns when a user fragment
+has neither. Without it `doccheck` had an empty target list and reported a clean tree by
+checking none of it.
+
 **Advisory, never a gate.** The check is non-deterministic and cannot fail a build
 honestly. It emits a triage list — claim, anchor, verdict, the reading that disagreed — for
 review by whoever is making the change, and by the human co-author. A *contradicted* verdict
@@ -613,6 +621,22 @@ whose silence means nothing. Stage 8 supplies real labelled cases, which is unus
 Run the checker against those five before trusting it on anything else. A version that
 cannot separate the before-and-after pairs is not ready, and the pairs are cheap to keep as
 a regression suite because they are recorded in git.
+
+> **Corrected 2026-08-28, when the set was built.** The placeholders rows above are not
+> real. `1a97426` *introduced* the placeholders topic; there is no text before it, and no
+> claim anywhere in the tree at `1a97426~1` that borge does not substitute. The table was
+> written from memory and nothing checked it — in a section arguing that unchecked prose
+> goes false, which is the joke this paragraph exists to record.
+>
+> What git does hold is better: `094e7b4` corrected the same false claim in **four** places
+> (the environment topic, `Env.passphrase`, `key.go`'s header, and a test's stated reason),
+> and `6d14209` corrected a claim about `--log-json` and `newFlagSet` that has nothing to do
+> with passphrases — which matters, because a set where every case is about prompting cannot
+> tell a checker from a checker that has learned one word. The set is thirteen cases:
+> five contradicted, five supported, three rationale. It lives in
+> `internal/doccheck/testdata/calibration`, is built by
+> `scripts/build-doccheck-calibration.py`, and every case is re-read from git by
+> `TestCalibrationMatchesGit` so that none can be edited into agreeing with the checker.
 
 **Honest limits.** An independent reading can share the author's wrong assumption and agree
 with a false claim — correlated error, not eliminated by any of the above. It cannot see

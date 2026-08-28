@@ -33,6 +33,7 @@ const helpText = "user-facing help text"
 //
 //borge:doc user
 //borge:help patterns/intro
+//borge:about Matcher.Match
 var _ = helpText
 
 // The five file-pattern styles, named by their two-letter prefix.
@@ -61,6 +62,7 @@ const (
 //
 //borge:doc user
 //borge:help patterns/stored-paths
+//borge:about normalizePattern
 var _ = helpText
 
 // Pattern matches archived paths.
@@ -180,6 +182,7 @@ func preparePathPattern(pattern, suffix string) string {
 //
 //borge:doc user
 //borge:help patterns/styles
+//borge:about ParsePattern
 var _ = helpText
 
 // The prefix is recognised on positional PATH arguments too, not only on --pattern. borge
@@ -190,6 +193,7 @@ var _ = helpText
 //borge:doc user
 //borge:help patterns/prefix-on-positionals
 //borge:claim patterns/prefix-on-positionals
+//borge:about ParsePattern
 var _ = helpText
 
 // ParsePattern reads a pattern with an optional "xx:" style prefix.
@@ -258,6 +262,7 @@ type entry struct {
 //
 //borge:doc user
 //borge:help patterns/match-order
+//borge:about Matcher.Match
 var _ = helpText
 
 // Matcher decides whether a path is included.

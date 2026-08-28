@@ -49,7 +49,8 @@ Sized so the first is useful alone. Each is committable; the tree is never left 
 - [x] **T4 — `docgen --api`, decided: no.** 2026-08-27; the reasoning is at the end. borge has no exported API; everything is under
   `internal/`, which `go doc ./internal/...` already serves. Record an explicit decision
   either way rather than leaving it as a permanently open item.
-- [ ] **T5 — `doccheck`, advisory.** The contradiction pass of §2.1.1 over `//borge:doc
+- [x] **T5 — `doccheck`, advisory.** Done 2026-08-28; the measurements and the two defects
+  building it turned up are at the end. The contradiction pass of §2.1.1 over `//borge:doc
   user` blocks only. Build the five-case calibration set from git **first**, then the
   checker: entailment (supported / contradicted / not determinable), not similarity —
   negation barely moves an embedding, and the claim that motivated all this was a negation.
@@ -77,9 +78,10 @@ The goal is that the unverified share is small, visible, and deliberate.
 
 `internal/docs` parses the anchors, `cmd/docaudit` reports them, `make docaudit` runs it,
 and `TestDocAuditIsClean` (in `internal/cli`, where the topic list lives) is the gate.
-Twelve findings, each with a case in `internal/docs/audit_test.go` that damages a clean
-fixture one way and requires that rule — a case that fails through some other check counts
-as a failure, because the check it is about would still be unproven.
+Twelve findings at the time — eighteen after T5 — each with a case in
+`internal/docs/audit_test.go` that damages a clean fixture one way and requires that rule —
+a case that fails through some other check counts as a failure, because the check it is
+about would still be unproven.
 
 What the work turned up:
 
@@ -208,3 +210,232 @@ What was measured, rather than assumed:
 What would change the answer: borge growing a package outside `internal/` that other
 programs import. The GUI (R3) does not, by design — it is a frontend to the command-line
 JSON API, which keeps one tested format boundary rather than two.
+
+## T5, done 2026-08-28: `doccheck`, and what the calibration set was for
+
+`internal/doccheck` reads the code blind and asks a local model whether that reading
+contradicts the prose anchored to it. `cmd/doccheck` runs it, `make doccheck` invokes it,
+`make doccalibrate` scores it. It is advisory and it is not in `make check`.
+
+The order in the task mattered: **the calibration set was built first**, from git, before
+any checker existed. Everything below came out of that decision.
+
+### The plan's own calibration table was wrong
+
+`docs/PORTING_PLAN.md` §2.1.1 named five cases. Two of them do not exist. The table says
+the placeholders topic said "borge does not substitute" before `1a97426` and was corrected
+by it — but `1a97426` is the commit that *introduced* placeholders. There is no topic
+before it, and `git grep` at `1a97426~1` finds no such claim anywhere in the tree.
+
+The table was written from memory, in the section arguing that prose nobody checks goes
+false. Building the set from git is what found it, which is the whole argument for building
+it from git.
+
+### What git actually holds: thirteen cases, three subjects
+
+`094e7b4` corrected the same false claim in four places, not one — the environment topic,
+`Env.passphrase`'s doc comment, `key.go`'s header, and a test comment whose assertion was
+right and whose stated reason was false. Each is a before/after pair against the same code,
+which that commit did not touch.
+
+`6d14209` supplies a pair about something else entirely: `--log-json` was claimed to reach
+every command through `newFlagSet`, and three command groups build no `FlagSet` at all.
+That pair earns its place by not being about passphrases.
+`TestCalibrationSubjectsAreNotAllTheSame` requires it: a set where every case is about
+prompting cannot tell a checker from a checker that has learned one word.
+
+Three rationale paragraphs complete it — prose that is true, useful, and not entailed by
+any code, which must come back *not determinable* or the report fills with noise nobody
+reads.
+
+Five contradicted, five supported, three not determinable. A checker that answers the same
+label every time scores 5 of 13, and that is the number to beat.
+
+### The set is verified against git, not typed
+
+Every case records a commit, a path, a line range and the byte-exact text.
+`TestCalibrationMatchesGit` re-reads all of it and fails when a case has drifted. Without
+that, a case can be quietly softened whenever the checker gets it wrong, and the set stops
+being evidence at the moment it is most needed. `TestCalibrationIsBalanced` refuses a set
+where one label is more than half the cases.
+
+### A second false comment, found by hand while building the set
+
+`6d14209` established that `newFlagSet` does not reach the `key`, `debug` and `benchmark`
+parents. It corrected `docs/DIVERGENCES.md` #41 and left the comment *inside `newFlagSet`*
+still saying "this is the one place that reaches all of them", naming those three groups.
+It was still there on 2026-08-28, nine days later. Corrected now, with the date and the
+reason in the comment.
+
+It is worth being precise about what this proves. `doccheck` did not find it — the comment
+is not a doc comment and carries no anchor, so the checker would never have looked at it.
+Building the calibration set found it. But it is exactly the failure the anchors exist to
+prevent: the correction went to the document and not to the code beside the mistake,
+because the two were in different files and nothing put them in one diff.
+
+### How the checker works
+
+`ExtractUnit` takes the declaration a claim is anchored to plus the functions it calls
+directly in its own package, **with the doc comment removed**, to a 6000-byte budget.
+`TestExtractUnitDropsTheDocComment` is the test that keeps the two-step honest: a unit
+carrying the comment would hand the model the sentence it is about to judge, and every
+verdict would be "supported" while looking like it was working.
+
+The reading is made from that unit alone. Then the claim is broken into simple statements
+and each is judged against the reading. Both of those are measured decisions rather than
+guesses; see below.
+
+Rationale is excluded by *mechanism* rather than by a list: a paragraph that gives a reason
+and asserts nothing about behaviour leaves no statements after decomposition, and a claim
+with no statements is not determinable. Only `//borge:doc user` blocks on functions are
+looked at at all.
+
+### Three things the model taught us, in order
+
+**A single three-way label is beyond it.** Asked for SUPPORTED / CONTRADICTED / UNRELATED
+in one call, the model answered the same label for every case, and *which* label depended
+on the prompt's wording rather than on the content. Told "most sentences are UNRELATED", it
+said UNRELATED thirteen times.
+
+**It gets the polarity of sentences about "borge" wrong.** This one is worth writing down.
+Given facts that say the program prompts for a passphrase:
+
+| statement | asked "is this true?" |
+| --- | --- |
+| "borge does not prompt for a passphrase." | NO — correct |
+| "borge prompts for a passphrase." | **NO — wrong** |
+| "The program does not prompt for a passphrase." | NO — correct |
+| "The program prompts for a passphrase." | YES — correct |
+
+Seven of eight right with the subject rewritten, and the one failure is the one sentence
+that keeps the name. "borge" is a word no training corpus contains, and the model's
+handling of an unknown proper noun is not something a verdict can rest on. `Normalise`
+rewrites it, `TestNormaliseIsWhyTheNameGoes` records why, and it is careful not to touch
+`BORGE_PASSPHRASE` — rewriting inside a word would change what a claim about the
+environment says.
+
+**Long sentences defeat it.** The documentation here runs to three clauses and a
+subordinate "so that". A verdict on such a sentence is a verdict on whichever clause the
+model attended to. Decomposing first helps; it does not help enough.
+
+### What it scored: the model fails its own calibration
+
+`make doccalibrate`, 2026-08-28, `qwen2.5-coder-1.5b-instruct-q4_k_m` on a GTX 1650:
+
+```
+4/13 correct (always answering the commonest label scores 5/13)
+want -> got:
+  contradicted      -> contradicted      4
+  contradicted      -> supported         1
+  not-determinable  -> contradicted      3
+  supported         -> contradicted      5
+```
+
+It answered *contradicted* for twelve of the thirteen. It gets four of the five real
+contradictions right, and it would get them right by saying "contradicted" to everything —
+which is what the fifth column shows it very nearly does.
+
+Seven prompt designs were measured. None beat the baseline:
+
+| design | score | what it actually did |
+| --- | --- | --- |
+| one three-way label, free text | 5/13 | said CONTRADICTED to everything |
+| the same, with a grammar and few-shot examples | 5/13 | still CONTRADICTED to everything |
+| relevance gate, then truth | 4/13 | the relevance question was noise |
+| truth first, relevance only on a NO | 6/13 | over-abstained: 5 supported cases lost |
+| five-vote self-consistency at temperature 0.8 | 4/13 | votes split, so it abstained |
+| **decompose the claim, then judge each statement** | **4/13** | the shipped design |
+| the same, reading a fixed questionnaire | 5/13 | CONTRADICTED thirteen times out of thirteen |
+
+The two 5/13 rows are not near-misses; they are the constant checker, arrived at twice.
+`TestModelIsCalibrated` and `make doccalibrate` both say so in as many words: *this model
+does not beat answering the commonest label every time; its verdicts carry no information
+and its silence carries none either.*
+
+So `make doccheck` is wired up, runs, and produces a triage list — and on this hardware
+that list should not be acted on. What would change the answer is a larger model, which is
+a GPU question rather than a design one. The checker takes any llama.cpp server through
+`BORGE_DOCCHECK_URL`, and the thirteen cases are there to re-run against it.
+
+**The alternative was to ship it silent.** A checker that emits nothing looks like a
+checker finding nothing wrong, and nobody would have known the difference for months. The
+calibration set is what makes the difference visible, which is the whole reason §2.1.1 says
+to build it first.
+
+### The checker was checking nothing, and said so cleanly
+
+The first end-to-end run reported `no //borge:doc user blocks on functions to check`. All
+twenty-six user fragments sit on `var _ = helpText` carriers — T3 put them there because
+gofmt moves directives to the end of a comment — so a target list built from "is this
+comment on a function?" was empty. A clean report over an empty list is the worst thing a
+checker can produce, because it is indistinguishable from a clean tree.
+
+`//borge:about Decl` is the fix: a carrier names the function its prose describes.
+Twenty carriers now carry one. The audit errors on a name no function in the directory
+answers to (`unknown-declaration`), and **warns** on a user fragment that neither sits on a
+function nor names one (`fragment-without-code`) — so the silence cannot come back
+unnoticed. One warning stands on purpose: `compression/intro` is about how compression
+relates to chunk ids and deduplication, which no single function in `internal/compress`
+implements, and pointing it at a plausible neighbour would be worse than admitting it.
+
+This is worth stating plainly, because it is a defect that T3 introduced and T3's own tests
+could not see: the gofmt workaround preserved *where the prose lives* and lost *what it is
+about*, and everything downstream of that kept working.
+
+### What a report actually looks like
+
+`doccheck -only placeholders`, four claims, three "contradicted" — and reading them is what
+settles the question:
+
+```
+internal/placeholders/strftime.go:12  placeholders/formats  (strftime)
+  claim:   The program formats dates according to the machine's locale.
+  claim:   The program formats dates according to the machine's locale.
+  ... twenty-two times
+```
+
+The decomposition step looped, and one of the statements it invented for the braces
+fragment was `The program writes the literal string "{hostnmae}"` — a typo lifted out of
+an example of an *unknown* placeholder and asserted as behaviour. Those are not verdicts
+that a human triages; they are a tool wasting a reader's attention.
+
+The loop was partly borge's fault and is fixed: `parseStatements` now drops repeats and
+stops at `MaxStatements`, with tests for both. The hallucination is the model's, and no
+amount of capping addresses it.
+
+### Honest limits, including one this exercise created
+
+**The set is a development set as much as a test set.** Seven prompt designs were tried
+against these thirteen cases and the best was kept. With a set that small, that is
+selection pressure on the measurement itself, and the reported score is optimistic. The
+right fix is a held-out set, and git does not contain one — these are all the labelled
+before/after pairs this repository has. Any future work should add cases *before* touching
+the prompts, not after.
+
+**Correlated error.** An independent reading can share the author's wrong assumption and
+agree with a false claim. Nothing above removes that.
+
+**The unit is one package deep.** Behaviour that emerges across packages is invisible to
+the reading, and a claim needing more than one hop is a claim anchored in the wrong place.
+
+**The scope is narrower than the defects.** All three defects found while doing this work
+were outside what a *working* `doccheck` would have caught: two were in prose it does not
+read (a plan table, an unanchored comment inside a function body), and the third was
+`doccheck` itself checking nothing. The checker reads `//borge:doc user` blocks. That is
+the right scope — everything else would be noise — but it should not be mistaken for
+coverage, and on this hardware it is not even that.
+
+### What T5 leaves behind
+
+Useful now, whatever the model does: thirteen labelled cases verified against git, a
+`//borge:about` link from every user fragment to the code it describes, two audit rules
+that keep both honest, one corrected false comment, one corrected table in the porting
+plan, and a bounded decomposition. Useful when there is a bigger GPU: the checker itself,
+and a number to beat.
+
+One more, found while writing this up. Two documents said the audit had "twelve findings",
+which stopped being true the moment T5 added a rule. A number in prose cannot check itself,
+so `TestEveryRuleHasADamageCase` now reads `audit.go` for the rules it can emit and fails
+on any that no case in `TestAuditDetects` produces — which is both a stronger claim than
+the count was and one that maintains itself. It was checked by planting a rule name with no
+case and watching it fail.

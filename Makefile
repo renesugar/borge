@@ -26,7 +26,7 @@ BORG2       := tests/borg2/borg2
 # leaves room for the work.
 TIMEOUT     ?= -timeout 120m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit docgen \
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit docgen doccheck doccalibrate \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
         evidence-verify evidence-verify-full evidence-attest evidence-negative \
         evidence-isos clean help
@@ -88,6 +88,17 @@ docgen:
 ## docaudit: report how the user-facing documentation is verified (ROADMAP R2)
 docaudit:
 	go run ./cmd/docaudit -root .
+
+## doccheck: ask a local model whether the code contradicts the documentation (advisory)
+##   Needs a llama.cpp server; see AGENTS.md. Never part of "check": the verdicts move
+##   when the model does, and a build cannot fail on that honestly.
+doccheck:
+	go run ./cmd/doccheck -root .
+
+## doccalibrate: score that model against the labelled cases from git. Run it first -
+##   an uncalibrated checker's silence means nothing.
+doccalibrate:
+	go run ./cmd/doccheck -root . -calibrate
 
 ## spdx: check every Go file's license header (docs/LICENSING.md section 5)
 spdx:

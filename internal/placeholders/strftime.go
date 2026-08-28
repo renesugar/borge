@@ -26,6 +26,7 @@ import (
 //borge:doc user
 //borge:help placeholders/formats
 //borge:claim placeholders/locale-independent-formats
+//borge:about strftime
 var _ = helpText
 
 // strftime formats a time with C/Python strftime directives.

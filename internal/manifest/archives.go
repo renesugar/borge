@@ -213,6 +213,7 @@ const helpText = "user-facing help text"
 //
 //borge:doc user
 //borge:help match-archives/intro
+//borge:about applyMatch
 var _ = helpText
 
 // Selectors combine with the ordering and limiting options:
@@ -225,6 +226,7 @@ var _ = helpText
 //
 //borge:doc user
 //borge:help match-archives/filters
+//borge:about Archives.List
 var _ = helpText
 
 // Selector describes one archive selector for the documentation.
