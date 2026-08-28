@@ -18,7 +18,8 @@
 // against does not beat that baseline. A checker with no known-answer set is a checker
 // whose silence means nothing; this one has the set, and the set says so.
 //
-// docs/PORTING_PLAN.md 2.1.1 has the design, and PLAN.md R2 T5 has the measurements.
+// docs/PORTING_PLAN.md 2.1.1 has the design, and
+// plans/r2-documentation-system-20260828.md T5 has the measurements.
 package doccheck
 
 import (

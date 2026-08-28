@@ -65,8 +65,9 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 ### R2. Complete the documentation system
 
-State: **complete (2026-08-28).** [`PLAN.md`](PLAN.md) is the plan it was executed
-from and carries the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
+State: **complete (2026-08-28).**
+[`plans/r2-documentation-system-20260828.md`](plans/r2-documentation-system-20260828.md)
+is the plan it was executed from and carries the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
 and what stage 8 found. Execution is tracked here because it is documentation
 infrastructure, not part of the borg port.
 

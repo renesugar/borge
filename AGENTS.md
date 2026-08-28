@@ -103,7 +103,9 @@ repository's history — prose that was true, went false, and was corrected, plu
 that no code can confirm. **Run it before believing a doccheck report.** A checker with no
 known-answer set is a checker whose silence means nothing, and this one is silent most of
 the time. The score to beat is the constant-answer baseline printed beside it; the 1.5B
-model above does not beat it, so its verdicts on this tree are noise. `PLAN.md` records the
+model above does not beat it, so its verdicts on this tree are noise.
+[`plans/r2-documentation-system-20260828.md`](plans/r2-documentation-system-20260828.md)
+records the
 measurements.
 
 The cases are verified against git by `TestCalibrationMatchesGit`, so one cannot be edited

@@ -18,7 +18,7 @@
 // while remaining readable from CommentGroup.List.
 //
 // The only subset is "user". An "api" subset was specified and declined - see
-// PLAN.md, R2 T4: borge has no exported API, every package is under internal/, and
+// plans/r2-documentation-system-20260828.md, T4: borge has no exported API, every package is under internal/, and
 // "go doc ./internal/..." already renders all 794 exported declarations from the same
 // comments a generator would read.
 //

@@ -13,3 +13,11 @@ Before archiving a plan, move anything in it that still describes **unfinished**
 have to open this directory.
 
 The workflow, and which document is current, is described in `AGENTS.md`.
+
+| plan | item | archived |
+|---|---|---|
+| `r1-evidence-attestations-20260827.md` | ROADMAP R1, the signing identity and timestamp policy | 2026-08-27 |
+| `r2-documentation-system-20260828.md` | ROADMAP R2, the doc anchors and the two advisory checkers | 2026-08-28 |
+
+No plan is current as of 2026-08-28: the port is open again at Stage 9, so
+`docs/PORTING_PLAN.md` is the plan, and `PLAN.md` returns when the port closes.
