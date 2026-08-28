@@ -17,9 +17,14 @@
 // is a directive, so it is stripped from "go doc" output and from CommentGroup.Text()
 // while remaining readable from CommentGroup.List.
 //
+// The only subset is "user". An "api" subset was specified and declined - see
+// PLAN.md, R2 T4: borge has no exported API, every package is under internal/, and
+// "go doc ./internal/..." already renders all 794 exported declarations from the same
+// comments a generator would read.
+//
 // # The vocabulary
 //
-//	//borge:doc user|api          which documentation subset this comment belongs to
+//	//borge:doc user              this comment is user-facing documentation
 //	//borge:help topic[/section]  this comment is the source of that topic or section
 //	//borge:enumerates expr       the list here is generated from the set the code defines
 //	//borge:claim id              this prose makes a behavioural claim checked by id

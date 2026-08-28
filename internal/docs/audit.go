@@ -186,10 +186,19 @@ func Audit(set *Set, topics, enumerations []string) Report {
 	}
 
 	for _, b := range set.Blocks {
-		if b.Audience != "" && b.Audience != "user" && b.Audience != "api" {
+		if b.Audience != "" && b.Audience != "user" {
+			// "api" is the one worth naming: it was in the design, and marking a comment
+			// with it would do nothing at all, because nothing renders that subset. An
+			// audience no generator reads is a silent no-op, which is the failure this
+			// whole package exists to remove.
+			hint := "the only subset is user"
+			if b.Audience == "api" {
+				hint = "the api subset was declined in R2 T4: go doc already serves " +
+					"internal/, so nothing renders it"
+			}
 			report.Findings = append(report.Findings, Finding{
 				Severity: SeverityError, Rule: "invalid-audience",
-				Message: fmt.Sprintf("//borge:doc %q: the subsets are user and api", b.Audience),
+				Message: fmt.Sprintf("//borge:doc %q: %s", b.Audience, hint),
 				File:    b.File, Line: b.Line,
 			})
 		}

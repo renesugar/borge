@@ -55,7 +55,7 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 ### R2. Complete the documentation system
 
-State: **4 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
+State: **5 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
 the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
 and what stage 8 found. Execution is tracked here because it is documentation
 infrastructure, not part of the borg port.
@@ -76,8 +76,11 @@ infrastructure, not part of the borg port.
   implements it; `make docgen` assembles them and the freshness test diffs. The audit's
   grade breakdown went from a flattering 0% unverified over five lumps to 39% over
   thirty-one fragments, which is the number the exercise existed to produce.
-- [ ] Decide whether `docgen --api` adds enough over `go doc ./internal/...` to justify an
-  `docs/INTERNALS.md`; record an explicit no if it does not.
+- [x] Decide whether `docgen --api` adds enough over `go doc ./internal/...` to justify an
+  `docs/INTERNALS.md`. **Decided 2026-08-27: no.** borge has no exported API — 21 packages
+  under `internal/`, three `package main`s outside it — and `go doc` already renders all
+  ~794 exported declarations from the same comments. `//borge:doc api` is now an error
+  naming this decision, so nobody can mark a comment for a subset nothing renders.
 - [ ] Build the calibrated, advisory contradiction checker over user-facing anchored prose.
 - [x] Execute every help example and assert its effect (`TestHelpExamplesRun`, 2026-08-18).
 - [ ] Build `docactionable`: generate a command from each topic and run it against the

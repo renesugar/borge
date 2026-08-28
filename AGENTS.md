@@ -200,7 +200,7 @@ sentence carries a directive naming what verifies it, and `make docaudit` (gated
 `TestDocAuditIsClean`) reports the grades and fails on a promise with nothing behind it.
 
 ```go
-//borge:doc user                 which documentation subset this comment belongs to
+//borge:doc user                 this comment is user-facing documentation
 //borge:help topic[/section]     this comment is the source of that topic or section
 //borge:enumerates expr          the list here is generated from what the code defines
 //borge:claim id                 this prose asserts something the check with that id verifies

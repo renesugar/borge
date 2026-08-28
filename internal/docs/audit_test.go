@@ -173,6 +173,15 @@ func TestAuditDetects(t *testing.T) {
 			"invalid-audience",
 		},
 		{
+			"the api subset, which was declined and which nothing renders",
+			func(f map[string]string) {
+				f["help.go"] = strings.Replace(f["help.go"],
+					"//borge:doc user\n//borge:help patterns",
+					"//borge:doc api\n//borge:help patterns", 1)
+			},
+			"invalid-audience",
+		},
+		{
 			"a help fragment with no audience, which nothing would render",
 			func(f map[string]string) {
 				f["help.go"] = strings.Replace(f["help.go"],

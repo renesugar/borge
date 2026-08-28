@@ -46,7 +46,7 @@ Sized so the first is useful alone. Each is committable; the tree is never left 
   depend on file order), generation into `internal/cli/help_generated.go`, and
   `TestDocsAreCurrent` re-running the extraction in memory and diffing. Migrate the five
   topics out of string constants and into anchored comments.
-- [ ] **T4 — `docgen --api`, decided.** borge has no exported API; everything is under
+- [x] **T4 — `docgen --api`, decided: no.** 2026-08-27; the reasoning is at the end. borge has no exported API; everything is under
   `internal/`, which `go doc ./internal/...` already serves. Record an explicit decision
   either way rather than leaving it as a permanently open item.
 - [ ] **T5 — `doccheck`, advisory.** The contradiction pass of §2.1.1 over `//borge:doc
@@ -179,3 +179,32 @@ Four things this turned up:
 The text a user sees is unchanged except where it was meant to change: the three quoted
 action characters, the selector list gaining `id:` and losing its blank lines, and the
 environment topic's single column. Every topic was diffed against the previous build.
+
+## T4, decided 2026-08-27: no `docgen --api`, and no `docs/INTERNALS.md`
+
+**The decision is no**, and the anchors now enforce it: `//borge:doc api` is an error that
+names this decision, because an audience nothing renders is a silent no-op — a maintainer
+could mark a comment `api`, believe it was published somewhere, and be wrong forever.
+
+What was measured, rather than assumed:
+
+- **borge has no exported API at all.** Twenty-one packages under `internal/`; the only
+  code outside it is three `package main`s (`cmd/borge`, `cmd/docaudit`, `cmd/docgen`).
+  There is nothing for an external caller to import, and internal packages never appear on
+  pkg.go.dev.
+- **`go doc` already serves it, from the same comments a generator would read.**
+  `go doc ./internal/repoobj` renders the package's documentation including its format
+  diagram; across the tree there are about 794 exported declarations and all 21 packages
+  carry a package comment. A generated `INTERNALS.md` would be a second rendering of the
+  same source, with nothing added but a file to keep fresh.
+- **The narrative a generator cannot produce already exists elsewhere.** The layering and
+  its rationale are `docs/PORTING_PLAN.md` §1, the on-disk format is `docs/FORMAT.md`, the
+  deliberate differences are `docs/DIVERGENCES.md`, and the map of the tree is AGENTS.md's
+  "shape of the code". Those are the documents a new maintainer needs, and none of them is
+  a list of declarations.
+- **The cost is not zero.** Another generated file, another freshness test, another subset
+  in the audit, and a second place for a doc comment to be wrong.
+
+What would change the answer: borge growing a package outside `internal/` that other
+programs import. The GUI (R3) does not, by design — it is a frontend to the command-line
+JSON API, which keeps one tested format boundary rather than two.

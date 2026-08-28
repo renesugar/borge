@@ -434,6 +434,15 @@ sentence into the diff of the change that falsifies it.
 4. **`docgen --api`** → `docs/INTERNALS.md`. Lowest value of the four: borge has no exported
    API — everything is under `internal/` — so this is maintainer documentation that
    `go doc ./internal/...` already serves. Do it last, or not at all.
+
+   **Decided 2026-08-27: not at all**, and the measurement backs the guess this item was
+   written on. 21 packages under `internal/`, all 21 carrying package comments, ~794
+   exported declarations already rendered by `go doc`; outside `internal/` there are three
+   `package main`s and nothing importable. The cross-package narrative a generator cannot
+   produce is already written — §1 here, `FORMAT.md`, `DIVERGENCES.md`, AGENTS.md's map of
+   the tree. The decision is enforced rather than recorded: `//borge:doc api` is now an
+   audit error that names it, because an audience nothing renders is exactly the silent
+   no-op §2.3 is about.
 5. **`doccheck`** — the contradiction pass of §2.1.1, over `//borge:doc user` blocks only.
    Build the five-case calibration set from git *first*, then the checker. Advisory output,
    not a gate. Worth doing after item 1 and independently of items 2–4: it needs the anchors
@@ -3265,7 +3274,7 @@ than no tracker: it is the document a new reader trusts first.
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
 | 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **4 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1, 2 and 3 (`docaudit`, `//borge:enumerates`, `docgen --help`) 2026-08-27; items 4, 5 and 7 not started. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **5 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1, 2, 3 and 4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 not started. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
