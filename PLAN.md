@@ -26,7 +26,8 @@ to a check), **unverified** (everything else — permitted, but counted).
 
 Sized so the first is useful alone. Each is committable; the tree is never left broken.
 
-- [ ] **T1 — `docaudit`, and the anchors it audits.** A parser for `//borge:doc`,
+- [x] **T1 — `docaudit`, and the anchors it audits.** Done 2026-08-27; what it turned up
+  is at the end of this file. A parser for `//borge:doc`,
   `//borge:help`, `//borge:enumerates`, `//borge:claim` and `//borge:checks`; a read-only
   tool that reports the grade breakdown per topic; and failures for a `//borge:help`
   naming a topic that does not exist, a `//borge:claim` with no registered check, and a
@@ -70,3 +71,32 @@ Chase the unverified share to zero. Rationale — "this exists because the key t
 known until the manifest is read" — is not a testable assertion and marking it as one
 produces permanent *not determinable* noise that teaches everyone to ignore the report.
 The goal is that the unverified share is small, visible, and deliberate.
+
+## T1, done 2026-08-27
+
+`internal/docs` parses the anchors, `cmd/docaudit` reports them, `make docaudit` runs it,
+and `TestDocAuditIsClean` (in `internal/cli`, where the topic list lives) is the gate.
+Twelve findings, each with a case in `internal/docs/audit_test.go` that damages a clean
+fixture one way and requires that rule — a case that fails through some other check counts
+as a failure, because the check it is about would still be unproven.
+
+What the work turned up:
+
+- **The first report was flattering, and that was a bug in the report.** Anchoring each
+  topic as one lump graded all five *executed* and printed "unverified share: 0%", which is
+  false about several thousand words of prose. The audit now counts section anchors and
+  says `topic-anchored-as-a-whole` for every topic that has none. A number that reads as
+  reassurance while measuring almost nothing is worse than no number.
+- **Near-misses are reported, not ignored.** `// borge:help patterns` with a space is not a
+  directive to Go: it would render into the documentation as prose and register nothing.
+  So would `//borge:claims`. Both are findings — a typo that silently registers nothing is
+  the exact failure the anchors exist to remove.
+- **Two claims needed checks that did not exist**, so they were written:
+  `environment/prefix-fallback` (BORGE_ first, BORG_ second, and an empty BORGE_ value is a
+  value rather than an absence) and `environment/passphrase-prompt` (the unencrypted modes
+  never prompt; with no terminal the error names the variable to set). The second is the
+  claim whose sentence was false for part of stage 8.
+- **The topic list is passed into the audit, not read by it.** `internal/docs` is a leaf
+  package and must not know what borge's topics are; the caller asks the code. A list
+  inside the auditor would be a second place for the topics to disagree, which is the bug
+  the whole mechanism exists to remove.

@@ -55,14 +55,17 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 ### R2. Complete the documentation system
 
-State: **1 of 7 original doc-anchor items done.** The design and findings remain in
-`docs/PORTING_PLAN.md` §2.1; current execution is tracked here because it is documentation
-infrastructure, not part of the borg port. The design moves into this repository's
-non-porting documents when R2 is implemented, so that archiving the porting plan does not
-archive the specification of unfinished work.
+State: **2 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
+the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
+and what stage 8 found. Execution is tracked here because it is documentation
+infrastructure, not part of the borg port.
 
-- [ ] Build `docaudit`: parse `//borge:*` anchors, report verification grades per topic,
-  and fail on dangling help anchors or claims without registered checks.
+- [x] Build `docaudit`: parse `//borge:*` anchors, report verification grades per topic,
+  and fail on dangling help anchors or claims without registered checks (2026-08-27).
+  `internal/docs` parses, `cmd/docaudit` reports, `make docaudit` runs it and
+  `TestDocAuditIsClean` gates it; twelve findings, each with a case that damages a clean
+  fixture and requires that rule. It also reports when a topic is anchored in one piece,
+  so the grade breakdown cannot read as reassurance it has not earned.
 - [ ] Generate enumerations already checked ad hoc: environment variables, pattern styles,
   compression specs, and placeholders.
 - [ ] Build `docgen --help`, topic templates, and `TestDocsAreCurrent`; migrate the five

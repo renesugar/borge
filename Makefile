@@ -16,9 +16,17 @@ BORG2       := tests/borg2/borg2
 # exceed: they drive a Python borg over a pipe across a whole corpus, and under -race
 # several of them take longer than that on their own. The deadline still exists - a test
 # that hangs must fail rather than run forever - it is just set to fit the work.
-TIMEOUT     ?= -timeout 60m
+#
+# Raised from 60m on 2026-08-27. "go test ./..." runs packages in parallel, so internal/cli
+# forks borg while tests/interop is doing the same for forty minutes, and the two share the
+# machine. A full run killed internal/cli at exactly 60m0s, 43 seconds into a test that
+# takes about a minute - a deadline hit while making progress, which reads exactly like a
+# hang and is not one. The next full run measured internal/cli at 4062s (67.7 min), so 60m
+# was not marginal, it was short. The guard only distinguishes a hang from real work if it
+# leaves room for the work.
+TIMEOUT     ?= -timeout 120m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage \
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
         evidence-verify evidence-verify-full evidence-attest evidence-negative \
         evidence-isos clean help
@@ -72,6 +80,10 @@ lint:
 		echo "lint: golangci-lint not installed, skipping (go vet still runs via 'make vet')"; \
 	fi
 
+## docaudit: report how the user-facing documentation is verified (ROADMAP R2)
+docaudit:
+	go run ./cmd/docaudit -root .
+
 ## spdx: check every Go file's license header (docs/LICENSING.md section 5)
 spdx:
 	./scripts/check-spdx.sh
@@ -81,7 +93,7 @@ layering:
 	./scripts/check-layering.sh
 
 ## check: the gate - formatting, vet, lint, license headers, layering, tests
-check: fmtcheck vet lint spdx layering test
+check: fmtcheck vet lint spdx layering docaudit test
 	@echo "check: all green"
 
 .PHONY: fmtcheck

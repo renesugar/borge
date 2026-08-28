@@ -69,6 +69,7 @@ make evidence-verify          # check the evidence catalog against the ZIPs on d
 make evidence-verify-full     # the same, and require every signature and token
 make evidence-attest          # sign and timestamp anything not yet attested
 make evidence-negative        # prove the attestation checks can fail
+make docaudit                 # report how the user-facing documentation is verified
 ```
 
 Every source file needs an SPDX header; `scripts/check-spdx.sh` enforces it. A file ported
@@ -88,12 +89,15 @@ check the output, not just the exit code.
 `go test -short` skips the borg gate deliberately. The evidence bundler uses `-short` for
 its `-race` pass only.
 
-**Use `make test`, not a bare `go test ./...`.** The Makefile passes `-timeout 60m`;
-Go's default is 10 minutes, and `internal/cli` alone now runs for about that long because
-almost every command has a differential test that forks borg. A bare `go test` fails with a
+**Use `make test`, not a bare `go test ./...`.** The Makefile passes `-timeout 120m`;
+Go's default is 10 minutes, and `internal/cli` alone measured 4062s — 68 minutes — on
+2026-08-27, because almost every command has a differential test that forks borg. A bare `go test` fails with a
 goroutine dump pointing at whichever test happened to be running when the deadline fired —
 which looks exactly like that test hanging, and is not. If you must invoke `go test`
-directly, pass `-timeout 60m`.
+directly, pass `-timeout 120m`. It was 60m until 2026-08-27, when a full run hit it
+exactly — the deadline fired 43 seconds into a test that takes about a minute, which reads
+exactly like a hang and was not one. The next run measured the package at 68 minutes, so
+the old limit was short rather than marginal.
 
 ### Temporary space
 
@@ -190,10 +194,28 @@ stdout and stderr separately, at least once per command.
 
 **Documentation goes stale silently, and prose is the part that does.** Four claims went
 false during stage 8; the two with tests behind them failed loudly, the two that were prose
-needed a human to notice. Until the rest of the doc-anchor work in `PORTING_PLAN.md` §2.1
-lands, the rule for prose is manual: **if you change behaviour, grep the help topics for
-what you just made false.** `borge help <topic>` renders them; `internal/cli/help.go` holds
-them.
+needed a human to notice. The mechanism against it is the **doc anchors**: a user-facing
+sentence carries a directive naming what verifies it, and `make docaudit` (gated by
+`TestDocAuditIsClean`) reports the grades and fails on a promise with nothing behind it.
+
+```go
+//borge:doc user                 which documentation subset this comment belongs to
+//borge:help topic[/section]     this comment is the source of that topic or section
+//borge:enumerates expr          the list here is generated from what the code defines
+//borge:claim id                 this prose asserts something the check with that id verifies
+//borge:checks id                this function is that check
+```
+
+A claim whose check disappears fails the audit, and so does a check whose claim
+disappears. The grades, best first: **executed** (the suite runs the prose's own
+examples), **generated**, **claimed**, **unverified** — the last is permitted and counted,
+because the point is that the untested share is a number rather than an assumption.
+
+The topics are still anchored one lump each, which the audit says out loud
+(`topic-anchored-as-a-whole`) rather than reporting a flattering 0% unverified; `docgen`
+splits them into sections (`ROADMAP.md` R2). Until then the rule for prose is still partly
+manual: **if you change behaviour, grep the help topics for what you just made false.**
+`borge help <topic>` renders them; `internal/cli/help.go` holds them.
 
 The *examples* in those topics are no longer manual. `TestHelpExamplesRun`
 (`internal/cli/help_examples_test.go`) runs every command in every topic against a scratch

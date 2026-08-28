@@ -121,6 +121,13 @@ func printHelpIndex(w io.Writer, topics []helpTopic) {
 		"For the list of commands, run \"borge\".\n")
 }
 
+// HelpTopicNames is the sorted topic list.
+//
+// Exported for the documentation tooling, which must ask the code which topics exist
+// rather than keep a list of its own - a second list is a second thing to disagree with
+// the first, which is the bug the whole doc-anchor mechanism exists to remove.
+func HelpTopicNames() []string { return helpTopicNames() }
+
 // helpTopicNames is the sorted topic list, for the completions.
 func helpTopicNames() []string {
 	var out []string
@@ -131,6 +138,14 @@ func helpTopicNames() []string {
 	return out
 }
 
+// helpPatterns is the text of "borge help patterns".
+//
+// Anchored so the audit can see it. The claims below name the behaviour this text
+// asserts; each has a registered check, and docaudit fails if one loses it.
+//
+//borge:doc user
+//borge:help patterns
+//borge:claim patterns/examples
 const helpPatterns = `borge help patterns
 
 Which files a command acts on is decided by patterns. They appear as --exclude and
@@ -198,6 +213,14 @@ EXAMPLES
   borge find 'sh:**/invoice-*.pdf'
 `
 
+// helpMatchArchives is the text of "borge help match-archives".
+//
+// Anchored so the audit can see it. The claims below name the behaviour this text
+// asserts; each has a registered check, and docaudit fails if one loses it.
+//
+//borge:doc user
+//borge:help match-archives
+//borge:claim match-archives/examples
 const helpMatchArchives = `borge help match-archives
 
 Commands that act on archives take a selector, as -a or --match-archives, or as a
@@ -249,6 +272,15 @@ EXAMPLES
   borge prune --keep-daily 7 -a 'host:laptop'
 `
 
+// helpPlaceholders is the text of "borge help placeholders".
+//
+// Anchored so the audit can see it. The claims below name the behaviour this text
+// asserts; each has a registered check, and docaudit fails if one loses it.
+//
+//borge:doc user
+//borge:help placeholders
+//borge:claim placeholders/examples
+//borge:claim placeholders/substituted
 const helpPlaceholders = `borge help placeholders
 
 An archive name, a comment, an archive selector (-a) and the repository path may contain
@@ -299,6 +331,14 @@ EXAMPLES
   borge repo-list -r /backups/{hostname}
 `
 
+// helpCompression is the text of "borge help compression".
+//
+// Anchored so the audit can see it. The claims below name the behaviour this text
+// asserts; each has a registered check, and docaudit fails if one loses it.
+//
+//borge:doc user
+//borge:help compression
+//borge:claim compression/examples
 const helpCompression = `borge help compression
 
 Compression applies to each chunk as it is stored, and is chosen with -C or
@@ -337,6 +377,17 @@ EXAMPLES
   borge repo-compress -r REPO -C zstd,3
 `
 
+// helpEnvironment is the text of "borge help environment".
+//
+// Anchored so the audit can see it. The claims below name the behaviour this text
+// asserts; each has a registered check, and docaudit fails if one loses it.
+//
+//borge:doc user
+//borge:help environment
+//borge:claim environment/examples
+//borge:claim environment/prefix-fallback
+//borge:claim environment/passphrase-prompt
+//borge:claim environment/other-passphrase-no-fallback
 const helpEnvironment = `borge help environment
 
 Every variable is read as BORGE_<NAME> first and BORG_<NAME> second, so an existing borg

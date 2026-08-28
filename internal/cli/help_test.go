@@ -167,6 +167,8 @@ func TestHelpTopicsCoverTheCode(t *testing.T) {
 // behaviour rather than trusted. It has already been wrong once in the other direction:
 // first written describing borg's substitution when borge had none, then left claiming
 // borge had none after it gained it. Both were caught here.
+//
+//borge:checks placeholders/substituted
 func TestHelpPlaceholdersTopicIsTrue(t *testing.T) {
 	r := newBorgRepo(t, "aes256-ocb")
 	src := t.TempDir()

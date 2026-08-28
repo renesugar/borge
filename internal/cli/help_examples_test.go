@@ -746,6 +746,15 @@ func helpExampleChecks(t *testing.T) map[string]exampleCheck {
 // Each one gets a repository of its own, rebuilt from scratch, so the order the examples
 // run in cannot matter and a destructive example - delete, prune - can be run for real
 // rather than with --dry-run, which would test something other than what is documented.
+//
+// Every topic's examples are executed here, which is the "executed" grade in the doc
+// audit: the one a user actually relies on, because they copy the example.
+//
+//borge:checks patterns/examples
+//borge:checks match-archives/examples
+//borge:checks placeholders/examples
+//borge:checks compression/examples
+//borge:checks environment/examples
 func TestHelpExamplesRun(t *testing.T) {
 	found := helpExamplesFromTopics(t)
 	checks := helpExampleChecks(t)

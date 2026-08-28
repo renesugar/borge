@@ -282,6 +282,8 @@ func TestTransferRefusesBorg1(t *testing.T) {
 // prompts; running "borg repo-create --other-repo" with only BORG_PASSPHRASE set asks
 // interactively and fails in a script. Falling back would be friendlier and would mean a
 // command line that works under borge hangs under borg.
+//
+//borge:checks environment/other-passphrase-no-fallback
 func TestOtherPassphraseDoesNotFallBack(t *testing.T) {
 	env := func(vars map[string]string) *Env {
 		return &Env{Getenv: func(name string) (string, bool) {
