@@ -73,6 +73,7 @@ make docaudit                 # report how the user-facing documentation is veri
 make docgen                   # regenerate the help topics from the anchored source
 make doccalibrate             # score the contradiction checker against the cases from git
 make doccheck                 # ask a local model whether the code contradicts the prose
+make docactionable            # generate a command from each help topic and run it
 ```
 
 Every source file needs an SPDX header; `scripts/check-spdx.sh` enforces it. A file ported
@@ -108,6 +109,21 @@ measurements.
 The cases are verified against git by `TestCalibrationMatchesGit`, so one cannot be edited
 into agreeing with the checker. Rebuild them with
 `python3 scripts/build-doccheck-calibration.py`.
+
+`make docactionable` asks the other question, from `docs/PORTING_PLAN.md` §2.1.2: not *is
+this sentence true* but **does it tell a reader what to type**. It gives the model one
+topic and a task, runs whatever command comes back against the same scratch repository
+`TestHelpExamplesRun` uses, and checks what the command did. Its calibration
+(`TestDocActionableIsCalibrated`, four cases from git) **passes** on the 1.5B model, unlike
+doccheck's — generating a command line from a manual page is a much easier task than
+judging entailment.
+
+Read its output as a prompt to look, not as a verdict. On 2026-08-28 it called two of five
+topics unactionable and **both were the model's fault**: the placeholders topic contains
+exactly the example needed and the model copied a different one. Triage before believing.
+Its calibration cases carry a `probe` command and `TestActionableCasesStillDiscriminate`
+runs it, because a case stops being a case when *borge* is fixed — which has already
+happened to two of them.
 
 ### Tests need a real borg
 

@@ -10,10 +10,20 @@ describes that workflow.
 
 **On the numbering.** R0 is not the first priority; it is the oldest item. It was Stage 10
 of the porting plan and moved here on 2026-08-27, because it is work that begins after the
-port is complete. The identifier is a name, not a rank. The current priorities are R1 and
-R2, in that order.
+port is complete. The identifier is a name, not a rank.
+
+**What is next, as of 2026-08-28.** R1 has one item open and R2 is complete, so the
+remaining work before the first GitHub push is **Stage 9** — the performance baseline,
+whose investigation is done (`docs/PORTING_PLAN.md` §12.1–12.5) and whose measurement and
+fixes are not — and then **R0**, which begins only once Stage 9 has said what it justifies.
+R0.1 item 1 is explicitly a Stage 9 experiment first: large-directory restore may be
+deliverable with no format change at all, and the format must not move until Stage 9 shows
+that it has to.
 
 ## Current priorities
+
+Stage 9 is the live priority and it lives in the porting plan, not here; this section is
+what remains of the roadmap's own work.
 
 ### R1. Preserve the pre-GitHub evidence record
 
@@ -55,8 +65,8 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 ### R2. Complete the documentation system
 
-State: **6 of 7 done.** [`PLAN.md`](PLAN.md) is the current plan for the rest and carries
-the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
+State: **complete (2026-08-28).** [`PLAN.md`](PLAN.md) is the plan it was executed
+from and carries the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
 and what stage 8 found. Execution is tracked here because it is documentation
 infrastructure, not part of the borg port.
 
@@ -99,15 +109,32 @@ infrastructure, not part of the borg port.
   with an audit error for a name nothing answers to and a warning for a fragment with
   neither.
 - [x] Execute every help example and assert its effect (`TestHelpExamplesRun`, 2026-08-18).
-- [ ] Build `docactionable`: generate a command from each topic and run it against the
-  existing scratch-repository harness; keep it advisory.
+- [x] Build `docactionable`: generate a command from each topic and run it against the
+  existing scratch-repository harness; keep it advisory (2026-08-28).
+  `internal/cli/docactionable_test.go` gives the model one topic and a task, runs the
+  command that comes back against `newHelpFixture`, and checks what it did.
+  **Its calibration passes** — 3 of 4 against a 2 of 4 baseline — unlike doccheck's:
+  producing a command line from a manual page is a far easier task than judging entailment.
+  Building the set found that two of the three known-answer cases §2.1.2 named had stopped
+  discriminating, because `permute` fixed the flag-order defect that broke those commands;
+  `TestActionableCasesStillDiscriminate` now catches that decay without a model.
 
 Acceptance: no dangling anchors or orphan claims; every help topic has at least one
 executed example and a recorded verification-grade breakdown; generated documentation is
 fresh; advisory checks are calibrated against the known before/after cases in the plan.
 
-When R2 is complete, a GitHub project is created and the completed project is pushed to
-`origin`. After that first push, `main` is protected: work lands on `develop` and is
+Met, with one qualification worth stating rather than burying. Both advisory checks are
+calibrated against labelled cases taken from git; `docactionable` **passes** its
+calibration and `doccheck` **fails** its own, on the 1.5B model this hardware can hold.
+Acceptance asked that they be calibrated, not that they succeed, and a checker that
+measures itself and reports that its verdicts are noise is doing the job the calibration
+requirement exists for. What R2 delivers either way is the anchors, the generated help,
+the grade breakdown, the two labelled sets, and the audit rules that keep them honest.
+
+After Stage 9 and R0, a GitHub project is created and the completed project is pushed to
+`origin`. R2 completing does not trigger it: the port is not finished while Stage 9's
+baseline is unmeasured, and R0 changes the on-disk format, which is not a thing to do
+first in public. After that first push, `main` is protected: work lands on `develop` and is
 merged into `main` by pull request, which is the branch model `docs/PORTING_PLAN.md` §2
 settled on.
 

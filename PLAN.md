@@ -57,8 +57,9 @@ Sized so the first is useful alone. Each is committable; the tree is never left 
   Read the code blind, then compare, so the reading is not anchored on the claim. Never a
   gate.
 - [x] **T6 — execute every help example.** Done 2026-08-18, `TestHelpExamplesRun`.
-- [ ] **T7 — `docactionable`, advisory.** Generate a command from each topic and run it
-  against T6's scratch-repository harness. Last: it depends on that harness.
+- [x] **T7 — `docactionable`, advisory.** Done 2026-08-28; notes at the end. Generate a
+  command from each topic and run it against T6's scratch-repository harness. Last: it
+  depends on that harness.
 
 ## Gate
 
@@ -439,3 +440,100 @@ so `TestEveryRuleHasADamageCase` now reads `audit.go` for the rules it can emit 
 on any that no case in `TestAuditDetects` produces — which is both a stronger claim than
 the count was and one that maintains itself. It was checked by planting a rule name with no
 case and watching it fail.
+
+
+## T7, done 2026-08-28: `docactionable`, and a calibration set that decayed the other way
+
+`internal/cli/docactionable_test.go` gives the model one help topic and a task, runs
+whatever command comes back against `newHelpFixture` — T6's scratch repository — and checks
+what the command *did*. `make docactionable` runs it. Skipped without
+`BORGE_DOCCHECK_URL`, and never in `make check`.
+
+It lives in `internal/cli` rather than in a command because the harness is there and
+unexported. That is the whole reason §2.1.2 ordered T7 after T6.
+
+### The question it asks is not the one doccheck asks
+
+Not *is this sentence true* but **does it tell a reader what to type**. A true sentence can
+be useless: "borge supports patterns" is unfalsifiable and unactionable. The test is
+constructive — produce a command from the prose alone and run it — and it subsumes part of
+the contradiction check, because a claim a reader cannot act on is a bad claim whatever its
+truth.
+
+### The calibration set went stale because *borge* was fixed
+
+§2.1.2 names its own known-answer cases: three commands the topics documented that did not
+work. Built as three before/after pairs, run against today's binary — and **two of them
+were no longer pairs**:
+
+| documented command | then | today |
+| --- | --- | --- |
+| `borge find --pattern 'sh:…'` | error | still an error |
+| `borge tag ARCHIVE --add @PROT` | "tag needs an archive" | **works** |
+| `borge create … archive ~ --exclude 'sh:**/.cache'` | silently archived the .cache | **works, excludes correctly** |
+
+Both were the flag-order defect of DIVERGENCES #20, and `args.go`'s `permute` has since
+fixed it. The prose was corrected in August, and then the program caught up with the prose
+that had been wrong.
+
+This is the opposite decay from the one the anchors are for. There, prose goes stale while
+code stays right. Here a labelled example stops discriminating because the code was
+*fixed* — and a dead case scores the checker on nothing while looking exactly like a live
+one. Verified by hand: both commands were run against today's binary and their effects
+inspected, not just their exit status.
+
+So `TestActionableCasesStillDiscriminate` now runs each case's documented command and fails
+when it no longer behaves as the case says. It needs no model, so it runs in the ordinary
+suite. It was checked by flipping a label and watching it fail.
+
+The set is four cases, not six: the `find` pair, which still discriminates, and a pair of a
+different kind — the environment topic before and after it had any example at all, which is
+§2.1.2's "true prose that tells a reader nothing they can run" made concrete. Two pairs are
+better than four when two of the four are dead.
+
+### It passes its calibration, which doccheck did not
+
+**3 of 4, against a 2 of 4 constant-answer baseline**, and not degenerate. Deterministic
+across runs. The one miss is the model dropping the `sh:` prefix from
+`borge find 'sh:**/invoice-*.pdf'`, producing a command that runs and matches nothing.
+
+That difference from T5 is not luck. Generating a command line from a manual page is close
+to what a coding model is trained on; judging whether a negated three-clause sentence is
+entailed by a function is not.
+
+**One caveat, recorded because it is the same trap T5 documented.** One check was corrected
+after seeing results: the environment check demanded an archive named `ARCHIVE`, which the
+*correct* command cannot produce, because the topic's example points at
+`/backups/{hostname}`. Fixing a check that the right answer fails is legitimate; it is also
+exactly how a set gets tuned into agreement, so it is written down rather than left in the
+diff.
+
+### What it says about the topics today, and why that needs triage
+
+3 of 5 topics yielded a working command. Both misses are the **model's**, not the prose:
+
+- **placeholders** — generated `borge create -r /backups/{hostname} ~`, with no archive
+  name. The topic's first example is `borge create -r REPO '{hostname}-{now:%Y-%m-%d}' ~`,
+  which is precisely the pattern asked for. The model copied a different example.
+- **environment** — generated `borge list`. The same topic, given the sharper task in the
+  calibration set, produced `BORGE_REPO=… borge repo-list` and passed. The wording of the
+  task moves the answer, which is a real limit on reading any single run.
+
+Neither was tuned away. A report whose failures are mostly the model's is the honest state
+of this tool at 1.5B, and it is why the output is a triage list.
+
+### Two harness bugs, both of which had made a topic look broken
+
+- **The runner did not change directory.** `TestHelpExamplesRun` does `t.Chdir(f.work)`;
+  mine did not, so `borge extract` succeeded and wrote its files into
+  `internal/cli/` — the package source directory — while the check looked in the fixture
+  and found nothing. The patterns topic was reported unactionable on that basis. Fixed, the
+  stray files removed, and the reason recorded on `runGenerated`.
+- **The model writes `borg`, not `borge`,** however plainly the manual page in front of it
+  says otherwise — the same missing-letter problem doccheck measured. Untreated, every case
+  failed on it and the first calibration run scored the baseline with no command ever
+  executed. `deBorg` rewrites the program name only, with its reason, and
+  `TestGeneratedLineIsCleanedUp` pins it.
+
+Both are worth recording for the same reason the substitutions in `help_examples_test.go`
+carry theirs: each is a step away from running what the reader actually reads.

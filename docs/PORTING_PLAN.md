@@ -447,6 +447,13 @@ sentence into the diff of the change that falsifies it.
    Build the five-case calibration set from git *first*, then the checker. Advisory output,
    not a gate. Worth doing after item 1 and independently of items 2–4: it needs the anchors
    for pairing, and nothing else.
+   **Done 2026-08-28**, sixth of the seven, in `internal/doccheck` with `cmd/doccheck`,
+   `make doccheck` and `make doccalibrate`. Building the set first is what paid: two of the
+   five cases §2.1.1 named never happened (see the correction there), a comment inside
+   `newFlagSet` had been false for nine days, and the checker's own first run over the tree
+   found no blocks at all because every user fragment sits on a carrier — closed by
+   `//borge:about`. **The 1.5B model fails the calibration**, 4 of 13 against a 5 of 13
+   constant-answer baseline, and the tool says so rather than emitting a confident silence.
 6. **`TestHelpExamplesRun`** — §2.1.2(a). **Done 2026-08-18**, first of the seven, in
    `internal/cli/help_examples_test.go`. 25 commands from the five topics: 23 run against a
    scratch repository, 2 are prose fragments marked unrunnable with the reason. It found
@@ -454,6 +461,13 @@ sentence into the diff of the change that falsifies it.
    the effort is in §2.1.2 below.
 7. **`docactionable`** — §2.1.2(b). Generate a command from each topic and run it. Advisory.
    Last, because it depends on item 6's scratch-repository harness for execution.
+   **Done 2026-08-28**, seventh of the seven, in `internal/cli/docactionable_test.go` with
+   `make docactionable`. It **passes** its calibration — 3 of 4 against a 2 of 4 baseline —
+   where item 5 fails its own: producing a command line from a manual page is much closer
+   to what a coding model does than judging entailment. Building the set found that two of
+   the three known-answer cases §2.1.2 names had stopped discriminating, because `permute`
+   fixed the flag-order defect that broke those commands; a labelled example can decay
+   because the *code* was corrected, and `TestActionableCasesStillDiscriminate` catches it.
 
 **Gate:** `docaudit` reports zero dangling anchors and zero orphan claims; every help topic
 has a grade breakdown recorded; and the unverified share is stated in the plan rather than
@@ -3166,6 +3180,23 @@ library does not expose. The options, in increasing order of commitment: generat
 ARMv8-crypto assembly with `mmcloughlin/avo`; adopt a third-party pure-Go AES exposing a
 bulk API; or reconsider the default mode (see §12.3).
 
+**Raised upstream** as [golang/go#81029][go81029], "proposal: crypto/cipher: evaluate
+multi-block pipelined assembly architecture for OCB mode optimizations" — filed by this
+project's author, because the ceiling is a property of `crypto/cipher`'s single-block API
+rather than of borge, and every Go implementation of OCB, EAX, SIV or any other mode built
+on `cipher.Block` pays it. It is the one finding in this stage that borge cannot fix in
+borge.
+
+**The issue's own benchmark understates it.** The reproducer measures the API overhead in
+isolation; borge's OCB path is worse, because each 16-byte block carries the surrounding
+offset arithmetic and XORs rather than being a bare `Encrypt` in a tight loop. Treat the
+numbers in the issue as a floor. Supplying the real figure is Stage 9 work: measure borge's
+own AES-OCB throughput against the isolated `cipher.Block` ceiling on the same machine, and
+attach it to the issue — a proposal argued from a real workload is worth more than one
+argued from a microbenchmark, and this port is exactly the workload the proposal is about.
+
+[go81029]: https://github.com/golang/go/issues/81029
+
 **What is not a problem.** `lukechampine.com/blake3`, which borge already uses, measured
 **930 MB/s at 2 MiB and 1199 MB/s at 64 MiB against `zeebo/blake3`'s 724 and 708** — the
 suggested replacement is 1.3–1.7x *slower* here, despite advertising wider SIMD coverage,
@@ -3220,6 +3251,19 @@ AES-OCB is still the bottleneck for users who need that specific mode, write bat
 with `avo` — pure Go assembly, no C toolchain, no loss of cross-compilation. BearSSL, named
 in the references, is a C library and would forfeit exactly what §12.3 needs.
 
+**A fourth option, and the only one that fixes it for everybody: upstream.**
+[golang/go#81029][go81029] proposes that `crypto/cipher` grow a multi-block pipelined path,
+which is what AES-GCM's assembly already does privately. If it lands, borge's `avo` work
+becomes unnecessary and every other Go OCB implementation gets the same lift.
+
+It changes what borge should do now only a little, and the reason is timing: a language
+proposal moves on its own schedule and borge cannot plan around a date. So the order stands
+— pure-Go fixes, then the pipeline, then re-measure — with two additions. Do not start
+writing `avo` assembly before checking the issue's state, because that is the work it would
+make redundant. And when Stage 9 measures AES-OCB on a real corpus, post the number:
+borge's degradation is larger than the issue's isolated benchmark shows, and a proposal
+argued from a backup tool's write path is a stronger argument than one argued from a loop.
+
 ### 12.5 The suggested references, checked
 
 Claims worth checking before acting on them. Verdicts are from this machine and this
@@ -3231,7 +3275,7 @@ repository, not from the descriptions.
 | `github.com/pkg/xattr` is needed for extended attributes | **Not needed.** borge calls `unix.Lgetxattr`/`Lsetxattr` directly — one fewer dependency than suggested. |
 | `unix.SyncFileRange`, `os/user` cover the rest | Correct; both are in use or available. |
 | `zeebo/blake3` is faster (AVX-512/AVX2/SVE2/NEON) | **False here.** 1.3–1.7x *slower* than the incumbent on AVX2 hardware. Digests match, so the swap is safe but would regress. Re-measure per target. |
-| `mmcloughlin/avo` for generating x86 assembly | **The right tool** if borge writes batched AES-NI. Pure Go, no C toolchain, keeps cross-compilation. |
+| `mmcloughlin/avo` for generating x86 assembly | **The right tool** if borge writes batched AES-NI. Pure Go, no C toolchain, keeps cross-compilation. Check [golang/go#81029][go81029] first: if `crypto/cipher` grows a multi-block path, this work is redundant. |
 | `Yawning/bsaes` (bitsliced constant-time AES) | Relevant for constant-time guarantees and for CPUs *without* AES instructions; it is slower than AES-NI, so not a speedup on the targets measured. |
 | BearSSL | A C library: cgo, and forfeits the cross-compilation §12.3 depends on. |
 | `ProtonMail/go-crypto` (OpenPGP fork of x/crypto) | Not applicable; borge uses no OpenPGP. |
@@ -3245,6 +3289,13 @@ Then, in order:
 0. **Fix the chunker-per-file construction** (finding 2). It is a bug, not a tuning
    question, and it makes every later measurement of the small-file corpora wrong.
 1. **Profile before changing anything** (`pprof`, CPU + alloc).
+
+   While the profiles are in hand: **measure AES-OCB on a real corpus and post the number
+   to [golang/go#81029][go81029].** The isolated `cipher.Block` benchmark in that issue is
+   a floor; borge's OCB path is worse, because each block carries the offset arithmetic
+   and XORs around it. A proposal argued from a backup tool's write path is stronger than
+   one argued from a loop, and this is the single Stage 9 finding whose fix is not borge's
+   to make.
 2. Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.
 3. Parallelise `extract` similarly.
 4. Tune `PackWriter` `max_count`/`max_size` and the pack cache size against the
@@ -3296,9 +3347,9 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
+| 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run, `tests/bench/` not yet written. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **5 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1, 2, 3 and 4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 not started. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was

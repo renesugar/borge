@@ -26,7 +26,7 @@ BORG2       := tests/borg2/borg2
 # leaves room for the work.
 TIMEOUT     ?= -timeout 120m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit docgen doccheck doccalibrate \
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit docgen doccheck doccalibrate docactionable \
         borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
         evidence-verify evidence-verify-full evidence-attest evidence-negative \
         evidence-isos clean help
@@ -99,6 +99,14 @@ doccheck:
 ##   an uncalibrated checker's silence means nothing.
 doccalibrate:
 	go run ./cmd/doccheck -root . -calibrate
+
+## docactionable: generate a command from each help topic and run it (advisory)
+##   Needs a llama.cpp server; see AGENTS.md. Prints the command the model derived from
+##   each topic and what running it did, plus the calibration score that says how much
+##   the report is worth. Never part of "check".
+docactionable:
+	BORGE_DOCCHECK_URL=$${BORGE_DOCCHECK_URL:-http://127.0.0.1:8081} \
+	go test ./internal/cli/ -run 'TestDocActionable' -count=1 -v $(TIMEOUT)
 
 ## spdx: check every Go file's license header (docs/LICENSING.md section 5)
 spdx:
