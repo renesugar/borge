@@ -95,35 +95,44 @@ func envVarsReadBySource(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
-	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		// help.go is the documentation, not a reader: every documented name appears in
-		// it, so scanning it would make the reverse check below vacuous.
-		if filepath.Base(path) == "help.go" {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, re := range []*regexp.Regexp{envVarLookup, envVarDirect} {
-			for _, m := range re.FindAllStringSubmatch(string(src), -1) {
-				for _, group := range m[1:] {
-					if group != "" {
-						seen[group] = true
+	// Both internal/ and cmd/: the command layer reads variables too, and scanning only
+	// half the source while claiming "only the source can say which variables borge reads"
+	// is the kind of half-check this suite exists to remove. cmd/borge's profiling
+	// variables were invisible here until 2026-08-29.
+	roots := []string{filepath.Join(root, "internal"), filepath.Join(root, "cmd")}
+	walk := func(dir string) error {
+		return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			// help.go is the documentation, not a reader: every documented name appears in
+			// it, so scanning it would make the reverse check below vacuous.
+			if filepath.Base(path) == "help.go" {
+				return nil
+			}
+			src, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, re := range []*regexp.Regexp{envVarLookup, envVarDirect} {
+				for _, m := range re.FindAllStringSubmatch(string(src), -1) {
+					for _, group := range m[1:] {
+						if group != "" {
+							seen[group] = true
+						}
 					}
 				}
 			}
+			return nil
+		})
+	}
+	for _, dir := range roots {
+		if err := walk(dir); err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	var out []string
 	for name := range seen {

@@ -308,6 +308,11 @@ TESTING
   BORGE_TESTONLY_WEAKEN_KDF  weakens the passphrase KDF so tests are fast. Never set
                              this for a real repository: it makes the passphrase cheap
                              to attack.
+  BORGE_TESTONLY_CPUPROFILE  writes a Go CPU profile to this path. For the stage 9
+                             performance work; profiling costs time, so a measured run
+                             is not a normal one.
+  BORGE_TESTONLY_MEMPROFILE  writes a Go heap profile to this path, after the command
+                             finishes and a collection.
 
 NOT BORGE'S
 

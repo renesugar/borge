@@ -3192,6 +3192,63 @@ reference, so one cannot serve two goroutines. Reuse is correct now because the 
 is serial. Pipelining `create` makes this one chunker per worker, and `Builder.contentChunker`
 carries that note so it is revisited rather than inherited.
 
+### 12.1b Step 1 done 2026-08-29: the first baseline, and where the time goes
+
+`tests/bench` runs both tools over one corpus and emits JSON: wall, user and system time,
+peak RSS per operation, repository size, and the timings each tool records for itself. It
+is the *minimum* §12 asks for - one scenario, warm cache - because a profile taken against
+a scenario nobody can re-run produces numbers nobody can check. `BORGE_BENCH=1` runs it;
+it is not in the suite.
+
+**The scenario is `deutsche-rezepte`**: 118,866 files in one directory, 190.5 MiB of
+content. Not the 479 MB `du` reports - that counts 4 KiB blocks, and at 1.6 kB average the
+files round up nearly threefold. Unencrypted, deliberately: AES-OCB is 17x behind borg
+because of a ceiling that is not borge's (§12.2, [golang/go#81029][go81029]), and measuring
+it here would swamp everything the write path does.
+
+| tool | op | wall | user | sys | peak RSS |
+|---|---|---:|---:|---:|---:|
+| **borge** | create | **93.4 s** | 72.7 s | 25.3 s | 378 MiB |
+| **borge** | extract | **82.4 s** | 44.4 s | 41.3 s | 70 MiB |
+| borg | create | 215.2 s | 203.3 s | 13.1 s | 248 MiB |
+| borg | extract | 183.9 s | 145.3 s | 37.3 s | 267 MiB |
+
+borge is **2.3x faster on create and 2.2x on extract**. Two caveats attach to that number
+before anyone quotes it. Run-to-run variance on this machine is about 10% (an earlier run
+of the same scenario gave 85.4 s and 72.4 s), so differences below that are not
+differences. And **borge's peak RSS on create exceeds borg's** - 378 MiB against 248 - which
+is the first measurement showing borge is the heavier of the two on the corpus that matters,
+and §12.3 wants memory bounded for the desktop and mobile goal.
+
+**Where borge's 93.4 s goes** (`BORGE_TESTONLY_CPUPROFILE`, added for this):
+
+| | | |
+|---|---:|---|
+| syscalls | 23.7 s (25%) | 118,866 files, each opened, read and closed |
+| **garbage collection** | **22.2 s (23.5%)** | see below |
+| sha256 | 10.9 s (11.5%) | chunk ids |
+| lz4 | 10.4 s (11%) | |
+| msgpack | 5.5 s (5.8%) | item metadata |
+
+**The statistic borge reports for chunking is not what it sounds like.** `create --json`
+gave `chunking_time: 34.478s`, 37% of the run - but `FastCDC.Next` is 9.5 s in the profile.
+The timer wraps `Next()`, and `Next()` pulls from the file, so the reads are inside it. The
+number is comparable with borg's, which is defined the same way, and it is not a measure of
+the chunking algorithm. Anyone tuning fastcdc on the strength of that 34 s would be tuning
+the wrong thing.
+
+**What the profile found, which is a bug and not a tuning question.**
+`compress.LZ4.attempt` allocated **16.1 GB in one create - 91% of everything the run
+allocated**. `lz4.Compressor` is 136 KiB (a 128 KiB hash table and an 8 KiB in-use bitmap)
+and borge constructs one per chunk: 118,866 x 136 KiB is 15.4 GiB, which is the profile's
+number. The library is built for reuse - the `inUse` bitmap exists so the table can be
+*reset* rather than reallocated - and that allocation is what pays for the 22.2 s of
+collection.
+
+Same shape as the chunker of §12.1a, in a different package, found the same way. It is the
+next fix, and it comes before step 2: an allocation of that size distorts every measurement
+taken while it stands.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
@@ -3344,7 +3401,8 @@ Then, in order:
    question, and it makes every later measurement of the small-file corpora wrong.~~
    **Done 2026-08-28**; see §12.1a. The cost turned out to be the 8 MiB backing buffer
    rather than the tables, and larger than §12.1 estimated.
-1. **Profile before changing anything** (`pprof`, CPU + alloc).
+1. ~~**Profile before changing anything** (`pprof`, CPU + alloc).~~ **Done 2026-08-29**;
+   see §12.1b. It found a 16 GB allocation in the lz4 path, which is now step 1a.
 
    While the profiles are in hand: **measure AES-OCB on a real corpus and post the number
    to [golang/go#81029][go81029].** The isolated `cipher.Block` benchmark in that issue is
@@ -3352,6 +3410,10 @@ Then, in order:
    and XORs around it. A proposal argued from a backup tool's write path is stronger than
    one argued from a loop, and this is the single Stage 9 finding whose fix is not borge's
    to make.
+1a. **Reuse the lz4 compressor** (§12.1b). 136 KiB constructed per chunk, 91% of the
+   run's allocation, and the reason a quarter of create is garbage collection. A bug of
+   the same family as step 0, and it comes before the pipeline because it distorts every
+   measurement taken while it stands.
 2. Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.
 3. Parallelise `extract` similarly.
 4. Tune `PackWriter` `max_count`/`max_size` and the pack cache size against the
@@ -3403,7 +3465,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); no baseline run yet, `tests/bench/` not yet written. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
+| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); step 1 done 2026-08-29 (§12.1b, `tests/bench` and the first profile — borge is 2.3x borg on create, and 91% of its allocation is one reusable lz4 struct). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |

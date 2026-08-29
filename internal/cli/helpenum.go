@@ -82,6 +82,8 @@ func envVars() []envVar {
 		{"PACK_ASYNC", "TUNING", "set to \"no\" to write packs on the calling goroutine"},
 		// TESTING
 		{"TESTONLY_WEAKEN_KDF", "TESTING", "weakens the passphrase KDF so tests are fast. Never set this for a real repository: it makes the passphrase cheap to attack."},
+		{"TESTONLY_CPUPROFILE", "TESTING", "writes a Go CPU profile to this path. For the stage 9 performance work; profiling costs time, so a measured run is not a normal one."},
+		{"TESTONLY_MEMPROFILE", "TESTING", "writes a Go heap profile to this path, after the command finishes and a collection."},
 	}
 }
 

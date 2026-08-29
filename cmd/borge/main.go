@@ -14,6 +14,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"strings"
 
 	"github.com/renesugar/borge"
@@ -49,7 +51,64 @@ if the URL names a host). "borge help environment" lists what each needs.
 `
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	stop := startProfiling(os.Stderr)
+	code := run(os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
+}
+
+// startProfiling turns on Go's profilers when the TESTONLY variables ask for it, and
+// returns the function that writes them out.
+//
+// Stage 9 (docs/PORTING_PLAN.md §12.5 step 1) says to profile before changing anything,
+// and profiling the real binary over the real corpus is worth more than profiling a
+// benchmark that approximates it. The alternative - a --cpuprofile flag - would be CLI
+// surface borg does not have, so this uses the environment instead, under the TESTONLY
+// prefix the KDF weakener already established.
+//
+// os.Exit does not run deferred functions, which is why main calls stop() explicitly
+// rather than deferring it: a profile that is never flushed is an empty file, and an empty
+// profile looks like a program that did nothing.
+func startProfiling(stderr *os.File) func() {
+	cpuPath := os.Getenv("BORGE_TESTONLY_CPUPROFILE")
+	memPath := os.Getenv("BORGE_TESTONLY_MEMPROFILE")
+	if cpuPath == "" && memPath == "" {
+		return func() {}
+	}
+	var cpuFile *os.File
+	if cpuPath != "" {
+		f, err := os.Create(cpuPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "borge: cpu profile: %v\n", err)
+		} else if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintf(stderr, "borge: cpu profile: %v\n", err)
+			f.Close()
+		} else {
+			cpuFile = f
+		}
+	}
+	return func() {
+		if cpuFile != nil {
+			pprof.StopCPUProfile()
+			cpuFile.Close()
+		}
+		if memPath == "" {
+			return
+		}
+		f, err := os.Create(memPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "borge: memory profile: %v\n", err)
+			return
+		}
+		defer f.Close()
+		// The heap profile is a snapshot, so it is taken after the work rather than
+		// before, and a GC first makes it a profile of what is live rather than of what
+		// has not been collected yet.
+		runtime.GC()
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			fmt.Fprintf(stderr, "borge: memory profile: %v\n", err)
+		}
+	}
 }
 
 func run(args []string, stdout, stderr *os.File) int {

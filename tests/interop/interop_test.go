@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +30,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/renesugar/borge/tests/harness"
 )
 
 // ---------------------------------------------------------------- harness
@@ -46,55 +47,15 @@ type tools struct {
 	passphrase string
 }
 
-// requireCurrentBinary fails when bin/borge is older than the source it is built from.
-//
-// This gate runs the binary rather than compiling it, so nothing ties the result to the
-// tree. On 2026-08-28 a full suite reported "ok tests/interop (cached)" against a binary
-// seven days old - the cache was right, its input was stale, and the compatibility gate
-// therefore passed without having tested the change in front of it. Missing was already
-// handled; being out of date is the case that reports success.
+// requireCurrentBinary fails the gate when bin/borge is older than the source it is built
+// from. The reasoning, and the run that made it necessary, are in harness.StaleBinary.
 //
 // It fails rather than skips. A skip here would be the same silence in a different
 // costume: the gate that protects borg-2 format compatibility must not be quietly absent.
-func requireCurrentBinary(t *testing.T, root, borge string, built time.Time) {
+func requireCurrentBinary(t *testing.T, root string, built time.Time) {
 	t.Helper()
-	var newest time.Time
-	var newestPath string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // an unreadable corner is not this check's business
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "bin", "vendor", "testdata", ".venv-borg2", "evidence":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") && d.Name() != "go.mod" && d.Name() != "go.sum" {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		if info.ModTime().After(newest) {
-			newest, newestPath = info.ModTime(), path
-		}
-		return nil
-	})
-	if err != nil || newest.IsZero() {
-		return // cannot tell; do not invent a failure
-	}
-	if newest.After(built) {
-		rel, relErr := filepath.Rel(root, newestPath)
-		if relErr != nil {
-			rel = newestPath
-		}
-		t.Fatalf("bin/borge was built %s but %s changed %s: this gate runs the binary "+
-			"rather than compiling it, so it would be testing code that is not in the "+
-			"tree. Run 'make build' (or 'make test', which now depends on it).",
-			built.Format(time.RFC3339), rel, newest.Format(time.RFC3339))
+	if why := harness.StaleBinary(root, built); why != "" {
+		t.Fatal(why)
 	}
 }
 
@@ -116,7 +77,7 @@ func newTools(t *testing.T, encryption string) *tools {
 	if err != nil {
 		t.Skipf("borge binary not built at %s; run 'make build'", borge)
 	}
-	requireCurrentBinary(t, root, borge, info.ModTime())
+	requireCurrentBinary(t, root, info.ModTime())
 
 	base := t.TempDir()
 	tl := &tools{
