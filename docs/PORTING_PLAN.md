@@ -3249,6 +3249,57 @@ Same shape as the chunker of §12.1a, in a different package, found the same way
 next fix, and it comes before step 2: an allocation of that size distorts every measurement
 taken while it stands.
 
+### 12.1c Step 1a done 2026-08-29: the lz4 compressor is pooled
+
+`compress.LZ4.attempt` built a 136 KiB `lz4.Compressor` per chunk. It now takes one from a
+`sync.Pool`.
+
+The library is designed for this: `CompressBlock` calls its own reset before anything else,
+with the comment *"Zero out reused table to avoid non-deterministic output"* (pierrec/lz4
+issue #65), and the in-use bitmap exists to make that reset cheap. A pool rather than one
+shared instance, because unlike §12.1a's chunker this then needs no revisiting when step 2
+parallelises - and `LZ4` is a value type with nowhere to keep state anyway.
+
+**Allocation, which is the number that does not depend on the machine:**
+
+| | before | after |
+|---|---:|---:|
+| `LZ4.attempt` | 16,142 MB | **242 MB** |
+| whole run | ~17.7 GB | ~1.9 GB |
+
+The 242 MB that remains is the output buffer, which is work rather than waste.
+
+**Time, with borg as the control.** borg's code did not change between these runs, so what
+it did change by is the machine:
+
+| | before | after | |
+|---|---:|---:|---|
+| borge create | 93.4 s | 34.6 s | 2.7x raw |
+| borg create | 215.2 s | 154.9 s | 1.39x — *nothing changed but the machine* |
+| borge/borg | 0.434 | 0.223 | **1.9x, normalised** |
+
+**So the honest figure is about 1.9x on create, not 2.7x.** A third of the raw improvement
+is the machine being in a better state for the second run, and only a same-run comparison
+sees that. Run-to-run variance here is much worse than the 10% §12.1b estimated: borg alone
+moved 39%.
+
+**And extract did not improve at all.** Its borge/borg ratio went 0.448 to 0.475 - slightly
+*worse*, which is noise either way. The raw numbers say 82.4 s to 67.6 s and would have
+been reported as a win by anyone not holding a control. Decompression never touches
+`lz4.Compressor`, so there was no reason to expect one; the absence is the confirmation
+that the control is working rather than a disappointment.
+
+**In the profile**, garbage collection went from 22.2 s (23.5% of the run) to about 1.3 s,
+and the top is now syscalls 12.2 s (30%), sha256 8.2 s (20%) and lz4 itself 4.3 s (11%) -
+real work, in proportions that suit 118,866 small files.
+
+**One earlier reading is now corrected.** §12.1b said the reported `chunking_time` of
+34.5 s was dominated by the reads inside `Next()`. It was mostly garbage collection: with
+the allocation gone the same statistic reads **2.0 s**, and the chunker was never touched.
+Go charges collection assists to the goroutine that allocates and background marking steals
+from everyone, so time the statistic attributed to chunking belonged to the collector. The
+reads are still inside that timer - that part was right - but they are a small part of it.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
@@ -3410,10 +3461,9 @@ Then, in order:
    and XORs around it. A proposal argued from a backup tool's write path is stronger than
    one argued from a loop, and this is the single Stage 9 finding whose fix is not borge's
    to make.
-1a. **Reuse the lz4 compressor** (§12.1b). 136 KiB constructed per chunk, 91% of the
-   run's allocation, and the reason a quarter of create is garbage collection. A bug of
-   the same family as step 0, and it comes before the pipeline because it distorts every
-   measurement taken while it stands.
+1a. ~~**Reuse the lz4 compressor** (§12.1b).~~ **Done 2026-08-29**; see §12.1c. 16.1 GB of
+   allocation became 242 MB, collection went from 23.5% of create to about 3%, and create
+   is about 1.9x faster once borg is used as a control for the machine.
 2. Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.
 3. Parallelise `extract` similarly.
 4. Tune `PackWriter` `max_count`/`max_size` and the pack cache size against the
@@ -3465,7 +3515,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); step 1 done 2026-08-29 (§12.1b, `tests/bench` and the first profile — borge is 2.3x borg on create, and 91% of its allocation is one reusable lz4 struct). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
+| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); step 1 done 2026-08-29 (§12.1b, `tests/bench` and the first profile) and step 1a with it (§12.1c, the lz4 compressor pooled: 16.1 GB of allocation to 242 MB, create about 1.9x faster normalised against borg). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
