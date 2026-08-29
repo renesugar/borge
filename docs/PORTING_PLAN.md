@@ -3300,6 +3300,45 @@ Go charges collection assists to the goroutine that allocates and background mar
 from everyone, so time the statistic attributed to chunking belonged to the collector. The
 reads are still inside that timer - that part was right - but they are a small part of it.
 
+### 12.1d Step 3, first part, 2026-08-29: extract stopped calling C once per file
+
+Profiling extract - the slower half after steps 0-1a - put **`runtime.cgocall` at 20.7%**,
+and `pprof -peek` named it: `os/user._Cfunc_mygetgrnam_r`, **12.5 seconds** of
+`getgrnam_r`. `extractor.resolveOwner` asked the system to resolve the stored user and
+group *names* on every item, and the corpus has 118,866 items and about two distinct names.
+
+**This is worth more than its seconds, because it contradicts something §12.3 says.** That
+section argues borge is cgo-free and offers `CGO_ENABLED=0 go build ./...` as the evidence.
+The build does succeed - but `os/user` uses cgo when it is available, so the binary anyone
+actually ships was spending a fifth of every extract inside C. "It can be built without
+cgo" and "it does not use cgo" are different claims, and only the first was ever checked.
+§12.3's conclusion survives; its evidence needed this correction.
+
+The fix is the cache `safeDirs` already demonstrates two fields above - once per extraction
+rather than once per item - and it caches failures as firmly as hits, because restoring
+another machine's archive is the case where most names do not resolve and is exactly where
+an uncached lookup costs most.
+
+| | before | after | |
+|---|---:|---:|---|
+| borge extract | 67.6 s | 53.4 s | 1.27x raw |
+| borg extract | 142.4 s | 136.7 s | 1.04x — the control, well behaved this time |
+| borge/borg | 0.475 | 0.391 | **1.22x, normalised** |
+
+User time fell 36.4 s to 27.0 s, which is 9.4 s against the 12.5 s the profile attributed
+to cgo - consistent, given profiling overhead and that the two runs are not the same run.
+create's ratio stayed put (0.223 to 0.227), which is the check that matters here: a change
+to extract that moved create would have meant the measurement was drifting rather than the
+code improving.
+
+**What extract is now**: 53.4 s, of which 29.2 s is system time - 118,866 files, each
+created, written, closed, and given its mode, times and ownership. That is the wall
+ROADMAP R0.1 item 1 predicts, and it is now the largest thing left in the restore path.
+Two of my three predictions before profiling were wrong, which is worth recording: there
+was **no** third allocation bug, and **no** evidence of repeated pack reads, so the
+sort-by-`(pack_id, obj_offset)` idea R0.1 proposes has no support from this measurement
+yet. It is not refuted either; nothing here looked for it.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
@@ -3377,9 +3416,13 @@ The goal: a laptop or phone app points borge at a directory — possibly a cloud
 writes a backup to the cloud or a USB drive. What that needs, and where borge stands:
 
 - **No cgo.** Already true: `CGO_ENABLED=0 go build ./...` succeeds today, and the port
-  reaches the OS through `golang.org/x/sys/unix` rather than through C. This is what makes
-  `android/arm64` and `ios/arm64` cross-compilation a `go build` away, and it is worth
-  protecting — a cgo AES would cost exactly this property. See §12.4.
+  reaches the OS through `golang.org/x/sys/unix` rather than through C. **Corrected
+  2026-08-29:** that is evidence borge *can* be built without cgo, not that it does not use
+  it. `os/user` goes through cgo when it is available, and until §12.1d a shipped extract
+  spent 21% of its time in `getgrnam_r`. The conclusion stands; the evidence for it was
+  weaker than it read. Buildability is what makes `android/arm64` and `ios/arm64`
+  cross-compilation a `go build` away, and it is worth protecting — a cgo AES would cost
+  exactly this property. See §12.4.
 - **Encryption mode matters more on ARM than on x86.** ChaCha20-Poly1305 already measures
   332 MB/s against borg's 435 — 1.3x, because Go's implementation is assembly end to end —
   while AES-OCB is 17x behind. On a phone, ChaCha20-Poly1305 is the better default
@@ -3466,6 +3509,14 @@ Then, in order:
    is about 1.9x faster once borg is used as a control for the machine.
 2. Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.
 3. Parallelise `extract` similarly.
+
+> **Taken out of order, 2026-08-29: extract before create.** After steps 0, 1 and 1a,
+> extract is the slower half - 67.6 s against create's 34.6 s - and half of it is system
+> time (34.4 s), which is a different shape from anything the create work touched. It is
+> also the half ROADMAP R0.1 item 1 is about: large-directory restore is the case that
+> might need a format change, and the decision on that is supposed to be informed by
+> measuring here first. Profiling the slower half before optimising the faster one is the
+> order the evidence asks for, whatever the list says.
 4. Tune `PackWriter` `max_count`/`max_size` and the pack cache size against the
    pathological directory.
 5. Only if a Go hot path is measurably the bottleneck **and** a C implementation is

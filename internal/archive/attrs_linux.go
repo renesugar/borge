@@ -168,20 +168,49 @@ func (x *extractor) resolveOwner(it *item.Item) (uid, gid int) {
 		return uid, gid
 	}
 	if it.User != nil && *it.User != "" {
-		if u, err := user.Lookup(*it.User); err == nil {
-			if n, err := strconv.Atoi(u.Uid); err == nil {
-				uid = n
-			}
+		if n := x.lookupUID(*it.User); n >= 0 {
+			uid = n
 		}
 	}
 	if it.Group != nil && *it.Group != "" {
-		if g, err := user.LookupGroup(*it.Group); err == nil {
-			if n, err := strconv.Atoi(g.Gid); err == nil {
-				gid = n
-			}
+		if n := x.lookupGID(*it.Group); n >= 0 {
+			gid = n
 		}
 	}
 	return uid, gid
+}
+
+// lookupUID resolves a user name to a uid, remembering the answer.
+//
+// -1 means the name does not resolve here, and that is cached as firmly as a hit: see the
+// note on extractor.uids for why.
+func (x *extractor) lookupUID(name string) int {
+	if id, ok := x.uids[name]; ok {
+		return id
+	}
+	id := -1
+	if u, err := user.Lookup(name); err == nil {
+		if n, err := strconv.Atoi(u.Uid); err == nil {
+			id = n
+		}
+	}
+	x.uids[name] = id
+	return id
+}
+
+// lookupGID resolves a group name to a gid, remembering the answer.
+func (x *extractor) lookupGID(name string) int {
+	if id, ok := x.gids[name]; ok {
+		return id
+	}
+	id := -1
+	if g, err := user.LookupGroup(name); err == nil {
+		if n, err := strconv.Atoi(g.Gid); err == nil {
+			id = n
+		}
+	}
+	x.gids[name] = id
+	return id
 }
 
 // setXAttrs writes an item's extended attributes.
