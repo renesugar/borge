@@ -150,6 +150,20 @@ exactly — the deadline fired 43 seconds into a test that takes about a minute,
 exactly like a hang and was not one. The next run measured the package at 68 minutes, so
 the old limit was short rather than marginal.
 
+### The interop gate runs a binary, not the source
+
+`tests/interop` executes `bin/borge` rather than compiling it, so nothing ties its result
+to the tree. On 2026-08-28 a full suite reported `ok tests/interop (cached)` against a
+binary seven days old: Go's cache was right — `bin/borge` had not changed — and the gate
+that protects borg-2 format compatibility therefore passed without testing the change in
+front of it.
+
+`make test` now depends on `make build`, and `requireCurrentBinary` **fails** the gate when
+`bin/borge` is older than any `.go` file in the tree. It fails rather than skips: a skip
+would be the same silence in a different costume.
+
+If you invoke `go test ./tests/interop/` directly, build first.
+
 ### Temporary space
 
 The corpora are large. Set `TMPDIR=/media/renes/HD2/borge-tmp` for full runs; `/tmp` is a

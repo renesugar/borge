@@ -39,7 +39,11 @@ build:
 	go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/borge
 
 ## test: run the unit tests
-test:
+##   Depends on build because tests/interop runs bin/borge rather than compiling it, so a
+##   stale binary makes the compatibility gate pass without testing the current source.
+##   That happened: on 2026-08-28 the suite reported "ok tests/interop (cached)" against a
+##   binary from 2026-08-21.
+test: build
 	go test $(TIMEOUT) ./...
 
 ## interop: run the stage 7 interoperability gate (needs 'make build' and 'make borg2')

@@ -3408,6 +3408,14 @@ than no tracker: it is the document a new reader trusts first.
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
 
+**On the gate running a stale binary.** `tests/interop` executes `bin/borge` rather than
+compiling it. On 2026-08-28 a full suite reported `ok tests/interop (cached)` against a
+binary from 2026-08-21 — Go's cache was correct, its input was stale — so the gate passed
+without testing the chunker change in front of it. `make test` now depends on `make build`,
+and `requireCurrentBinary` fails the gate when the binary predates any `.go` file. Worth
+recording next to the bundles below, because it is the same lesson: a green gate has to be
+green *about something*, and both times it took a person noticing rather than a check.
+
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see
 §2). The gate itself passed both times. `stage-7-clean` is the one to cite: no failure
