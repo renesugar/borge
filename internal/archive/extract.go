@@ -582,15 +582,23 @@ func (x *extractor) writeFile(it *item.Item, path string) error {
 	if err := x.restoreAttrsFd(f, path, it); err != nil {
 		return err
 	}
+	// The whole attribute sequence runs on the descriptor that is already open, in the
+	// order the path versions document: times, then flags, because the immutable flag
+	// makes every further change to the inode impossible.
+	//
+	// The times used to be set after the close, on the grounds that "writing updates
+	// mtime, so setting it while the file is still open and unflushed would be undone".
+	// That is not how Linux behaves - mtime is stamped in write(), not in close() - and
+	// the claim was measured before this changed. Doing it here saves the kernel a second
+	// walk of the path, and doing the flags here saves the openat, four fcntls and close
+	// that setFlags spent reopening a file that was still open a moment earlier.
+	if err := x.restoreTimesFd(f, it); err != nil {
+		return err
+	}
+	if err := x.restoreFlagsFd(f, it); err != nil {
+		return err
+	}
 	if err := f.Close(); err != nil {
-		return err
-	}
-	// Times are set after the file is closed: writing updates mtime, so setting it while
-	// the file is still open and unflushed would be undone.
-	if err := x.restoreTimes(path, it); err != nil {
-		return err
-	}
-	if err := x.restoreFlags(path, it); err != nil {
 		return err
 	}
 	return x.checkSize(it, written)

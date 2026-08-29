@@ -168,7 +168,11 @@ it goes behind an explicit repository version bump and a documented migration.
    with no format change, and `docs/PORTING_PLAN.md` §12.1e has the numbers. What remains
    unmeasured is whether read *order* matters once the file stays open; nothing has looked
    for that yet, so the sort-by-`(pack_id, obj_offset)` proposal below is neither supported
-   nor refuted.)* borg 2's `PackWriter` already packs *chunks*. The
+   nor refuted. And a caution added 2026-08-29 from §12.1f: removing about 1.07 million
+   syscalls from an extract - three `openat` per file down to one - returned only about
+   three seconds, so per-file syscall overhead is *not* what dominates a large-directory
+   restore. The deferred-metadata and batching ideas below should be expected to buy less
+   than this item assumes.)* borg 2's `PackWriter` already packs *chunks*. The
    remaining problem is the restore side: extracting 118,866 files from one directory
    means 118,866 `create`+`write`+`close`+`utimes`+`chown` sequences, and on a slow or
    high-latency filesystem that, not I/O bandwidth, is the wall. Investigate:

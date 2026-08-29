@@ -3396,6 +3396,58 @@ The allocation figures elsewhere in §12 are unaffected: they do not depend on t
 timing ratios quoted before this section were measured unwarmed and are slightly generous
 to borg.
 
+### 12.1f One descriptor per restored file, and what that did not buy
+
+`strace` had counted three `openat` per restored file. The second was the pack, fixed by
+§12.1e. The third was `setFlags`, reopening the file that `writeFile` had closed a moment
+earlier purely to read and write its flags - an `openat`, four `fcntl`s and a `close` each
+time.
+
+The obstacle was a comment saying the times had to be set after the close, because "writing
+updates mtime, so setting it while the file is still open and unflushed would be undone".
+**That is not true.** Linux stamps mtime in `write()`, not in `close()`; times set on an
+open descriptor survive it, which was measured before anything changed. The other unstated
+assumption - that `FS_IOC_GETFLAGS` and `FS_IOC_SETFLAGS` need a read-only descriptor - was
+checked too, and they work on the `O_WRONLY` one `writeFile` already holds.
+
+So the whole sequence now runs on one descriptor: write, chown, chmod, times, flags, close.
+The ordering that *is* real is kept - flags strictly last, because the immutable flag makes
+every further change to the inode impossible - and is now enforced where it is documented.
+
+| per restored file | before | after |
+|---|---:|---:|
+| `openat` | 3.0 | **1.0** |
+| `close` | 3.0 | **1.0** |
+| `fcntl` | 8.0 | **4.0** |
+| `lseek` | 1.0 | 0 (now `pread64`) |
+
+One `openat` per file remains: the output file, which is irreducible.
+
+| | before | after | |
+|---|---:|---:|---|
+| borge extract | 45.8 s | 42.6 s | |
+| borg extract | 136.4 s | 135.1 s | control |
+| borge/borg | 0.336 | 0.315 | **1.065x normalised** |
+| system time | 24.9 s | 22.0 s | |
+
+**The interesting part is how little that was.** About 1.07 million syscalls disappeared and
+roughly three seconds came back. Syscall *count* was not what dominated extract; the
+remaining 22 s of system time is the kernel genuinely creating, writing and stamping 118,866
+files.
+
+**That is a caution for ROADMAP R0.1.** If per-file syscall overhead were the wall, the
+deferred-metadata and batching ideas that item proposes would be promising. This measurement
+says the wall is the work itself, so they should be expected to buy less than the item
+assumes. One dimension has been measured, not all of them - read *order* still has not been
+looked at - but the cheap-overhead theory of large-directory restore now has evidence
+against it rather than merely no evidence for it.
+
+**One lead deliberately not taken.** `newfstatat` stays at one per file, 118,878 of 118,899
+of them failing. It is what makes `--continue` able to skip an already-extracted item, and
+what removes a pre-existing entry before `O_CREATE|O_TRUNC` runs - without it an existing
+*symlink* at the target would be followed and written through. That is a security property,
+and one ENOENT on a cached dentry is the right price for it.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
