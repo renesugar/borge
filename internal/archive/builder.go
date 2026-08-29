@@ -114,6 +114,9 @@ type Builder struct {
 	countItemStreamSize bool
 	chunkSeed           uint32
 
+	// workers is how many goroutines hash and format chunks; 0 or 1 is serial.
+	workers int
+
 	items *itemStream
 	stats Stats
 	start time.Time
@@ -157,6 +160,7 @@ func NewBuilder(m *manifest.Manifest, opts BuilderOptions) (*Builder, error) {
 		chunkerParams:       params,
 		chunkerKey:          chunkerKey,
 		chunkSeed:           opts.ChunkSeed,
+		workers:             createWorkers(),
 		start:               time.Now().UTC(),
 	}
 
@@ -351,7 +355,31 @@ func (b *Builder) contentChunker(params chunker.Params, seed uint32, r io.Reader
 }
 
 // ChunkFile splits a reader into content chunks and stores them.
+//
+// With more than one worker the hashing and formatting go to a pool; see pipeline.go for
+// what is parallel, what stays serial and why. The serial path below remains the reference
+// and is what BORGE_CREATE_WORKERS=1 selects.
 func (b *Builder) ChunkFile(r io.Reader) ([]item.ChunkListEntry, error) {
+	return b.ChunkFileSized(r, -1)
+}
+
+// ChunkFileSized is ChunkFile for a caller that knows how much it is about to hand over.
+//
+// size is -1 when unknown. The hint decides whether the worker pool is used at all, and
+// getting it wrong only costs speed: see pipelineMinFileSize for the measurement. An
+// unknown size takes the pipeline, because the callers that do not know - import-tar,
+// recreate, a stream on standard input - are the ones handing over whole archives, while
+// the case the pipeline is bad at is many small files, which arrives through create where
+// the size is always known.
+func (b *Builder) ChunkFileSized(r io.Reader, size int64) ([]item.ChunkListEntry, error) {
+	if b.workers > 1 && (size < 0 || size >= pipelineMinFileSize) {
+		return b.chunkFilePipelined(r, b.workers)
+	}
+	return b.chunkFileSerial(r)
+}
+
+// chunkFileSerial is the one-goroutine path.
+func (b *Builder) chunkFileSerial(r io.Reader) ([]item.ChunkListEntry, error) {
 	ch, err := b.contentChunker(b.chunkerParams, b.chunkSeed, r)
 	if err != nil {
 		return nil, err

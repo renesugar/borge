@@ -3497,6 +3497,58 @@ its own 153.9 s with no code change, so the machine was loaded and neither run c
 a real cost from it. The ratio "improved" in that run only because borg, running second, was
 hit harder. It is owed a measurement on a quiet machine.
 
+### 12.1h Step 2 done 2026-08-29: a create pipeline that mostly declines to run
+
+`internal/archive/pipeline.go` spreads the per-chunk work - the id hash and
+`repoobj.Format`, which is compression and encryption - over a worker pool. Cutting stays
+serial because the chunker is stateful, and the tail stays serial and in chunk order
+because the deduplication check, the pack append and the index all touch state shared
+across the archive.
+
+**The result is two-sided, and quoting one side would be a lie by omission.** Measured on
+one binary with `BORGE_CREATE_WORKERS`, back to back:
+
+| corpus | wall | CPU | verdict |
+|---|---:|---:|---|
+| 118,866 files averaging 1.6 kB | 1.07x | **1.52x** | a bad trade |
+| one 1.2 GB file, 2 MB chunks | **1.69x** | 1.20x | a good one |
+
+Chunk size decides it. Hashing 1.6 kB takes microseconds - about what the channel handoff,
+the scheduling and the mandatory copy cost - so per-chunk overhead swamps per-chunk work.
+At 2 MB the overhead disappears into real hashing and compression.
+
+So the pool is used only for files of at least `pipelineMinFileSize`, and the small-file
+corpus is back to the serial path: 39.4 s against 38.1 s serial, CPU 33.9 s against 32.7,
+RSS unchanged - where always-on had cost 58.9 s, 60.3 s and 50 MB more resident.
+
+**Four workers, not one per CPU.** Eight took the large-file create to 26.9 s where four
+took it to 26.6 - no faster, and 130 MB more resident, because each worker holds chunks in
+flight. The cap is what measurement supports rather than what the machine has.
+
+**The threshold is conservative and the crossover is not measured.** Two extremes were; the
+point between them was not. Eight MiB is four default chunks, enough to fill the workers
+once, and it errs towards the serial path because that is the side that costs nothing when
+the guess is wrong.
+
+**The copy the pipeline cannot avoid.** `Chunker.Next` returns a slice aliasing its own
+buffer, valid only until the next call - the serial path uses it immediately, a worker
+cannot - so every chunk is copied before handover. At memcpy speed that is noise in time;
+in memory it is workers x depth chunks in flight, which is why the queue depth is two.
+
+**One claim in the first draft was wrong.** It said keeping chunk order preserved a
+byte-reproducible repository. Checked: two *serial* creates of the same tree already produce
+different pack names, because the archive's own metadata carries timestamps and its chunks
+share packs with the file chunks. Repositories were never byte-reproducible run to run.
+Order matters for a sharper reason - a file's chunk list *is* the file, and extraction
+concatenates in list order, so a list out of order restores a corrupted file from a set of
+chunk ids that every check would accept.
+
+**What makes the concurrency safe** was already in place and none of it is incidental:
+`Key.IDHash` is pure; the AEAD nonce counter is mutex-guarded with the cipher outside the
+lock, its own comment naming the worker pool as the reason; and both compressors are pooled
+with race tests, because a compressor per call was the bug that made them pools (§12.1c,
+and the zstd note in §12.2).
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
@@ -3696,7 +3748,10 @@ Then, in order:
 1a. ~~**Reuse the lz4 compressor** (§12.1b).~~ **Done 2026-08-29**; see §12.1c. 16.1 GB of
    allocation became 242 MB, collection went from 23.5% of create to about 3%, and create
    is about 1.9x faster once borg is used as a control for the machine.
-2. Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.
+2. ~~Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.~~
+   **Done 2026-08-29**; see §12.1h. 1.69x on large files, nothing on small ones, and it
+   declines to run below 8 MiB because measurement said the pool costs more than it saves
+   there.
 3. Parallelise `extract` similarly.
 
 > **Taken out of order, 2026-08-29: extract before create.** After steps 0, 1 and 1a,
@@ -3755,7 +3810,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); step 1 done 2026-08-29 (§12.1b, `tests/bench` and the first profile) and step 1a with it (§12.1c, the lz4 compressor pooled: 16.1 GB of allocation to 242 MB, create about 1.9x faster normalised against borg). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
+| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); steps 1 and 1a done 2026-08-29 (§12.1b, §12.1c), step 3's extract work (§12.1d-f), peak RSS measured and bounded (§12.1g), and step 2's create pipeline (§12.1h: 1.69x on large files, declines to run on small ones). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |

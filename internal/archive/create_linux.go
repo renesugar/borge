@@ -796,7 +796,8 @@ func (w *walker) readOnce(abs string, before *unix.Stat_t) ([]item.ChunkListEntr
 	defer f.Close()
 
 	startReading := time.Now().UnixNano()
-	chunks, err := w.builder.ChunkFile(reader)
+	// The size decides whether the worker pool is worth using; see pipelineMinFileSize.
+	chunks, err := w.builder.ChunkFileSized(reader, before.Size)
 	if err != nil {
 		return nil, false, err
 	}
