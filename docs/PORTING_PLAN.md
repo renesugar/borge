@@ -3339,6 +3339,63 @@ was **no** third allocation bug, and **no** evidence of repeated pack reads, so 
 sort-by-`(pack_id, obj_offset)` idea R0.1 proposes has no support from this measurement
 yet. It is not refuted either; nothing here looked for it.
 
+### 12.1e Extract keeps the pack open, and the harness stopped flattering borg
+
+**`strace -c` on an extract counted three `openat` per restored file where one is needed**,
+and eight `fcntl`. Tracing the sequence named all three: the output file, **the pack -
+reopened for every chunk** - and the output file again for `ioctl(FS_IOC_GETFLAGS)`. Each
+open also costs four `fcntl`s while Go registers and deregisters the descriptor with its
+poller.
+
+`PosixFS.Load` opened and closed on every object read: 118,866 opens of a handful of packs.
+It now keeps a bounded cache of handles and reads with `ReadAt`, which carries no file
+position and is therefore safe to share.
+
+| | before | after | |
+|---|---:|---:|---|
+| borge extract | 53.4 s | **45.8 s** | |
+| borg extract | 136.7 s | 136.4 s | control |
+| borge/borg | 0.391 | 0.336 | **1.16x normalised** |
+
+**This is evidence for ROADMAP R0.1.** That item proposes sorting a restore by
+`(pack_id, obj_offset)` so each pack is read once - which needs format work. A large part
+of what that would buy is available by keeping the pack open, and does not. R0 has that
+much less to justify.
+
+**Two things the tests caught that the code comments had argued away.** The first version
+cached handles unconditionally and `TestWritethroughCache` failed at once: the local cache
+has files removed behind the backend by design, and a held descriptor kept answering. Hence
+`SetReadCache`, off by default, on only for the primary backend. The second version
+reasoned that a handle held across a rewrite was harmless because it would serve "the old
+file rather than a torn new one"; `TestReadCacheSeesAReplacedObject`, written to check
+exactly that, failed. Every path that changes what a name refers to now drops the handle
+first, and the comment says that list is exhaustive by construction rather than by
+argument.
+
+#### The harness was flattering borg, and a "regression" that was not one
+
+The first measurement after this change showed create at 55.3 s against 35.3 - a 57%
+regression - while borg stayed flat. I called it real on that basis. It was not: three
+back-to-back creates measured **35.3, 34.8 and 34.1 s**, and the profile showed
+`store.Load` nowhere near create's path.
+
+The reasoning was the error. borg runs *later in the same invocation*, so a transient load
+early in a run hits borge and spares borg entirely. A same-run control catches drift
+*between* runs and cannot catch a disturbance *within* one, which is a weaker guarantee
+than the one §12.1c claimed for it.
+
+Fixing that exposed a real defect underneath. **The harness always ran borge first**, so
+the first tool faulted the corpus into the page cache and every later tool inherited it
+warm. Cold against warm is worth about 20 s here, so this was never negligible, and every
+ratio the harness produced was mildly in borg's favour. `warmCorpus` now reads the corpus
+before anything is measured - 190.5 MiB in 5.9 s, which is the cost that used to be
+absorbed silently - and the tool order is recorded in the JSON so two result files can be
+compared knowing whether they were measured the same way.
+
+The allocation figures elsewhere in §12 are unaffected: they do not depend on timing. The
+timing ratios quoted before this section were measured unwarmed and are slightly generous
+to borg.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get

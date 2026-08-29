@@ -23,6 +23,7 @@ package bench
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,7 +75,12 @@ type result struct {
 	BorgVer   string `json:"borg_version,omitempty"`
 	Host      string `json:"host"`
 	StartedAt string `json:"started_at"`
-	Runs      []run  `json:"runs"`
+	// Order is the sequence the tools ran in. It is recorded because it matters: the
+	// first tool to touch the corpus warms it for the rest, which is why warmCorpus
+	// exists, and a reader comparing two files should be able to see whether they were
+	// measured the same way.
+	Order []string `json:"tool_order"`
+	Runs  []run    `json:"runs"`
 	// RepoBytes is borge's repository after its create, and Archive what borge recorded
 	// about the archive it wrote.
 	RepoBytes int64       `json:"repo_bytes"`
@@ -140,6 +146,30 @@ func countTree(t *testing.T, root string) (int, int64) {
 		t.Fatalf("walking %s: %v", root, err)
 	}
 	return files, bytes
+}
+
+// warmCorpus reads every byte of the corpus and throws it away.
+func warmCorpus(t *testing.T, root string) {
+	t.Helper()
+	started := time.Now()
+	var read int64
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil // an unreadable corner is not this harness's problem
+		}
+		n, _ := io.Copy(io.Discard, f)
+		f.Close()
+		read += n
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("warming %s: %v", root, err)
+	}
+	t.Logf("warmed %s of corpus in %s", humanBytes(read), time.Since(started).Round(time.Millisecond))
 }
 
 // dirBytes is the on-disk size of a directory tree.
@@ -248,6 +278,18 @@ func TestBaselinePathologicalDir(t *testing.T) {
 		t.Logf("borg 2 not built at %s; measuring borge alone (run 'make borg2' for the comparison)", borg)
 	}
 
+	// Read the corpus once before measuring anything.
+	//
+	// Without this the first tool to run pays for faulting 190 MiB of source into the page
+	// cache and every later tool inherits it warm - and the harness always ran borge
+	// first, so every ratio it produced flattered borg. The size of that effect is not
+	// small: a cold create measured 55.3 s where three warm ones measured 35.3, 34.8 and
+	// 34.1.
+	//
+	// It also makes "warm" in the record mean something specific, rather than "whatever
+	// the machine happened to be holding".
+	warmCorpus(t, corpus)
+
 	files, bytes := countTree(t, corpus)
 	host, _ := os.Hostname()
 	res := result{
@@ -275,6 +317,7 @@ func TestBaselinePathologicalDir(t *testing.T) {
 	}
 
 	for _, tl := range tools {
+		res.Order = append(res.Order, tl.name)
 		repo := filepath.Join(base, tl.name+"-repo")
 		dest := filepath.Join(base, tl.name+"-out")
 		if err := os.MkdirAll(dest, 0o755); err != nil {

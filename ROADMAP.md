@@ -162,7 +162,13 @@ State: **not started.** Moved here from `docs/PORTING_PLAN.md` §13 (Stage 10) o
 2026-08-27. Only after Stages 7 and 9. Everything here **breaks format compatibility**, so
 it goes behind an explicit repository version bump and a documented migration.
 
-1. **Large-directory packing.** borg 2's `PackWriter` already packs *chunks*. The
+1. **Large-directory packing.** *(Stage 9 note, 2026-08-29: part of the restore-side cost
+   this item is about was simply that `PosixFS.Load` reopened the pack on every object read
+   - 118,866 opens for a handful of packs. Keeping the handle open bought 1.16x on extract
+   with no format change, and `docs/PORTING_PLAN.md` §12.1e has the numbers. What remains
+   unmeasured is whether read *order* matters once the file stays open; nothing has looked
+   for that yet, so the sort-by-`(pack_id, obj_offset)` proposal below is neither supported
+   nor refuted.)* borg 2's `PackWriter` already packs *chunks*. The
    remaining problem is the restore side: extracting 118,866 files from one directory
    means 118,866 `create`+`write`+`close`+`utimes`+`chown` sequences, and on a slow or
    high-latency filesystem that, not I/O bandwidth, is the wall. Investigate:
