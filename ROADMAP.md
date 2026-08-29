@@ -8,12 +8,14 @@ is archived in [`plans/`](plans/) and the current documents become this roadmap 
 `PLAN.md`, the plan for whatever roadmap item is being implemented now. `AGENTS.md`
 describes that workflow.
 
-**On the numbering.** R0 is not the first priority; it is the oldest item. It was Stage 10
+**On the numbering.** RP is the port; it has letters rather than a number because it
+predates this file and its stages are numbered already. R0 is not the first priority; it is
+the oldest item. It was Stage 10
 of the porting plan and moved here on 2026-08-27, because it is work that begins after the
 port is complete. The identifier is a name, not a rank.
 
 **What is next, as of 2026-08-28.** R1 has one item open and R2 is complete, so the
-remaining work before the first GitHub push is **Stage 9** — the performance baseline,
+remaining work before the first GitHub push is **RP's Stage 9** — the performance baseline,
 whose investigation is done (`docs/PORTING_PLAN.md` §12.1–12.5) and whose measurement and
 fixes are not — and then **R0**, which begins only once Stage 9 has said what it justifies.
 R0.1 item 1 is explicitly a Stage 9 experiment first: large-directory restore may be
@@ -22,8 +24,21 @@ that it has to.
 
 ## Current priorities
 
-Stage 9 is the live priority and it lives in the porting plan, not here; this section is
-what remains of the roadmap's own work.
+### RP. The borg-to-Go port (Stages 0-9)
+
+State: **Stages 0-8 done; Stage 9 in progress.** Owned by
+[`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md), which is the current plan while this
+milestone is open; its §14 tracker is the authority on stage state and is not duplicated
+here.
+
+**Listed here because every milestone belongs on this roadmap, and this one was missing.**
+The roadmap was written after the port had started, so the port was never given an entry —
+and the convention is that development moves to the next roadmap item and `PLAN.md` is
+written for it. With the port absent and R1 and R2 completed *during* it, the sequence
+stopped being legible: after R2 closed there was no `PLAN.md`, which reads as a mistake
+rather than as "the port is current again". It is not a mistake, and now it is written
+down. When Stage 9 closes, the porting plan is archived to `plans/` and `PLAN.md` becomes
+the plan for R0.
 
 ### R1. Preserve the pre-GitHub evidence record
 

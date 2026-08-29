@@ -27,7 +27,10 @@ There is exactly **one current plan** at a time, and one long-lived roadmap.
 The workflow:
 
 1. **While the port is open** (through stage 9), `docs/PORTING_PLAN.md` is the plan and
-   `ROADMAP.md` holds everything the port does not own.
+   `ROADMAP.md` holds everything the port does not own. The port is itself a roadmap
+   milestone — `ROADMAP.md` RP — because every milestone belongs there; it was added late,
+   and its absence is what made "no `PLAN.md`" look like an omission rather than like the
+   porting plan being current.
 2. **When stage 9 closes**, move `docs/PORTING_PLAN.md` to `plans/` unmodified and stop
    editing it. Anything in it that describes unfinished non-porting work must already have
    been moved into `ROADMAP.md` or a document under `docs/` before it is archived — an
