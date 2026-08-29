@@ -3448,6 +3448,55 @@ what removes a pre-existing entry before `O_CREATE|O_TRUNC` runs - without it an
 *symlink* at the target would be followed and written through. That is a security property,
 and one ENOENT on a cached dentry is the right price for it.
 
+### 12.1g Peak RSS: what it is made of, and the knob that already bounds it
+
+borge's peak RSS on create was the one number where borg won - 409 MiB against 246 - and
+§12.3 wants it bounded for the desktop and mobile goal. Measured rather than guessed.
+
+**It is the Go heap, and it is pack buffering.** `gctrace=1` puts the live heap peak at
+163 MB with a collector goal of 327 MB, which is what a 409 MiB resident set is made of.
+Sweeping `BORGE_PACK_MAX_SIZE` over the corpus of §12.1b:
+
+| pack size | peak RSS | wall |
+|---:|---:|---:|
+| 50 MB (the default, and borg's) | 383 MB | 36.6 s |
+| 8 MB | 307 MB | 34.8 s |
+| 2 MB | **244 MB** | 35.4 s |
+
+RSS tracks pack size and wall time does not move. **At 2 MB packs borge sits below borg**,
+so the metric borge loses on is a tuning default rather than a structural deficit, and the
+knob §12.3 says a phone needs is already there and works.
+
+The default stays at 50 MB because it is borg's. Diverging on repository layout to win a
+benchmark would trade interoperability for a number.
+
+**One copy removed.** `storePack` held every chunk's buffer *and* the assembled pack across
+the `Store` call - the slowest part of a write - when all the results loop needs from the
+pieces afterwards is their sizes. They are released as they are copied now.
+
+| | before | after |
+|---|---:|---:|
+| peak RSS, harness, default packs | 409 MiB | **337 MiB** |
+| peak RSS, standalone, 50 MB packs | 383 MB | 358 MB |
+| peak RSS, standalone, 2 MB packs | 244 MB | 202 MB |
+
+**The mechanism is not the one predicted, and the prediction is worth recording.** Releasing
+one pack-sized copy should have saved about 50 MB at 50 MB packs and nothing at 2 MB. The
+opposite happened: 2 MB improved by 42 MB and 50 MB by 25. Releasing a 2 MB buffer cannot
+directly return 42 MB, so "one copy removed" is not what is happening. The likely
+explanation is that Go's heap target is a multiple of the live heap at the last collection,
+so freeing earlier lowers the peak, which lowers the target, which lowers RSS by more than
+the bytes freed and not in proportion to pack size. That also fits the 2.9-copies-per-pack
+ratio in the sweep better than three literal copies did - a linear model was being fitted to
+something with collector amplification in it. Recorded as the reading that fits, not as a
+mechanism established.
+
+**Wall time is indeterminate and is not claimed either way.** The uncontrolled sweep showed
+3-4 s more on both pack sizes; the controlled run afterwards had borg take 204.7 s against
+its own 153.9 s with no code change, so the machine was loaded and neither run can separate
+a real cost from it. The ratio "improved" in that run only because borg, running second, was
+hit harder. It is owed a measurement on a quiet machine.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
@@ -3539,7 +3588,11 @@ writes a backup to the cloud or a USB drive. What that needs, and where borge st
   mobile question largely independent of the OCB ceiling.**
 - **Memory has to be bounded.** The pack writer buffers whole packs, the chunk index is
   held in memory, and `analyze` walks every archive. A phone needs `BORGE_PACK_MAX_SIZE`
-  and an index that can spill. Not yet measured; it belongs in this stage's scenarios.
+  and an index that can spill. **Measured 2026-08-29, §12.1g:** peak RSS is the Go heap and
+  it is pack buffering; `BORGE_PACK_MAX_SIZE` bounds it, and at 2 MB packs borge sits below
+  borg at no cost in wall time. The prediction in this bullet was right. The index spilling
+  is still unmeasured - the chunk index is about 11 MB for this corpus, which is not what
+  dominates here.
 - **High-latency storage is already exercised.** The stage 7 Google Drive corpus runs over
   an rclone mount where a single object write measured 2.7 s, and the gate passes there.
   That is the same I/O shape a phone writing to cloud storage sees.

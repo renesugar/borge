@@ -184,9 +184,22 @@ func storePack(s *store.Store, pieces []piece) ([]PackResult, error) {
 	// Build the pack bytes once. borg joins rather than concatenating incrementally to
 	// avoid quadratic copying; the same reasoning applies to a Go append loop without a
 	// pre-sized buffer.
+	//
+	// Each chunk's buffer is released as soon as it has been copied, and the sizes are
+	// kept because that is all the results loop below needs from it. Without that, the
+	// pieces and the assembled pack are both live across the Store call - two copies of
+	// up to BORGE_PACK_MAX_SIZE, held across the slowest part of the write. Peak RSS on
+	// the corpus of §12.1b measured 383 MB at the default 50 MB pack and 244 MB at 2 MB,
+	// a ratio of about 2.9 copies per pack; this is one of them.
+	//
+	// takePieces has already detached the slice from the writer, so nothing else can read
+	// these buffers.
 	packData := make([]byte, 0, total)
-	for _, p := range pieces {
-		packData = append(packData, p.data...)
+	sizes := make([]int, len(pieces))
+	for i := range pieces {
+		sizes[i] = len(pieces[i].data)
+		packData = append(packData, pieces[i].data...)
+		pieces[i].data = nil
 	}
 
 	// The pack is named by the SHA-256 of its bytes, so the name commits to the content
@@ -195,16 +208,16 @@ func storePack(s *store.Store, pieces []piece) ([]PackResult, error) {
 
 	results := make([]PackResult, 0, len(pieces))
 	offset := 0
-	for _, p := range pieces {
+	for i, p := range pieces {
 		id := make([]byte, repoobj.ChunkIDSize)
 		copy(id, p.chunkID[:])
 		results = append(results, PackResult{
 			ChunkID:   id,
 			PackID:    packID,
 			ObjOffset: uint32(offset),
-			ObjSize:   uint32(len(p.data)),
+			ObjSize:   uint32(sizes[i]),
 		})
-		offset += len(p.data)
+		offset += sizes[i]
 	}
 
 	if err := s.Store(PackName(packID[:]), packData); err != nil {
