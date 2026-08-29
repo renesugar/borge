@@ -3512,6 +3512,33 @@ described in each row.
 | OCB's byte-at-a-time XOR | 50.2 → 72.6 MB/s (1.45x) | `crypto/subtle.XORBytes` | no |
 | OCB's per-call AES ceiling | capped at ~154 MB/s | batched AES | no, but needs assembly |
 
+> **Taken 2026-08-29, a week later than it should have been.** The encoders are pooled per
+> level and the measurement is below. It went unfixed while three smaller findings around
+> it were fixed, because the default compression is lz4 and every benchmark run in Stage 9
+> went straight past this path. A finding recorded in a plan but not exercised by the
+> benchmark corpus is one nobody trips over a second time; the harness covering a single
+> compression mode is the gap, and it is worth closing before the next such claim.
+>
+> Measured here on a 2 MiB semi-compressible buffer:
+>
+> | | fresh per chunk | pooled |
+> |---|---:|---:|
+> | time | 15.0 ms | **5.0 ms** |
+> | throughput | 139.8 MB/s | **420.1 MB/s** |
+> | allocated | 27.7 MB | **4.9 MB** |
+> | allocations | 49 | 12 |
+>
+> **3.0x, not the 4.7x predicted below** - different data and a busier machine, so the
+> direction and the order of magnitude carry over and the exact ratio does not. It changes
+> nothing in the Stage 9 create numbers, which all use the default lz4. It matters for
+> anyone running `-C zstd`, and it matters more for ROADMAP R0 item 3, which proposes
+> making zstd the default and would have walked straight into it.
+>
+> It would also have been worse under the create pipeline of step 2, not better:
+> klauspost's encoder starts goroutines when it is constructed, so a worker pool would have
+> been building and tearing them down per chunk on every worker - and the result would have
+> read as "parallelism does not help much" rather than as a bug underneath it.
+
 **1. `compress.Zstd.Compress` calls `zstd.NewWriter` on every chunk.** A klauspost encoder
 allocates window buffers and starts goroutines at construction; the library is designed to
 have one encoder reused, and `EncodeAll` on a reused encoder is safe for concurrent use.

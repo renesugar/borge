@@ -190,13 +190,48 @@ func (Zstd) EncodeLevel(level int) (uint8, error) {
 // DecodeLevel reverses EncodeLevel, reading the byte as a signed int8.
 func (Zstd) DecodeLevel(clevel uint8) int { return int(int8(clevel)) }
 
+// zstdEncoders holds one pool of encoders per level.
+//
+// §12.2 measured a fresh encoder per chunk at 183.7 MB/s against 871.8 for a reused one -
+// 4.7x, "the single largest win available and the cheapest to take" - and then it was not
+// taken, because the default compression is lz4 and the benchmark corpus never reached
+// this path. Found on the way into the create pipeline, where it would have been worse
+// still: klauspost's encoder starts goroutines when it is constructed, so a worker pool
+// would have been building and tearing them down per chunk on every worker.
+//
+// Keyed by level because an encoder is built for one. EncodeAll on a reused encoder is
+// safe for concurrent use, which is what makes a single pool per level correct rather than
+// one per goroutine.
+var zstdEncoders sync.Map // zstd.EncoderLevel -> *sync.Pool of *zstd.Encoder
+
+func zstdEncoderPool(level zstd.EncoderLevel) *sync.Pool {
+	if p, ok := zstdEncoders.Load(level); ok {
+		return p.(*sync.Pool)
+	}
+	p := &sync.Pool{New: func() any {
+		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
+		if err != nil {
+			// NewWriter only fails on a bad option, and the option is this level.
+			return err
+		}
+		return enc
+	}}
+	actual, _ := zstdEncoders.LoadOrStore(level, p)
+	return actual.(*sync.Pool)
+}
+
 func (c Zstd) Compress(meta *Meta, data []byte) ([]byte, error) {
 	return decideCompress(meta, c, data, func() ([]byte, error) {
-		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstdLevel(c.level)))
-		if err != nil {
+		level := zstdLevel(c.level)
+		pool := zstdEncoderPool(level)
+		got := pool.Get()
+		if err, isErr := got.(error); isErr {
 			return nil, fmt.Errorf("compress: zstd: %w", err)
 		}
-		defer enc.Close()
+		enc := got.(*zstd.Encoder)
+		// Returned rather than closed: Close releases the encoder's goroutines, which is
+		// the cost this pool exists to stop paying per chunk.
+		defer pool.Put(enc)
 		out := enc.EncodeAll(data, nil)
 		if len(out) >= len(data) {
 			return nil, nil
