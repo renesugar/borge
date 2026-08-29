@@ -98,6 +98,18 @@ type Chunker interface {
 	Next() (Chunk, error)
 	// Algorithm names the chunker, as stored in archive metadata.
 	Algorithm() string
+	// Reset points the chunker at a new stream, keeping the tables and the buffer.
+	//
+	// It exists because building a chunker is not free and borge was doing it per file
+	// while borg does it per archive: the keyed Gear and buzhash tables are derived from
+	// a CSPRNG, which measured 1.75 ms for fastcdc and 4.35 ms for buzhash64 - about
+	// 3.5 minutes of pure table construction over the 118,866-file corpus the project
+	// brief singles out, before a byte is chunked. See docs/PORTING_PLAN.md 12.1.
+	//
+	// A reset chunker must produce exactly the chunks a fresh one would; that is the
+	// property the fix lives or dies on, and TestResetChunksIdentically checks it for
+	// every algorithm.
+	Reset(r io.Reader)
 }
 
 // Params describes a chunker configuration, the parsed form of --chunker-params.

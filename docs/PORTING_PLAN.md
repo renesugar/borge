@@ -3125,6 +3125,23 @@ project brief singles out. The fix is a `Reset(io.Reader)` on the chunker so a B
 constructs one and reuses it. This is why the chunker rows report setup separately: borg's
 benchmark puts construction in the timeit setup and would never show it.
 
+> **Corrected 2026-08-28, when the fix was implemented and measured.** The diagnosis above
+> is right about the cost and wrong about the cause. Construction is dominated not by the
+> keyed tables but by `driver.init`'s backing buffer, which is allocated at exactly
+> `maxSize` - 8 MiB at the default `ChunkMaxExp` of 23 - and zeroed by Go. Measured on this
+> machine with `BenchmarkNewFastCDC` and `BenchmarkNewFastCDCSmallBuffer`, which differ
+> only in that maximum:
+>
+> | construction | time | allocated |
+> |---|---:|---:|
+> | default (8 MiB max chunk) | **2.85-3.06 ms** | 8,398,982 B |
+> | 64 KiB max chunk (tables only) | 0.09-0.14 ms | 75,841 B |
+>
+> So the tables are about 4% of it and the buffer is the rest. For the 118,866-file
+> directory that is **roughly 5.7 minutes**, not 3.5, and only about 12 seconds of it is
+> table derivation. The fix is the same fix - reuse keeps both - but the estimate above was
+> low and the reason it gave was the smaller half.
+
 **3. borge's zstd levels collapse.** `klauspost/compress` has four encoder levels against
 libzstd's twenty-two, so `zstd,16` and `zstd,22` produce identical output, as do `lzma,0`,
 `lzma,6` and `lzma,9`. Visible in the ratio column, which is why it is there:
@@ -3137,6 +3154,43 @@ DIVERGENCES #16.
 
 Two of these three are ordinary bugs with ordinary fixes; only the first is an argument for
 cgo. None were visible from the interop gate, which is the point of having stage 9 at all.
+
+### 12.1a Step 0 done 2026-08-28: the chunker is built once and reset
+
+`Chunker` gained `Reset(io.Reader)`; `archive.Builder` keeps one content chunker and resets
+it per file, `itemStream` keeps one across flushes, and `transfer`'s re-chunking goes
+through the same cache. The two `chunker.New` calls left in `benchmark.go` are deliberate:
+that command measures construction on purpose.
+
+Per 4 KiB file, on this machine:
+
+| | per call | throughput | allocated | allocs |
+|---|---:|---:|---:|---:|
+| a chunker per file (fastcdc) | 3.58-4.87 ms | 0.8-1.2 MB/s | 8,398,921 B | 8 |
+| one chunker reset (fastcdc) | **1.0-1.7 µs** | 2.6-4.0 GB/s | **48 B** | **1** |
+| a chunker per file (buzhash64) | 7.69 ms | 0.5 MB/s | 8,421,950 B | 22,509 |
+| one chunker reset (buzhash64) | **2.7 µs** | 1.5 GB/s | **48 B** | **1** |
+
+The ratio is not a speedup anyone will see end to end - it is the per-file *overhead*
+disappearing, and how much that matters depends on how much of a create is chunking. What
+is unambiguous is the allocation: 8.4 MB per file becomes 48 bytes, and buzhash64's 22,509
+allocations per file become one.
+
+**The correctness obligation, and how it is discharged.** A reset chunker must cut exactly
+where a fresh one would; if it did not, every archive written after this change would
+deduplicate against nothing that came before, and the interop gate would be comparing borge
+against a borge that no longer chunks like borg. `TestResetChunksIdentically` checks all
+four algorithms over an empty stream, one below the minimum chunk size, a run-heavy stream
+with few cut points, and 20 MiB of random data; `TestResetAfterAPartialReadStartsClean`
+covers the abandoned-read path. Both were checked by mutation - omitting any of `n`,
+`pending`, `eof`, `done` or `bytesRead` from `driver.reset` makes them fail. `pos` is the
+one field they do not pin, because both scan loops assign it before reading it; it is reset
+defensively and `driver.reset` says so rather than implying otherwise.
+
+**One thing this hands to step 2.** A chunker owns a buffer that `Next` returns by
+reference, so one cannot serve two goroutines. Reuse is correct now because the write path
+is serial. Pipelining `create` makes this one chunker per worker, and `Builder.contentChunker`
+carries that note so it is revisited rather than inherited.
 
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
@@ -3286,8 +3340,10 @@ conservative about how few dependencies that takes.
 
 Then, in order:
 
-0. **Fix the chunker-per-file construction** (finding 2). It is a bug, not a tuning
-   question, and it makes every later measurement of the small-file corpora wrong.
+0. ~~**Fix the chunker-per-file construction** (finding 2). It is a bug, not a tuning
+   question, and it makes every later measurement of the small-file corpora wrong.~~
+   **Done 2026-08-28**; see §12.1a. The cost turned out to be the 8 MiB backing buffer
+   rather than the tables, and larger than §12.1 estimated.
 1. **Profile before changing anything** (`pprof`, CPU + alloc).
 
    While the profiles are in hand: **measure AES-OCB on a real corpus and post the number
@@ -3347,7 +3403,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run, `tests/bench/` not yet written. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
+| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); no baseline run yet, `tests/bench/` not yet written. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |

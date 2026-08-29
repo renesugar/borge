@@ -280,7 +280,9 @@ func rechunkContent(b *Builder, other *Archive, srcChunks []item.ChunkListEntry,
 		return nil, n, 0, err
 	}
 
-	ch, err := chunker.New(*opts.ChunkerParams, b.chunkerKey, opts.ChunkSeed, r)
+	// Through the Builder's cache: a transfer re-chunks every item in the archive, so
+	// this is the same per-item construction cost ChunkFile had.
+	ch, err := b.contentChunker(*opts.ChunkerParams, opts.ChunkSeed, r)
 	if err != nil {
 		return nil, 0, 0, err
 	}

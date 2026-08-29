@@ -105,6 +105,10 @@ type Builder struct {
 
 	chunkerParams chunker.Params
 	chunkerKey    []byte
+	// chunkerCache is the content chunker, reused across files; see contentChunker.
+	chunkerCache       chunker.Chunker
+	chunkerCacheParams chunker.Params
+	chunkerCacheSeed   uint32
 
 	// countItemStreamSize is BuilderOptions.CountItemStreamSize.
 	countItemStreamSize bool
@@ -314,9 +318,41 @@ func (b *Builder) AddCompressedChunk(id []byte, meta *repoobj.Meta, compressed [
 	return item.ChunkListEntry{ID: id, Size: size}, nil
 }
 
+// contentChunker returns a chunker for these parameters, pointed at r.
+//
+// One chunker is kept and reset per file, because building one is not free: the keyed
+// Gear and buzhash tables come from a CSPRNG, measured at 1.75 ms for fastcdc and 4.35 ms
+// for buzhash64, which over a 118,866-file directory is about 3.5 minutes of table
+// construction before a byte is chunked (docs/PORTING_PLAN.md §12.1). borg builds one per
+// archive; borge was building one per file.
+//
+// The cache is keyed on the parameters and the seed rather than assumed: transfer
+// re-chunks through the *destination's* configuration, which is not necessarily the one
+// this Builder was made with, and silently reusing tables derived from a different key
+// would produce chunk boundaries that match neither repository.
+//
+// # This is safe because the write path is serial
+//
+// One chunker cannot serve two goroutines: it owns a buffer that Next hands out by
+// reference. Stage 9 step 2 pipelines create, and at that point this needs to become one
+// chunker per worker rather than one per Builder. Reusing it here is correct today and is
+// a thing to revisit then, not a thing to inherit.
+func (b *Builder) contentChunker(params chunker.Params, seed uint32, r io.Reader) (chunker.Chunker, error) {
+	if b.chunkerCache != nil && b.chunkerCacheParams == params && b.chunkerCacheSeed == seed {
+		b.chunkerCache.Reset(r)
+		return b.chunkerCache, nil
+	}
+	ch, err := chunker.New(params, b.chunkerKey, seed, r)
+	if err != nil {
+		return nil, err
+	}
+	b.chunkerCache, b.chunkerCacheParams, b.chunkerCacheSeed = ch, params, seed
+	return ch, nil
+}
+
 // ChunkFile splits a reader into content chunks and stores them.
 func (b *Builder) ChunkFile(r io.Reader) ([]item.ChunkListEntry, error) {
-	ch, err := chunker.New(b.chunkerParams, b.chunkerKey, b.chunkSeed, r)
+	ch, err := b.contentChunker(b.chunkerParams, b.chunkSeed, r)
 	if err != nil {
 		return nil, err
 	}
@@ -438,6 +474,8 @@ type itemStream struct {
 
 	buf    bytes.Buffer
 	chunks [][]byte
+	// chunker is built once and reset per flush; the stream's parameters never change.
+	chunker chunker.Chunker
 }
 
 func (s *itemStream) add(it *item.Item) error {
@@ -461,10 +499,19 @@ func (s *itemStream) flush(final bool) error {
 	if s.buf.Len() == 0 {
 		return nil
 	}
-	ch, err := chunker.New(s.params, s.key, s.builder.chunkSeed, bytes.NewReader(s.buf.Bytes()))
-	if err != nil {
-		return err
+	// The metadata stream is flushed repeatedly as items accumulate, so this was its own
+	// per-flush table construction. Its parameters never change, so one chunker serves
+	// the whole stream.
+	if s.chunker == nil {
+		ch, err := chunker.New(s.params, s.key, s.builder.chunkSeed, bytes.NewReader(s.buf.Bytes()))
+		if err != nil {
+			return err
+		}
+		s.chunker = ch
+	} else {
+		s.chunker.Reset(bytes.NewReader(s.buf.Bytes()))
 	}
+	ch := s.chunker
 	// The item stream is chunked too, and borg counts that in the same total: its
 	// chunking_time comes from the chunker object, not from the caller.
 	var pieces [][]byte

@@ -72,6 +72,10 @@ func fastCDCGearTable(key []byte) ([256]uint64, error) {
 
 func (c *FastCDC) Algorithm() string { return AlgoFastCDC }
 
+// Reset points the chunker at a new stream. The Gear table, which is the expensive part,
+// is derived from the repository key and does not depend on the stream.
+func (c *FastCDC) Reset(r io.Reader) { c.d.reset(r) }
+
 // Next returns the next chunk.
 func (c *FastCDC) Next() (Chunk, error) {
 	data, err := c.d.next(c.scan, func() uint64 { return 0 }) // window-less: restart from 0
