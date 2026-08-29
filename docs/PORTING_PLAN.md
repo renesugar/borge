@@ -3470,110 +3470,35 @@ knob §12.3 says a phone needs is already there and works.
 The default stays at 50 MB because it is borg's. Diverging on repository layout to win a
 benchmark would trade interoperability for a number.
 
-**One copy removed.** `storePack` held every chunk's buffer *and* the assembled pack across
-the `Store` call - the slowest part of a write - when all the results loop needs from the
-pieces afterwards is their sizes. They are released as they are copied now.
+**One copy removed - and then put back, because it did nothing.** `storePack` held every
+chunk's buffer *and* the assembled pack across the `Store` call, and releasing the buffers
+as they were copied looked like it cut peak RSS from 409 MiB to 337.
 
-| | before | after |
-|---|---:|---:|
-| peak RSS, harness, default packs | 409 MiB | **337 MiB** |
-| peak RSS, standalone, 50 MB packs | 383 MB | 358 MB |
-| peak RSS, standalone, 2 MB packs | 244 MB | 202 MB |
+**It did not.** That was two unpaired runs, and the effect is inside this machine's noise.
+Measured properly - two binaries differing only in that loop, run interleaved, eight pairs,
+on an idle machine (the desktop's browser and system monitor closed for it):
 
-**The mechanism is not the one predicted, and the prediction is worth recording.** Releasing
-one pack-sized copy should have saved about 50 MB at 50 MB packs and nothing at 2 MB. The
-opposite happened: 2 MB improved by 42 MB and 50 MB by 25. Releasing a 2 MB buffer cannot
-directly return 42 MB, so "one copy removed" is not what is happening. The likely
-explanation is that Go's heap target is a multiple of the live heap at the last collection,
-so freeing earlier lowers the peak, which lowers the target, which lowers RSS by more than
-the bytes freed and not in proportion to pack size. That also fits the 2.9-copies-per-pack
-ratio in the sweep better than three literal copies did - a linear model was being fitted to
-something with collector amplification in it. Recorded as the reading that fits, not as a
-mechanism established.
-
-**Wall time is indeterminate and is not claimed either way.** The uncontrolled sweep showed
-3-4 s more on both pack sizes; the controlled run afterwards had borg take 204.7 s against
-its own 153.9 s with no code change, so the machine was loaded and neither run can separate
-a real cost from it. The ratio "improved" in that run only because borg, running second, was
-hit harder. It is owed a measurement on a quiet machine.
-
-### 12.1h Step 2 done 2026-08-29: a create pipeline that mostly declines to run
-
-`internal/archive/pipeline.go` spreads the per-chunk work - the id hash and
-`repoobj.Format`, which is compression and encryption - over a worker pool. Cutting stays
-serial because the chunker is stateful, and the tail stays serial and in chunk order
-because the deduplication check, the pack append and the index all touch state shared
-across the archive.
-
-**The result is two-sided, and quoting one side would be a lie by omission.** Measured on
-one binary with `BORGE_CREATE_WORKERS`, back to back:
-
-| corpus | wall | CPU | verdict |
+| | mean difference | sd | direction |
 |---|---:|---:|---|
-| 118,866 files averaging 1.6 kB | 1.07x | **1.52x** | a bad trade |
-| one 1.2 GB file, 2 MB chunks | **1.6x** | 1.2x | a good one |
+| wall time | -0.10 s | 0.42 | 7 of 8 negative |
+| peak RSS | -5 MB | 24 | 5 of 8 negative |
 
-Chunk size decides it. Hashing 1.6 kB takes microseconds - about what the channel handoff,
-the scheduling and the mandatory copy cost - so per-chunk overhead swamps per-chunk work.
-At 2 MB the overhead disappears into real hashing and compression.
+Neither is a difference. The same binary spans 335-385 MB across repetitions, so a 70 MB
+before-and-after was measuring the machine.
 
-So the pool is used only for files of at least `pipelineMinFileSize`, and the small-file
-corpus is back to the serial path: 39.4 s against 38.1 s serial, CPU 33.9 s against 32.7,
-RSS unchanged - where always-on had cost 58.9 s, 60.3 s and 50 MB more resident.
+The likely reason it changes nothing is Go's liveness analysis: `pieces` is last read in the
+results loop, which runs *before* the `Store`, so the collector already treats those buffers
+as dead there. Telling it so explicitly told it what it had worked out.
 
-**Two workers, not one per CPU** - and reaching two took two sweeps, because the first lied.
+So the code is reverted. What is kept is the measurement, and the method: **an unpaired
+before-and-after cannot see an effect smaller than this machine's run-to-run spread**, which
+is about 50 MB for RSS and about 0.5 s for wall time on this workload. The pack-size sweep
+elsewhere in this section survives that standard - 383/307/244 MB across a 25x change in
+`BORGE_PACK_MAX_SIZE` is far outside the spread - but a lone 70 MB delta does not.
 
-Sampling only 1, 4 and 8 gave "four is the sweet spot, eight buys nothing". That sampling
-cannot tell "four is optimal" from "the peak is below four and I never looked". Sweeping
-1, 2, 3, 4 and 6 on a 1.2 GB create, twice:
-
-| workers | run 1 | run 2 | peak RSS (run 2) |
-|---:|---:|---:|---:|
-| 1 | 1.00x | 1.00x | 243 MB |
-| **2** | 1.57x | **1.64x** | 356 MB |
-| 3 | 1.59x | 1.51x | 386 MB |
-| 4 | 1.35x | 1.60x | 429 MB |
-| 6 | 1.17x | 1.59x | 491 MB |
-
-Run 1 looks like a clean peak at two or three with a fall-off after, and invites a tidy
-story about four physical cores already being saturated by the workers plus the cutting
-goroutine, the collector and the garbage collector. **Run 2 does not reproduce it**: four
-and six come back at 1.6x. The differences among 2, 3, 4 and 6 are inside this machine's
-noise and the contention story is not supported by them.
-
-What reproduces is narrower: one worker to two is a large, repeatable step, and nothing past
-two adds measurable time. Memory is the signal that survives, because it hardly moves with
-machine load - it climbs monotonically with each worker, every one holding chunks in flight.
-So the default is two because more buys no measurable time and costs measurable memory,
-which is the trade §12.3 cares about, where CPU is battery.
-
-One machine, and `BORGE_CREATE_WORKERS` is the knob for exactly that reason: nobody has
-measured a sixteen-core desktop or a phone, and a scaling rule extrapolated from a single
-data point is how a plausible constant becomes a permanent wrong default.
-
-**The threshold is conservative and the crossover is not measured.** Two extremes were; the
-point between them was not. Eight MiB is four default chunks, enough to fill the workers
-once, and it errs towards the serial path because that is the side that costs nothing when
-the guess is wrong.
-
-**The copy the pipeline cannot avoid.** `Chunker.Next` returns a slice aliasing its own
-buffer, valid only until the next call - the serial path uses it immediately, a worker
-cannot - so every chunk is copied before handover. At memcpy speed that is noise in time;
-in memory it is workers x depth chunks in flight, which is why the queue depth is two.
-
-**One claim in the first draft was wrong.** It said keeping chunk order preserved a
-byte-reproducible repository. Checked: two *serial* creates of the same tree already produce
-different pack names, because the archive's own metadata carries timestamps and its chunks
-share packs with the file chunks. Repositories were never byte-reproducible run to run.
-Order matters for a sharper reason - a file's chunk list *is* the file, and extraction
-concatenates in list order, so a list out of order restores a corrupted file from a set of
-chunk ids that every check would accept.
-
-**What makes the concurrency safe** was already in place and none of it is incidental:
-`Key.IDHash` is pure; the AEAD nonce counter is mutex-guarded with the cipher outside the
-lock, its own comment naming the worker pool as the reason; and both compressors are pooled
-with race tests, because a compressor per call was the bug that made them pools (§12.1c,
-and the zstd note in §12.2).
+**This also settles the wall-time question §12.1g left open.** It was owed a quiet-machine
+measurement; it got one, and the answer is that the change cost nothing because the change
+did nothing.
 
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 

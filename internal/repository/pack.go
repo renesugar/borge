@@ -185,21 +185,17 @@ func storePack(s *store.Store, pieces []piece) ([]PackResult, error) {
 	// avoid quadratic copying; the same reasoning applies to a Go append loop without a
 	// pre-sized buffer.
 	//
-	// Each chunk's buffer is released as soon as it has been copied, and the sizes are
-	// kept because that is all the results loop below needs from it. Without that, the
-	// pieces and the assembled pack are both live across the Store call - two copies of
-	// up to BORGE_PACK_MAX_SIZE, held across the slowest part of the write. Peak RSS on
-	// the corpus of §12.1b measured 383 MB at the default 50 MB pack and 244 MB at 2 MB,
-	// a ratio of about 2.9 copies per pack; this is one of them.
-	//
-	// takePieces has already detached the slice from the writer, so nothing else can read
-	// these buffers.
+	// An earlier version released each chunk's buffer here, on the theory that holding the
+	// pieces and the assembled pack across the Store call cost peak memory. Measured over
+	// eight interleaved pairs on an idle machine, it changed neither wall time (mean
+	// -0.10 s, sd 0.42) nor peak RSS (mean -5 MB, sd 24) - the same binary varies by 50 MB
+	// between runs, which is what the original before-and-after had actually measured. The
+	// likely reason it does nothing: pieces is last read in the results loop below, which
+	// runs before the Store, so the collector already treats those buffers as dead there.
+	// See §12.1g.
 	packData := make([]byte, 0, total)
-	sizes := make([]int, len(pieces))
-	for i := range pieces {
-		sizes[i] = len(pieces[i].data)
-		packData = append(packData, pieces[i].data...)
-		pieces[i].data = nil
+	for _, p := range pieces {
+		packData = append(packData, p.data...)
 	}
 
 	// The pack is named by the SHA-256 of its bytes, so the name commits to the content
@@ -208,16 +204,16 @@ func storePack(s *store.Store, pieces []piece) ([]PackResult, error) {
 
 	results := make([]PackResult, 0, len(pieces))
 	offset := 0
-	for i, p := range pieces {
+	for _, p := range pieces {
 		id := make([]byte, repoobj.ChunkIDSize)
 		copy(id, p.chunkID[:])
 		results = append(results, PackResult{
 			ChunkID:   id,
 			PackID:    packID,
 			ObjOffset: uint32(offset),
-			ObjSize:   uint32(sizes[i]),
+			ObjSize:   uint32(len(p.data)),
 		})
-		offset += sizes[i]
+		offset += len(p.data)
 	}
 
 	if err := s.Store(PackName(packID[:]), packData); err != nil {
