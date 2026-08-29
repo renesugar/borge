@@ -3511,7 +3511,7 @@ one binary with `BORGE_CREATE_WORKERS`, back to back:
 | corpus | wall | CPU | verdict |
 |---|---:|---:|---|
 | 118,866 files averaging 1.6 kB | 1.07x | **1.52x** | a bad trade |
-| one 1.2 GB file, 2 MB chunks | **1.69x** | 1.20x | a good one |
+| one 1.2 GB file, 2 MB chunks | **1.6x** | 1.2x | a good one |
 
 Chunk size decides it. Hashing 1.6 kB takes microseconds - about what the channel handoff,
 the scheduling and the mandatory copy cost - so per-chunk overhead swamps per-chunk work.
@@ -3521,9 +3521,35 @@ So the pool is used only for files of at least `pipelineMinFileSize`, and the sm
 corpus is back to the serial path: 39.4 s against 38.1 s serial, CPU 33.9 s against 32.7,
 RSS unchanged - where always-on had cost 58.9 s, 60.3 s and 50 MB more resident.
 
-**Four workers, not one per CPU.** Eight took the large-file create to 26.9 s where four
-took it to 26.6 - no faster, and 130 MB more resident, because each worker holds chunks in
-flight. The cap is what measurement supports rather than what the machine has.
+**Two workers, not one per CPU** - and reaching two took two sweeps, because the first lied.
+
+Sampling only 1, 4 and 8 gave "four is the sweet spot, eight buys nothing". That sampling
+cannot tell "four is optimal" from "the peak is below four and I never looked". Sweeping
+1, 2, 3, 4 and 6 on a 1.2 GB create, twice:
+
+| workers | run 1 | run 2 | peak RSS (run 2) |
+|---:|---:|---:|---:|
+| 1 | 1.00x | 1.00x | 243 MB |
+| **2** | 1.57x | **1.64x** | 356 MB |
+| 3 | 1.59x | 1.51x | 386 MB |
+| 4 | 1.35x | 1.60x | 429 MB |
+| 6 | 1.17x | 1.59x | 491 MB |
+
+Run 1 looks like a clean peak at two or three with a fall-off after, and invites a tidy
+story about four physical cores already being saturated by the workers plus the cutting
+goroutine, the collector and the garbage collector. **Run 2 does not reproduce it**: four
+and six come back at 1.6x. The differences among 2, 3, 4 and 6 are inside this machine's
+noise and the contention story is not supported by them.
+
+What reproduces is narrower: one worker to two is a large, repeatable step, and nothing past
+two adds measurable time. Memory is the signal that survives, because it hardly moves with
+machine load - it climbs monotonically with each worker, every one holding chunks in flight.
+So the default is two because more buys no measurable time and costs measurable memory,
+which is the trade §12.3 cares about, where CPU is battery.
+
+One machine, and `BORGE_CREATE_WORKERS` is the knob for exactly that reason: nobody has
+measured a sixteen-core desktop or a phone, and a scaling rule extrapolated from a single
+data point is how a plausible constant becomes a permanent wrong default.
 
 **The threshold is conservative and the crossover is not measured.** Two extremes were; the
 point between them was not. Eight MiB is four default chunks, enough to fill the workers
@@ -3749,7 +3775,7 @@ Then, in order:
    allocation became 242 MB, collection went from 23.5% of create to about 3%, and create
    is about 1.9x faster once borg is used as a control for the machine.
 2. ~~Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.~~
-   **Done 2026-08-29**; see §12.1h. 1.69x on large files, nothing on small ones, and it
+   **Done 2026-08-29**; see §12.1h. About 1.6x on large files, nothing on small ones, and it
    declines to run below 8 MiB because measurement said the pool costs more than it saves
    there.
 3. Parallelise `extract` similarly.
@@ -3810,7 +3836,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); steps 1 and 1a done 2026-08-29 (§12.1b, §12.1c), step 3's extract work (§12.1d-f), peak RSS measured and bounded (§12.1g), and step 2's create pipeline (§12.1h: 1.69x on large files, declines to run on small ones). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
+| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); steps 1 and 1a done 2026-08-29 (§12.1b, §12.1c), step 3's extract work (§12.1d-f), peak RSS measured and bounded (§12.1g), and step 2's create pipeline (§12.1h: about 1.6x on large files, declines to run on small ones). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |

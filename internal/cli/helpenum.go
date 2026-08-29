@@ -80,7 +80,7 @@ func envVars() []envVar {
 		{"PACK_MAX_COUNT", "TUNING", "how many objects one pack file holds"},
 		{"PACK_MAX_SIZE", "TUNING", "how large one pack file may become"},
 		{"PACK_ASYNC", "TUNING", "set to \"no\" to write packs on the calling goroutine"},
-		{"CREATE_WORKERS", "TUNING", "how many goroutines hash and compress chunks during create. 1 keeps it on the calling goroutine. The pool is used only for files large enough to pay for it, so setting this higher does nothing for a backup of many small files."},
+		{"CREATE_WORKERS", "TUNING", "how many goroutines hash and compress chunks during create. The default is 2, which is where measurement stopped showing a gain; more costs memory without saving time. 1 keeps the work on the calling goroutine. The pool is used only for files large enough to pay for it, so raising this does nothing for a backup of many small files."},
 		// TESTING
 		{"TESTONLY_WEAKEN_KDF", "TESTING", "weakens the passphrase KDF so tests are fast. Never set this for a real repository: it makes the passphrase cheap to attack."},
 		{"TESTONLY_CPUPROFILE", "TESTING", "writes a Go CPU profile to this path. For the stage 9 performance work; profiling costs time, so a measured run is not a normal one."},

@@ -303,9 +303,11 @@ TUNING
   BORGE_PACK_MAX_SIZE        how large one pack file may become
   BORGE_PACK_ASYNC           set to "no" to write packs on the calling goroutine
   BORGE_CREATE_WORKERS       how many goroutines hash and compress chunks during create.
-                             1 keeps it on the calling goroutine. The pool is used only
-                             for files large enough to pay for it, so setting this
-                             higher does nothing for a backup of many small files.
+                             The default is 2, which is where measurement stopped
+                             showing a gain; more costs memory without saving time. 1
+                             keeps the work on the calling goroutine. The pool is used
+                             only for files large enough to pay for it, so raising this
+                             does nothing for a backup of many small files.
 
 TESTING
 

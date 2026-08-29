@@ -67,11 +67,33 @@ import (
 // so a generous queue would undo the peak-RSS work of §12.1g.
 const pipelineQueueDepth = 2
 
-// maxCreateWorkers caps the default at four, which is what measurement supports rather
-// than what the machine has. On a 1.2 GB file, four workers took a create from 45.0 s to
-// 26.6 s; eight took it to 26.9 s - no faster, and 130 MB more resident, because each
-// worker holds chunks in flight. The serial tail is the limit past that point.
-const maxCreateWorkers = 4
+// maxCreateWorkers caps the default at two, which is what reproduces rather than what the
+// machine advertises.
+//
+// On the i5-9300H this was measured on - four physical cores, eight threads - a 1.2 GB
+// create over two sweeps of 1, 2, 3, 4 and 6 workers:
+//
+//	workers   run 1    run 2    peak RSS (run 2)
+//	1         1.00x    1.00x    243 MB
+//	2         1.57x    1.64x    356 MB
+//	3         1.59x    1.51x    386 MB
+//	4         1.35x    1.60x    429 MB
+//	6         1.17x    1.59x    491 MB
+//
+// The step from one worker to two is large and repeatable. Nothing beyond two reproduces:
+// the first sweep looked like a clean peak at two or three with a fall-off after, and the
+// second put four and six back at 1.6x, so the differences among 2, 3, 4 and 6 are inside
+// this machine's noise and no contention story is supported by them.
+//
+// Memory is the signal that does reproduce, because it barely moves with machine load: it
+// climbs monotonically with every worker, since each holds chunks in flight. So the default
+// is two on the grounds that more buys no measurable time and costs measurable memory -
+// which is the trade §12.3 cares about, where CPU is battery and memory is scarce.
+//
+// This is one machine. BORGE_CREATE_WORKERS is the knob because nobody has measured a
+// sixteen-core desktop or a phone, and a scaling rule extrapolated from a single data point
+// is how a plausible constant becomes a permanent wrong default.
+const maxCreateWorkers = 2
 
 // pipelineMinFileSize is the size below which a file is chunked on one goroutine.
 //
@@ -80,7 +102,7 @@ const maxCreateWorkers = 4
 // extremes on the same binary:
 //
 //	118,866 files averaging 1.6 kB   1.07x faster, 1.52x the CPU   a bad trade
-//	one file of 1.2 GB, 2 MB chunks  1.69x faster, 1.20x the CPU   a good one
+//	one file of 1.2 GB, 2 MB chunks  1.6x faster, 1.2x the CPU     a good one
 //
 // A file smaller than a chunk produces one chunk, and pipelining one chunk is pure
 // overhead. Eight MiB is four default-sized chunks - enough to fill the workers once - and
