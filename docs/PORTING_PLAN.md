@@ -3500,6 +3500,60 @@ elsewhere in this section survives that standard - 383/307/244 MB across a 25x c
 measurement; it got one, and the answer is that the change cost nothing because the change
 did nothing.
 
+### 12.1i AES-OCB measured for [golang/go#81029][go81029], 2026-08-29
+
+§12.5 step 1 owed the issue a number from a real workload, on the grounds that its own
+reproducer understates what a mode implementation pays. It does. Everything below is one
+machine, an idle i5-9300H, same 1 GiB or same 854 MB corpus.
+
+**The isolated encryption benchmark**, each tool's own `benchmark cpu`:
+
+| mode | borge | borg (OpenSSL) | borge vs borg |
+|---|---:|---:|---:|
+| **aes-256-ocb** | **46.0 MB/s** | **881.6 MB/s** | **19.2x slower** |
+| chacha20-poly1305 | 260.2 MB/s | 447.9 MB/s | 1.7x slower |
+
+**The inversion is the finding, not the ratio.** In borg, and in any implementation with
+multi-block AES, OCB is the *fast* mode - 881.6 against ChaCha's 447.9, nearly 2x ahead. In
+borge it is 5.7x *slower* than ChaCha. The mode that should win on AES-NI hardware loses,
+and it loses inside a single Go binary where the only structural difference is that
+ChaCha20-Poly1305 is assembly end to end while OCB is built on `cipher.Block`. That
+controls for language, runtime, framing code, corpus and CPU in a way no cross-tool
+comparison can.
+
+**It is worse than the API ceiling itself.** §12.2 measured a bare `cipher.Block.Encrypt` at
+103.6 ns per 16-byte block, about 154 MB/s. borge's OCB reaches 46, a third of that, because
+a real mode also pays offset arithmetic and two XORs per block - work that the same
+pipelining would amortise and that the issue's loop does not include. Stdlib AES-GCM manages
+560 MB/s on the same CPU with its own private multi-block assembly, which is what shows the
+hardware is not the limit and the capability already exists in the standard library, out of
+reach behind the public interface.
+
+**In a real create**, 854 MB of incompressible data, `-C none`, comparing the two AEAD modes
+- which share HMAC-SHA-256 chunk ids, so only the cipher differs:
+
+| | AES-OCB | ChaCha20-Poly1305 | difference |
+|---|---:|---:|---:|
+| wall | 19.1 s | 16.6 s | +2.5 s (1.15x) |
+| CPU | 52.3 s | 35.2 s | **+17.1 s (1.49x)** |
+
+The isolated figures predict 15.3 s of extra CPU for that corpus; 17.1 s was measured, an
+agreement within 12%. So the 46 MB/s is not an artifact of a microbenchmark - it is
+seventeen seconds of real CPU in a backup of under a gigabyte.
+
+**And note which number is masked.** The create pipeline's two workers and the overlap with
+I/O hide most of the cost in elapsed time, +15%, while the CPU cost is +49%. On a server
+that is a modest slowdown; on the laptop and phone §12.3 is aimed at, CPU is battery and
+heat, and the mode borg defaults to is the one that costs it.
+
+**A confound worth recording, because it nearly went in as a result.** The first pass
+compared each mode against `none-sha256` and produced "OCB costs 10%, implied throughput
+490 MB/s". That baseline is wrong: `none-sha256` uses unkeyed plain SHA-256 for chunk ids
+while both AEAD modes use HMAC-SHA-256, so the comparison mixed a cipher difference with a
+hash difference - which is also why ChaCha appeared to use *less* CPU than the unencrypted
+mode. Comparing the two AEAD modes against each other is the controlled experiment, and it
+is the one above.
+
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
 The question §0.4 defers to this stage: is a cgo dependency needed, or can pure Go get
@@ -3690,8 +3744,9 @@ Then, in order:
 1. ~~**Profile before changing anything** (`pprof`, CPU + alloc).~~ **Done 2026-08-29**;
    see §12.1b. It found a 16 GB allocation in the lz4 path, which is now step 1a.
 
-   While the profiles are in hand: **measure AES-OCB on a real corpus and post the number
-   to [golang/go#81029][go81029].** The isolated `cipher.Block` benchmark in that issue is
+   ~~While the profiles are in hand: **measure AES-OCB on a real corpus and post the number
+   to [golang/go#81029][go81029].**~~ **Measured 2026-08-29, §12.1i**; the comment is
+   drafted and awaits the author posting it under his own account. The isolated `cipher.Block` benchmark in that issue is
    a floor; borge's OCB path is worse, because each block carries the offset arithmetic
    and XORs around it. A proposal argued from a backup tool's write path is stronger than
    one argued from a loop, and this is the single Stage 9 finding whose fix is not borge's
