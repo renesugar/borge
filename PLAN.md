@@ -110,13 +110,10 @@ Sized so each is committable on its own, and ordered so the measurements that co
   costs more than it saves, and a knob rather than a `NumCPU` rule — the create default is
   two workers on this i5-9300H, chosen because more bought no measurable time and cost
   measurable memory (§12.1h).
-- [ ] **T4 — R0.2's gate, measured; then batching and deferred metadata only if it fails.**
-  Reframed 2026-08-30. T1 and T2 answered the *mechanism* questions but **nobody has
-  measured R0.2's actual gate**, which is not "is restore fast" but "does per-file restore
-  cost stay flat as the directory grows". That needs a scaling run - 100 files, 10,000,
-  118,866 - and the per-file cost compared, not the totals. Do that first. If the curve is
-  flat, this task closes and R0.2 is met with no format change; if it bends, the batching
-  and deferred-metadata ideas are back, and *then* their cost is worth paying.
+- [x] **T4 — R0.2's gate, measured. Done 2026-08-30: the curve is flat, so the task
+  closes.** Per-file restore cost is flat against directory size over a 2,400x range, so
+  R0.2's requirement is met **with no format change**, and the restore-side batching and
+  deferred-metadata ideas are not needed. Findings at the end of this file.
 - [ ] **T6 — zstd as the default compression** (borg #10085). Not a format change — both
   codecs are already in the format and borge reads either — so it is a default change with
   a compatibility cost only for readers older than borg 2. The encoders were pooled in
@@ -424,3 +421,93 @@ extraction. Two runs a second apart differed. It now compares only the archived 
 - The barrier cost is bounded by measurement on a 4,953-directory tree, not by analysis. A
   tree with far more directories and far fewer files in each would drain more often, and
   where that stops paying is unmeasured.
+
+---
+
+## What T4 found, 2026-08-30
+
+**R0.2's gate is met, and no format change was needed to meet it.** Per-file restore cost is
+flat against directory size across a 2,400-fold range.
+
+R0.2 is the requirement the project brief opens with: *restoring a directory of 118,866
+files must not cost more per file than restoring a directory of 100.* It had never been
+measured. T2 made restore 2.1x faster, which is a different claim entirely - a curve can
+bend upwards and still be fast.
+
+### The measurement
+
+One flat directory per size, distinct ~1.8 kB files, its own repository, packs warmed before
+timing, three extractions each. ext4 on `/dev/sda2`, the same device T1 and T2 used.
+
+| files | wall | µs/file | **marginal µs/file** |
+|---:|---:|---:|---:|
+| 100 | 0.048 s | 476.7 | — |
+| 1,000 | 0.205 s | 204.7 | 174.4 |
+| 10,000 | 1.864 s | 186.4 | 184.4 |
+| 40,000 | 7.263 s | 181.6 | 180.0 |
+| 118,866 | 22.576 s | 189.9 | 194.2 |
+| 240,000 | 47.667 s | 198.6 | 207.1 |
+
+Total time fits `t = -127 ms + 199 µs x n` from 10,000 files upward, predicting each
+measured point within 7%.
+
+### Why the naive reading of the gate is useless
+
+Read literally - per-file cost at 118,866 against per-file cost at 100 - the gate passes
+enormously: 190 µs against 477. But that is an artifact. At 100 files the fixed costs
+(process start, repository open, manifest, chunk index) land on 100 files and dominate
+everything; the number falls with n for a reason that has nothing to do with scaling. A gate
+scored that way would pass a genuinely quadratic implementation.
+
+**The honest metric is the marginal cost** - the slope between adjacent sizes - and that is
+what the table above reports.
+
+### Is the drift real, and is it borge's?
+
+Marginal cost creeps from 174 to 207 µs/file, about 19% across the range. Two things bound
+what that means.
+
+**It is far too small to be superlinear.** From 10,000 to 240,000 files - 24x - per-file cost
+rises 6.5%. Had restore been O(n log n), per-file cost would scale with log n and rise about
+34%; O(n^1.1) predicts about 38%. Observed: 6.5%. The curve is linear with a small
+constant-factor drift, not a bend.
+
+**Most of the drift is the filesystem, not borge.** The same file-creation loop without borge
+- open, write, close, one directory, one goroutine:
+
+| files | raw create, µs/file | borge restore, µs/file |
+|---:|---:|---:|
+| 10,000 | 151.2 | 186.4 |
+| 40,000 | 155.2 | 181.6 |
+| 118,866 | 162.1 | 189.9 |
+| 240,000 | 157.0 | 198.6 |
+
+ext4's own per-file creation cost drifts about 7% and **non-monotonically** - 240,000 is
+cheaper per file than 118,866 - which is also a useful bound on the measurement's own
+precision. borge's overhead above raw creation is 35, 26, 28 and 42 µs/file across the four
+sizes: no trend that survives that noise.
+
+### What closes, and what this does to R0
+
+**T4 closes.** Restore-side batching by pack, deferred metadata application in a second
+pass, and parallel writers per directory were the three mechanisms R0 item 1 proposed for
+this requirement. All three are now measured: read order was already optimal (T1), per-file
+syscall count is not what dominates (§12.1f), and parallel writers was the one that paid
+(T2, 2.1x). The requirement is met without the format moving at all.
+
+**That is now three of the four R0 items with no format change in them.** Only T5 and T8 can
+still require one, and both are contingent on their own measurements.
+
+### Limits
+
+- One filesystem. ext4's directory index is what the drift is mostly made of, and XFS,
+  btrfs and network filesystems will each have their own shape. The gate is met on ext4.
+- 240,000 files is 2x the size R0.2 names, not 20x. Nothing here says what happens at ten
+  million, and the linear fit is an observation over the range measured rather than a proof
+  of linearity beyond it.
+- Warm packs, `none-sha256`, ~1.8 kB files, one machine. A directory of large files spends
+  its time in `fetchChunks` instead and would scale on different terms.
+- The scaling harness is not kept in the tree, unlike T1's diagnostic: it is "build a
+  directory of n files, archive it, time the extraction", and the sizes, repetitions and
+  device are recorded above so it can be rebuilt. T1's was kept because it encodes a cache
+  model and a control that would be tedious to reconstruct.
