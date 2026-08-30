@@ -1,7 +1,9 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-8 complete.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified** - the work itself is not started. Stage 10 became ROADMAP R0 on 2026-08-27 and is not started; §2.4 records what a `v1.0.0` tag would have to be accompanied by.**
-Last updated: 2026-08-27.
+Status: **Complete. All nine stages are done, and this plan is an archive.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9 closed 2026-08-29** (§12.6): create 5.5x and extract 4.2x faster than borg on the pathological corpus, one regression in create peak RSS that a pack-size knob bounds below borg, no cgo dependency taken, and the prediction of §12.2 confirmed - the largest wins were pure Go and were borge's own bugs. Stage 10 became ROADMAP R0 on 2026-08-27; §2.4 records what a `v1.0.0` tag would have to be accompanied by.
+
+**Stage 9 is closed; this plan is complete and is archived to `plans/` next.** What to do next lives in [`ROADMAP.md`](../ROADMAP.md); what is here is why the code is the shape it is, which is why so much of the source still cites it by section.
+Last updated: 2026-08-29.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
 the repo, and on the working habits that have actually caught bugs here. Read it before
@@ -3894,6 +3896,76 @@ Then, in order:
 **Gate:** borge ≥ borg on every scenario, with the JSON to show it. Regressions are
 listed with an explanation, not hidden.
 
+### 12.6 Stage 9 closed, 2026-08-29: the gate, and what it does not say
+
+**The gate:** *borge ≥ borg on every scenario, with the JSON to show it. Regressions are
+listed with an explanation, not hidden.*
+
+**Verdict: passed on wall time and CPU by a wide margin, with one regression, stated
+below and bounded by an existing knob.** The closing run is
+``tests/bench/out/baseline-20260830T000800Z.json``, taken on a quiet machine from a clean tree at
+``02178d9``, both tools against the same warmed corpus in one invocation with the
+order recorded:
+
+| | borge | borg | |
+|---|---:|---:|---|
+| create, wall | **35.3 s** | 192.9 s | **5.5x faster** |
+| create, CPU (user+sys) | **41.7 s** | 194.3 s | 4.7x less |
+| create, peak RSS | 337 MiB | **249 MiB** | **1.36x more - the one regression** |
+| extract, wall | **42.9 s** | 178.3 s | **4.2x faster** |
+| extract, CPU | **44.9 s** | 176.9 s | 3.9x less |
+| extract, peak RSS | **71 MiB** | 268 MiB | 3.8x less |
+
+118,866 files, 190.5 MiB, warm cache, `none-sha256`, borge first with the corpus warmed
+before either tool ran. borge's repository is 188.7 MiB, and it recorded 2.1 s of chunking
+and 3.1 s of hashing inside the 35.3.
+
+
+**The regression is create peak RSS**, and §12.1g is its explanation: it is pack
+buffering, it tracks `BORGE_PACK_MAX_SIZE` linearly, and at 2 MB packs borge sits below
+borg at 244 MB with wall time unchanged. The default stays at borg's 50 MB because
+diverging on repository layout to win a benchmark would trade interoperability for a
+number. So the metric borge loses is a tuning default rather than a structural deficit -
+which is a claim with a sweep behind it, not a hope.
+
+Extract peak RSS goes the other way and by more, and that is worth naming because it is the
+half of the workload R0.2 is about.
+
+#### What this number is not
+
+The gate is met on the corpus the gate names. Four limits, so that nobody reads more into
+it later than it says:
+
+1. **It is unencrypted.** `defaultMode` is `none-sha256` on purpose: AES-OCB is capped near
+   154 MB/s by a `crypto/cipher` ceiling that is not borge's ([golang/go#81029][go81029],
+   §12.1i), and including it would measure that ceiling rather than the write path. The
+   encrypted picture is §12.1i's, separately, and it is the one finding of this stage that
+   borge cannot fix.
+2. **It is one corpus on one machine.** 118,866 small files on an i5-9300H with four
+   physical cores. Every default this stage chose - two create workers, the 8 MiB pipeline
+   threshold - is documented as measured here rather than as a scaling rule, because that
+   is how a plausible constant becomes a permanent wrong default on hardware nobody tested.
+3. **The largest single lever was not tuned, deliberately.** Compression is lz4 throughout,
+   which is borg's default; the zstd encoders were pooled for a 3.0x gain that no create
+   number in this section reflects, and it is ROADMAP R0's to exploit.
+4. **Six of the seven wins were bugs, not tuning.** A chunker per file, an lz4 compressor
+   per chunk, a zstd encoder per chunk, an `os/user` lookup per file, a pack reopen per
+   object, and three `openat` per restored file where one would do. The seventh - the
+   create pipeline - is the only one that is engineering rather than repair, and it is the
+   one that helps least on this corpus. That is the honest summary of a 5x lead:
+   most of it was borge no longer doing things it should never have done. The remaining
+   headroom is therefore smaller than the ratio suggests, and Stage 9's own attempts to
+   find more - the pack-buffer release, four workers instead of two - came back null.
+
+**What the stage cost in withdrawn claims** is worth recording next to the wins, because it
+is the part a summary would drop. Seven previously-stated claims were withdrawn on
+measurement, four of them written during this stage: a phantom create regression that was
+transient machine load (§12.1e), a 70 MB RSS saving that was run-to-run spread (§12.1g), a
+1.69x pipeline figure and the contention story that explained it (§12.1h), and the comment
+asserting that file times had to be set after `close` (§12.1f). The method that caught all
+four is the same one: pair the runs, interleave them, and treat any effect smaller than
+about 50 MB of RSS or 0.5 s of wall time on this machine as unmeasured.
+
 ---
 
 ## 13. Stage 10 — format and indexing changes — moved 2026-08-27
@@ -3930,7 +4002,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **in progress.** Investigated 2026-08-17 (§12.1–12.5); step 0 done 2026-08-28 (§12.1a, the chunker is built once and reset); steps 1 and 1a done 2026-08-29 (§12.1b, §12.1c), step 3's extract work (§12.1d-f), peak RSS measured and bounded (§12.1g), and step 2's create pipeline (§12.1h: about 1.6x on large files, declines to run on small ones). One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s. Measuring borge's real degradation and posting it is a Stage 9 item (§12.5 step 1a) | not yet bundled |
+| 9 | Performance baseline vs borg | **done 2026-08-29** (§12.6). Investigated 2026-08-17 (§12.1–12.5), then measured and fixed: the chunker built once and reset (§12.1a), the first profiles (§12.1b), the lz4 compressor pooled (§12.1c) and the zstd encoders with it, three serial extract fixes (§12.1d–f), peak RSS measured and bounded by `BORGE_PACK_MAX_SIZE` (§12.1g), and an adaptive create pipeline that declines to run below 8 MiB (§12.1h). Closing run: **create 5.5x and extract 4.2x faster than borg**, with **one regression — create peak RSS, 337 MiB against 249** — which tracks pack size and falls to 244 MiB at 2 MB packs; the default stays at borg's 50 MB. Six of the seven wins were borge's own bugs. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s, measured on a real corpus at §12.1i and drafted as a comment the author has yet to post | bundling |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
