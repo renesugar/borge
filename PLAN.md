@@ -76,7 +76,11 @@ Sized so each is committable on its own, and ordered so the measurements that co
   file. Nothing was built beyond the diagnostic that answered it,
   `tests/bench/readorder_test.go`, which is kept so the conclusion can be re-checked on
   other repositories rather than believed.
-- [ ] **T2 — Parallel writers per directory, measured.** §12.1f says the remaining extract
+- [x] **T2 — Parallel writers, measured and taken. Done 2026-08-30: about 2.1x.**
+  `internal/archive/extract_pool.go`, default 3 workers, `BORGE_EXTRACT_WORKERS` the knob.
+  Findings at the end of this file. The phrase "per directory" turned out to be the wrong
+  frame and is the first thing the measurement corrected. Original text:
+- ~~**T2 — Parallel writers per directory, measured.**~~ §12.1f says the remaining extract
   cost is the kernel doing real work; the untested question is whether that work
   parallelises. Reuse the create pipeline's shape (`internal/archive/pipeline.go`) and its
   lesson: adaptive, with a measured threshold, defaulting to the serial path when the pool
@@ -240,3 +244,125 @@ never compared it against the cheap one.
   generations live simultaneously would cross it, and what happens there is predicted by
   the control (badly) but not measured.
 - One machine, one corpus, warm cache, `none-sha256`.
+
+---
+
+## What T2 found, 2026-08-30
+
+**Result: extraction is about 2.1x faster, and the pool is on by default with three
+workers.** `internal/archive/extract_pool.go`; `BORGE_EXTRACT_WORKERS` overrides, and 1
+selects the serial path that existed before.
+
+### "Per directory" was the wrong frame
+
+R0 item 1 proposed "parallel writers per directory". The corpus the requirement is about -
+§12.1b's pathological directory - is **one flat directory of 118,866 files**, so
+per-directory parallelism would give exactly one writer on the case it was written for. The
+parallelism has to be *within* a directory, which is where the filesystem has an opinion.
+
+### Where the time actually goes
+
+A CPU profile of a serial extract, before anything was built:
+
+| | | |
+|---|---:|---|
+| syscalls | 22.85 s | 55% |
+| SHA-256 (chunk id verification) | 5.63 s | 13.6% |
+| everything else | ~13 s | allocation, msgpack, path cleaning, lz4 at 0.47 s |
+
+So a little under half is user work that parallelises freely, and the rest is the kernel
+creating, writing and stamping files in a single directory.
+
+### The kernel half, probed with a control
+
+Extract's own syscall sequence, replayed over 118,866 files with varying goroutines. Two
+arms, because a scaling number with nothing to compare it against does not say what limits
+it:
+
+| workers | one shared directory | one directory each |
+|---:|---:|---:|
+| 1 | 22.33 s | 22.50 s |
+| 2 | 12.80 s (1.74x) | 11.69 s (1.92x) |
+| 4 | 13.09 s (1.71x) | 6.56 s (3.43x) |
+| 8 | 14.78 s (**worse**) | 5.27 s (4.27x) |
+
+The device and the kernel will go 4.3x faster given separate directories. One directory
+stops at about 1.75x and then *degrades*, which is ext4 serialising creates on the parent's
+inode lock. The single-worker figure, 22.33 s, matches the profile's 22.85 s of syscall
+time, so the probe is measuring the right thing.
+
+### The real thing, on two shapes
+
+Same 118,866 files, twice: the flat pathological directory, and a tree of 4,953 directories
+that drains the pool at every boundary.
+
+| workers | flat, 1 dir | deep, 4,953 dirs |
+|---:|---:|---:|
+| 1 | 39.21 s | 34.81 s |
+| 2 | 18.91 s (2.07x) | 19.33 s (1.80x) |
+| 3 | 18.23 s (2.15x) | **16.60 s (2.10x)** |
+| 4 | 18.23 s (2.15x) | 17.23 s (2.02x) |
+
+**2.07x beats the 1.75x the syscall probe predicted**, and the gap is the point: the probe
+measured only the kernel half. The ~19 s of user work parallelises freely and overlaps the
+half that cannot, so the whole is faster than its slowest part.
+
+**The deep tree does not regress**, which was the risk worth measuring before changing a
+default for everyone. The barriers cost real time - 1.80x against the flat corpus's 2.07x
+at two workers - and a third worker more than recovers it.
+
+**Four workers is measurably worse than three on the deep tree**: 17.23 s against 16.60,
+with sds of 0.06 and 0.07. Not noise. Past three, workers contend for the directory lock the
+probe found.
+
+### The default moved, and why that is the §12.1h lesson again
+
+It was 2 until the deep tree was measured. On the flat corpus 2 -> 3 buys 3.6% of wall for
+15% more CPU, which is not worth it; on the deep tree the same step buys 14% for 5%, which
+plainly is. **Real trees have directories.** Choosing a default from the one corpus that
+happened to be in hand is the mistake §12.1h records - sampling is not measuring - and the
+corpus that would have contradicted it was the ordinary-looking one, not an exotic case.
+
+The constant is deliberately not tied to create's two. Different mechanism, different
+bottleneck; unifying them would couple two numbers that agreed by accident, and no longer
+do.
+
+### Correctness: what is shared, and what is proved
+
+The pool runs **only `writeFile`**. Everything ordered across items - the pending-directory
+stack, the hardlink map, the safe-parent cache - stays on the goroutine driving the item
+stream, and the pool is drained before any of it is read. That is the answer to the question
+`extractor`'s own comment posed in stage 9, that parallelising extract "has to deal with all
+three together": it does not touch them. Only the owner caches and the stats needed locking.
+
+Two barriers, and **both were mutation-tested rather than argued**:
+
+- **Directory attributes.** Removing the drain in `finishDirs` makes directory mtimes come
+  out as the time of the extraction (1788071633) instead of the time in the archive
+  (981173106). Every file written into a directory restamps it, so a directory stamped
+  while its files are still in flight is silently wrong and nothing else in the tree looks
+  off.
+- **Hard links.** Removing the drain in `tryHardlink` fails with `no such file or
+  directory`, because the link is attempted while its target is still queued.
+
+The hardlink barrier **passed the mutation at first**, and that is the finding rather than a
+footnote: the fixture linked to a file written 200 items earlier, which had always finished.
+It only became a real test once the target was made large and the two names adjacent in the
+item stream. A barrier that survives its own mutation test is a barrier nobody has checked.
+
+Strengthening that fixture also exposed that the test had been passing on **timing luck**:
+it compared the whole destination, including the parent directories `makeParent` synthesises
+for the archived path, which are not in the archive and are stamped with the time of the
+extraction. Two runs a second apart differed. It now compares only the archived subtree.
+
+### Limits
+
+- Both corpora are ~1.8 kB files. A tree of large files would spend its time in
+  `fetchChunks` rather than in file creation, and the balance would differ.
+- ext4 on one SSD. The directory-lock ceiling is a property of the filesystem: XFS, btrfs
+  and network filesystems will each have their own, and the 4.3x separate-directory arm
+  says the ceiling is the directory rather than this machine.
+- `none-sha256`, warm cache, one machine.
+- The barrier cost is bounded by measurement on a 4,953-directory tree, not by analysis. A
+  tree with far more directories and far fewer files in each would drain more often, and
+  where that stops paying is unmeasured.

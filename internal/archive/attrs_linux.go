@@ -241,6 +241,12 @@ func (x *extractor) resolveOwner(it *item.Item) (uid, gid int) {
 // -1 means the name does not resolve here, and that is cached as firmly as a hit: see the
 // note on extractor.uids for why.
 func (x *extractor) lookupUID(name string) int {
+	// Guarded because the writer pool (extract_pool.go) resolves owners from several
+	// goroutines. The lock is held across the lookup, not just the map access, so a name
+	// that misses is resolved once rather than once per worker - which is the whole point
+	// of the cache, and os/user goes through cgo.
+	x.ownerMu.Lock()
+	defer x.ownerMu.Unlock()
 	if id, ok := x.uids[name]; ok {
 		return id
 	}
@@ -256,6 +262,8 @@ func (x *extractor) lookupUID(name string) int {
 
 // lookupGID resolves a group name to a gid, remembering the answer.
 func (x *extractor) lookupGID(name string) int {
+	x.ownerMu.Lock()
+	defer x.ownerMu.Unlock()
 	if id, ok := x.gids[name]; ok {
 		return id
 	}

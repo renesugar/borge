@@ -256,8 +256,13 @@ none", 10 to 18 MB on a million files — and that case is arithmetic, not a ben
    each pack is read once and sequentially)~~ **- withdrawn 2026-08-30, it already is** -
    deferred metadata application (write all content, then apply modes/times/xattrs in a
    second pass), and parallel writers per directory. Of the three mechanisms this item
-   proposed, two are now measured and are not where the time goes: read order (T1) and
-   per-file syscall count (§12.1f). Parallel writers is the one still open, and it is R0 T2. **Note this is measurable and possibly deliverable without any format
+   proposed, two are measured and are not where the time goes - read order (T1) and per-file
+   syscall count (§12.1f) - and the third **is** where it goes: **R0 T2 parallelised the
+   writers on 2026-08-30 for about 2.1x, with no format change.** "Per directory" was the
+   wrong frame, though: the corpus this requirement is about is a single flat directory, so
+   per-directory parallelism would have given one writer. The parallelism is *within* a
+   directory, and its ceiling is ext4 serialising creates on the parent inode lock - the
+   same device reaches 4.3x across separate directories and about 1.75x inside one. **Note this is measurable and possibly deliverable without any format
    change at all** — try it in Stage 9 first, and only change the format if Stage 9
    proves it is not enough.
 2. **`blugelabs/bluge` for indexing.** Evaluate as a replacement for the chunk index
@@ -352,6 +357,8 @@ Anything worse than linear in that path defeats the intent. What is known so far
   pathological corpus and trivially removable.
 - The **chunker-per-file construction** (`plans/PORTING_PLAN.md` §12.1) is a per-file
   millisecond cost on the *create* side, worth ~3.5 minutes on that corpus alone.
+- **Parallel writers**, added to this list 2026-08-30 because T2 found the headroom the
+  other two did not have: about 2.1x, and the only one of the three mechanisms that paid.
 - ~~**Restore-side ordering** is item 1 above and is the one with real headroom.~~
   **Measured 2026-08-30 (R0 T1): no headroom.** It was the one of the three with a
   plausible story and no measurement, which is why it was worth running first. If a backup

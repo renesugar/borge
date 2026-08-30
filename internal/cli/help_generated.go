@@ -302,6 +302,14 @@ TUNING
   BORGE_PACK_MAX_COUNT       how many objects one pack file holds
   BORGE_PACK_MAX_SIZE        how large one pack file may become
   BORGE_PACK_ASYNC           set to "no" to write packs on the calling goroutine
+  BORGE_EXTRACT_WORKERS      how many goroutines write files during extract. The default
+                             is 3, which measured 2.10x against the serial path on a
+                             tree of 4,953 directories and 2.15x on a single directory
+                             of 118,866 files, for about 1.34x the CPU. 4 is slower than
+                             3 on the tree, not faster: creating files in one directory
+                             serialises on the parent inode lock, so the ceiling is the
+                             directory rather than the machine. 1 keeps extraction on
+                             the calling goroutine.
   BORGE_CREATE_WORKERS       how many goroutines hash and compress chunks during create.
                              The default is 2, which is where measurement stopped
                              showing a gain; more costs memory without saving time. 1

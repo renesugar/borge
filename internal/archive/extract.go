@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/renesugar/borge/internal/item"
@@ -141,11 +142,31 @@ func (a *Archive) Extract(opts ExtractOptions) (*ExtractStats, error) {
 		stats:     &ExtractStats{},
 	}
 
+	// The writer pool exists only for the real write path. A dry run writes nothing, and
+	// --stdout is a single ordered stream by definition, so both stay serial.
+	if w := extractWorkers(); w > 1 && !opts.DryRun && opts.Stdout == nil {
+		x.pool = newWritePool(x, w)
+		defer func() {
+			if x.pool != nil {
+				_ = x.pool.close()
+			}
+		}()
+	}
+
 	err = a.Items(func(it *item.Item) error {
 		return x.item(it)
 	})
 	if err != nil {
 		return x.stats, err
+	}
+	// Every file must be on disk before the directories above them are stamped, and before
+	// the caller is told the extraction finished.
+	if x.pool != nil {
+		e := x.pool.close()
+		x.pool = nil
+		if e != nil {
+			return x.stats, e
+		}
 	}
 	if err := x.finishDirs(""); err != nil {
 		return x.stats, err
@@ -178,17 +199,35 @@ type extractor struct {
 	// case when restoring somebody else's backup, and looking it up 118,866 times to be
 	// told so each time is the same bug wearing a different hat.
 	//
-	// Unguarded maps, like safeDirs and hardlinks above: an extractor belongs to one
-	// goroutine. Parallelising extract (§12.5 step 3) has to deal with all three
-	// together, and guarding only this one would suggest the others were already safe.
-	uids map[string]int
-	gids map[string]int
+	// Guarded by ownerMu, unlike safeDirs and hardlinks above, and the difference is the
+	// answer to what this comment used to ask.
+	//
+	// It used to say that an extractor belongs to one goroutine and that parallelising
+	// extract "has to deal with all three together, and guarding only this one would
+	// suggest the others were already safe". R0 T2 parallelised it, and dealt with them by
+	// splitting them rather than by locking them: the writer pool runs only writeFile, so
+	// it reaches these two caches and the stats and nothing else. safeDirs, hardlinks and
+	// pendingDirs are read and written solely by the goroutine driving the item stream,
+	// which drains the pool before it touches any of them. They are still unguarded, and
+	// now that is a statement about who uses them rather than about how many goroutines
+	// exist.
+	ownerMu sync.Mutex
+	uids    map[string]int
+	gids    map[string]int
 
-	stats *ExtractStats
+	// statsMu guards stats, which the pool updates per file.
+	statsMu sync.Mutex
+	stats   *ExtractStats
+
+	// pool is nil on the serial path, which is the path that existed before R0 T2 and the
+	// one a single worker still takes.
+	pool *writePool
 }
 
 func (x *extractor) fail(path string, err error) error {
+	x.statsMu.Lock()
 	x.stats.Errors++
+	x.statsMu.Unlock()
 	if x.opts.OnError == nil {
 		return err
 	}
@@ -284,6 +323,19 @@ func (x *extractor) item(it *item.Item) error {
 		}
 		if linked {
 			x.stats.Hardlinks++
+			return nil
+		}
+		if x.pool != nil {
+			// Ordering is safe because nothing later depends on this file until a
+			// barrier: finishDirs drains before it stamps a directory, and tryHardlink
+			// drains before it links to an earlier path.
+			//
+			// rememberHardlink still runs here, before the write rather than after it. It
+			// only records that this hlid now lives at this path, and the path is real by
+			// the time anything can link to it, because tryHardlink drains first.
+			x.rememberHardlink(it, path)
+			x.stats.Files++
+			x.pool.submit(writeJob{it: it, path: path})
 			return nil
 		}
 		if err := x.writeFile(it, path); err != nil {
@@ -529,6 +581,15 @@ func (x *extractor) tryHardlink(it *item.Item, path string) (bool, error) {
 	if !ok {
 		return false, nil
 	}
+	// Barrier. The target may be a file the pool has not written yet - it was recorded in
+	// the map at submit time, not at completion - and link() against a path that does not
+	// exist fails. Hard links are rare enough that draining for one costs nothing on the
+	// corpora this was built for, and correctness here is not negotiable.
+	if x.pool != nil {
+		if err := x.pool.drain(); err != nil {
+			return false, err
+		}
+	}
 	if err := linkNoFollow(target, path); err != nil {
 		return false, err
 	}
@@ -577,7 +638,9 @@ func (x *extractor) writeFile(it *item.Item, path string) error {
 			return err
 		}
 	}
+	x.statsMu.Lock()
 	x.stats.Bytes += written
+	x.statsMu.Unlock()
 
 	if err := x.restoreAttrsFd(f, path, it); err != nil {
 		return err
@@ -642,6 +705,16 @@ func (x *extractor) finishDirs(next string) error {
 		top := x.pendingDirs[len(x.pendingDirs)-1]
 		if next != "" && strings.HasPrefix(next, top.Path+"/") {
 			break
+		}
+		// Barrier. A directory is stamped once nothing more will be written inside it, and
+		// with a writer pool "nothing more" includes files still in flight: every write
+		// into a directory updates its mtime, so stamping it early would be undone by a
+		// worker finishing a moment later. Reached once on a flat tree, once per boundary
+		// on a deep one.
+		if x.pool != nil {
+			if err := x.pool.drain(); err != nil {
+				return err
+			}
 		}
 		x.pendingDirs = x.pendingDirs[:len(x.pendingDirs)-1]
 		if x.opts.DryRun {
