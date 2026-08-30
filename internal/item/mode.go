@@ -62,8 +62,15 @@ var modeTable = [10][]modeEntry{
 // An unrecognised file type renders as "?", not "-". That is what CPython's stat.filemode
 // produces - the C implementation in the _stat module, which is the one that actually runs
 // and which differs from the pure-Python fallback in exactly this character. It only shows
-// up for a mode with no file type bits, which no real item has, but borg's output is the
-// specification here and guessing differently would be a difference for no reason.
+// up for a mode with no file type bits, which no real item has.
+//
+// **Reviewed under ROADMAP R0 T9 on 2026-08-30 and kept, which is a decision rather than
+// the reproduction it used to be.** R0.1 listed this among the borg quirks to correct once
+// compatibility was lifted. Examined with the constraint gone, there is nothing to correct:
+// "?" says the file type is unknown, where "-" would assert it is a regular file, and the
+// second is wrong in a way the first is not. borge's own documentation never claimed
+// otherwise, so the mismatch R0.1 recorded was between borg's output and CPython's
+// documented fallback - inherited by copying borg, and harmless.
 func FormatMode(mode int64) string {
 	out := make([]byte, 0, 10)
 	for i, row := range modeTable {

@@ -305,16 +305,24 @@ review of known items rather than a fresh audit.
 
 **Reproduced bugs, to be corrected:**
 
-- **`shellpattern.translate`'s vacuous guard.** borg's `(`, `|` and `)` passthrough checks
-  `pat[i-1] != "\\"` *after* `i` has already advanced, so the guard always passes and
-  `\(` becomes a backslash plus a group opener rather than a literal parenthesis. borge
-  reproduces it (see `plans/PORTING_PLAN.md` §6 and `internal/patterns`). A user cannot
-  currently match a filename containing a literal `(` with an `sh:` pattern. Fixing it
-  changes which files a pattern selects, which is why it waits.
-- **`stat.filemode` renders an unknown file type as `?`.** borg's C `_stat` and its
-  pure-Python fallback disagree on that character; borge reproduces the C one because that
-  is the one that runs. Cosmetic, but it is a difference between borge's output and its own
-  documentation.
+- ~~**`shellpattern.translate`'s vacuous guard.**~~ **Fixed 2026-08-30 (R0 T9),
+  `DIVERGENCES.md` #63.** borg's `(`, `|` and `)` passthrough checks `pat[i-1] != "\\"`
+  *after* `i` has already advanced, so the guard always passes. The cost turned out to be
+  worse than the wrong match recorded here: `a\(b` does not compile at all, in either tool
+  - "unterminated subpattern". And restoring borg's stated intent would not have helped,
+  because the guard has no `else`, so an escaped `(` contributes nothing and `a\(b` would
+  match `a\b`. There is no reading of borg's code under which a literal parenthesis is
+  expressible, so this became a decision rather than a repair: a backslash now escapes those
+  three characters and only those, leaving every other use of a backslash - a legal filename
+  character on Linux - unchanged.
+- ~~**`stat.filemode` renders an unknown file type as `?`.**~~ **Examined 2026-08-30
+  (R0 T9) and kept — there was nothing to correct.** `?` says the file type is unknown,
+  where `-` would assert it is a regular file, and the second is wrong in a way the first is
+  not. borge's own documentation never claimed otherwise, so the mismatch recorded here was
+  between borg's output and CPython's *documented* pure-Python fallback, inherited by
+  copying borg and harmless. It also only arises for a mode with no file-type bits, which no
+  real item has. Recorded as a considered decision in `internal/item/mode.go` rather than
+  left looking like an unreviewed reproduction.
 
 **Already fixed, recorded so they are not "corrected" back:**
 

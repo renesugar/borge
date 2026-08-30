@@ -102,6 +102,24 @@ var shellPatterns = []string{
 	"with space", "ünïcodé", "tab\there",
 	"foo.txt", "*/", "/absolute/path", "./relative",
 	"a\\*b", "a\\?b", "\\[abc\\]",
+	// Deliberately divergent, and listed here so the gate states the exception rather than
+	// omitting the case. See divergentFromBorg below and DIVERGENCES #63.
+	"a\\(b", "a\\(b\\)c", "\\(", "a\\|b", "\\\\(",
+}
+
+// divergentFromBorg are the patterns where borge deliberately does not agree with borg.
+//
+// R0 T9 made a backslash escape the three characters borg passes through as regex syntax,
+// so "a\(b" matches a file called "a(b". borg cannot: its guard against that is vacuous,
+// and the pattern does not even compile there. Skipping these in the comparison is the
+// point of the entry - a divergence the gate knows about is a decision, and one it merely
+// never exercised is an accident waiting to be reported as a regression.
+var divergentFromBorg = map[string]string{
+	"a\\(b":     "escaped group characters are literals in borge (DIVERGENCES #63)",
+	"a\\(b\\)c": "escaped group characters are literals in borge (DIVERGENCES #63)",
+	"\\(":       "escaped group characters are literals in borge (DIVERGENCES #63)",
+	"a\\|b":     "escaped group characters are literals in borge (DIVERGENCES #63)",
+	"\\\\(":     "a literal backslash then a literal parenthesis (DIVERGENCES #63)",
 }
 
 // shellSubjects are the strings the patterns are matched against.
@@ -121,8 +139,13 @@ var shellSubjects = []string{
 func TestShellPatternMatchesBorg(t *testing.T) {
 	o := startPatternOracle(t)
 
-	var checked, differed int
+	var checked, differed, skipped int
 	for _, pat := range shellPatterns {
+		if why, ok := divergentFromBorg[pat]; ok {
+			t.Logf("not compared: %q - %s", pat, why)
+			skipped++
+			continue
+		}
 		re, err := Compile(pat)
 		if err != nil {
 			// borg would raise here too; check that it does rather than assuming.
@@ -140,7 +163,12 @@ func TestShellPatternMatchesBorg(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("compared %d (pattern, path) pairs, %d differed", checked, differed)
+	t.Logf("compared %d (pattern, path) pairs, %d differed, %d pattern(s) not compared",
+		checked, differed, skipped)
+	if skipped != len(divergentFromBorg) {
+		t.Errorf("skipped %d divergent patterns, expected %d: the corpus and the exception "+
+			"list have drifted apart", skipped, len(divergentFromBorg))
+	}
 }
 
 // namePatterns are the archive-name selectors.

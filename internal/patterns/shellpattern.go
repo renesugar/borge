@@ -97,16 +97,29 @@ func Translate(pat, matchEnd string) string {
 				}
 				res.WriteString("[" + stuff + "]")
 			}
+		case c == '\\' && i < n && (runes[i] == '(' || runes[i] == '|' || runes[i] == ')'):
+			// An escaped group character is a literal. **This is where borge stops
+			// reproducing borg**, deliberately; see DIVERGENCES #63.
+			//
+			// borg guards the passthrough below with `pat[i - 1] != "\\"`, but by then i
+			// has already moved past the character, so pat[i-1] *is* the character itself
+			// and the guard is always true. What that costs is worse than a wrong match:
+			// "a\(b" translates to a literal backslash followed by an unterminated group,
+			// which does not compile at all, in either tool.
+			//
+			// Restoring borg's *stated* intent would not fix it either. The guard has no
+			// else branch, so an escaped "(" contributes nothing and "a\(b" would match
+			// "a\b" - still not a way to write a literal parenthesis. So this is a
+			// decision rather than a repair, and it is the narrowest one that answers the
+			// complaint: a backslash escapes only the three characters borg treats as
+			// regex syntax. Everything else keeps its current meaning, which matters
+			// because a backslash is a legal filename character on Linux - "a\b" still
+			// matches a file called "a\b", and "\\(" still matches one called "\(".
+			res.WriteString(regexp.QuoteMeta(string(runes[i])))
+			i++
 		case c == '(' || c == '|' || c == ')':
 			// Passed through as regex syntax, so the alternatives translateAlternatives
-			// produced survive.
-			//
-			// borg guards this with `pat[i - 1] != "\\"`, but by then i has already moved
-			// past the character, so pat[i-1] *is* the character itself and the guard is
-			// always true. The effect is that "\(" becomes a literal backslash followed
-			// by a group opener rather than a literal parenthesis. Reproduced as-is: the
-			// two tools have to agree on what a pattern matches, and "fixing" it here
-			// would change what borge backs up relative to borg.
+			// produced survive. Unescaped, as borg does.
 			res.WriteRune(c)
 		default:
 			res.WriteString(regexp.QuoteMeta(string(c)))
