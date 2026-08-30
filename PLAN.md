@@ -70,13 +70,12 @@ It is replaced by three things, and **T3 builds them before any format change la
 Sized so each is committable on its own, and ordered so the measurements that could
 *cancel* later tasks come first. The tree is never left broken across a stop.
 
-- [ ] **T1 — Extraction read order, measured.** Sort extraction by `(pack_id, obj_offset)`
-  and measure against the current path on the pathological corpus, now that the pack stays
-  open (§12.1e) and the handle cache bounds descriptors at 16. This is the experiment R0.1
-  item 1 asked for and Stage 9 did not run. It needs no format change: the order is chosen
-  at restore time from the chunk list already in the item. **Report the result whichever
-  way it goes** — a null result here removes the main argument for item 1 and is worth as
-  much as a win.
+- [x] **T1 — Extraction read order, measured. Done 2026-08-30, and the answer is no.**
+  Sorting by `(pack_id, obj_offset)` is **not worth implementing**, and the reason
+  generalises rather than being a property of this corpus. Full findings at the end of this
+  file. Nothing was built beyond the diagnostic that answered it,
+  `tests/bench/readorder_test.go`, which is kept so the conclusion can be re-checked on
+  other repositories rather than believed.
 - [ ] **T2 — Parallel writers per directory, measured.** §12.1f says the remaining extract
   cost is the kernel doing real work; the untested question is whether that work
   parallelises. Reuse the create pipeline's shape (`internal/archive/pipeline.go`) and its
@@ -143,3 +142,101 @@ R0 is done when all of the following hold, from `ROADMAP.md` R0.2 plus what Stag
    (§12.1g).
 5. **Anything that came back "no" is written down as a no**, in this file, with the number
    that decided it.
+
+---
+
+## What T1 found, 2026-08-30
+
+**The claim under test**, from `ROADMAP.md` R0 item 1: extracting a large directory is
+dominated by restore-side costs that sorting extraction by `(pack_id, obj_offset)` would
+relieve, "so each pack is read once and sequentially".
+
+**It is already read once and sequentially.** Extraction in item order opens each pack
+exactly the minimum number of times — once — in every configuration measured. Sorting
+changes pack *switches* enormously and pack *opens* not at all, and only opens cost
+anything.
+
+### The measurement
+
+`tests/bench/readorder_test.go` scores a real archive's extraction sequence without
+extracting it: the chunk index already knows where every chunk lives, so the sequence of
+`(pack, offset)` reads can be evaluated directly, against a modelled LRU.
+
+| archive | packs in repo | distinct packs read | pack switches | opens at LRU 16 | smallest cache that still opens each pack once |
+|---|---:|---:|---:|---:|---:|
+| fresh, 50 MB packs | 7 | 4 | 3 *(= floor)* | 4 *(= floor)* | **1** |
+| fresh, 2 MB packs | 111 | 94 | 93 *(= floor)* | 94 *(= floor)* | **1** |
+| 2 generations | 111 | 107 | 23,451 | 107 *(= floor)* | **3** |
+| 3 generations | 171 | 118 | 35,729 | 118 *(= floor)* | **4** |
+| 6 generations | 171 | 154 | 71,355 | 154 *(= floor)* | **7** |
+| 18 generations | 351 | 120 | **118,865** | 120 *(= floor)* | **10** |
+
+The last row is the extreme: **every single read lands in a different pack from the one
+before it**, 118,865 switches across 118,866 reads, and it still costs exactly the floor
+number of opens.
+
+### Why it generalises: the reads are monotonic
+
+**Backward seeks were zero in every configuration**, which is the finding underneath all the
+others. `create` writes an archive's chunks in item order, so a fresh archive's chunks are
+laid down in the order extraction will ask for them. Dedup against earlier archives does not
+randomise that — it *interleaves* several such sequences, each still monotonic. Interleaving
+k monotonic streams needs exactly k open handles and no seeking backwards.
+
+So the working set is **the number of generations an archive still draws chunks from**, not
+the size of the repository: 94 packs and 351 packs both need a cache of 1 when fresh. borge
+caches 16 descriptors (`maxOpenHandles`, added by §12.1e), which is several times what any
+history measured here asks for.
+
+### The wall clock agrees
+
+A model of a read sequence is not a measurement of a restore, so the prediction was tested
+end to end: extract `gen1` (perfectly sequential) and `gen18` (switches packs on every
+read) from the same repository, paired and interleaved, with the whole repository warmed
+first so neither archive pays to fault it in.
+
+| | gen1 | gen18 |
+|---|---:|---:|
+| mean of 4 | 41.36 s | 41.67 s |
+| sd | 0.56 | 1.61 |
+
+Paired difference **+0.30 s, sd 1.54, positive in 2 of 4** — +0.7% on a 41-second
+extraction, with the sign split evenly. That is inside this machine's noise, which §12.1g
+put at about 0.5 s of wall. **118,865 pack switches are not detectable in the wall clock.**
+
+### The diagnostic is shown to be able to fail
+
+Every number above says "optimal", and a metric that cannot say anything else is not
+measuring anything. Scored against a cache of 2 — below the working set — the same `gen18`
+sequence misses 118,866 times against a floor of 120, **990x the floor**, and the test fails
+if it does not. `gen1` stays at the floor even at a cache of 2, correctly, because it never
+needs a second pack open.
+
+### What this does to R0 item 1
+
+The restore-side sort is **withdrawn as an optimisation**. Combined with §12.1f — removing
+1.07 million syscalls returned about three seconds — two of the three mechanisms R0 item 1
+proposed have now been measured and found not to be where the time goes.
+
+**And if a deep enough history ever did exceed the cache, reordering is still the wrong
+fix.** The working set is what overflows, so the lever is `maxOpenHandles`: a one-line
+constant, bounded cost, no format change, no change to the order files are written.
+Reordering extraction means buffering chunks across file boundaries until the file that
+wants them is being written — real memory, real complexity — to buy what raising a constant
+would buy. That is worth writing down because the roadmap proposed the expensive fix and
+never compared it against the cheap one.
+
+### Limits, stated rather than implied
+
+- **Local filesystem only.** Every number here is `posixfs` on an SSD, where a pack switch
+  between open descriptors costs a cache lookup. R0 item 1's original wording worries about
+  "a slow or high-latency filesystem", and on `sftp` or `s3` a switch may cost a round trip
+  rather than a lookup. **That case is untested and is the one place this result does not
+  reach.** It is also the case where the working set, not the switch count, would still be
+  the thing to fix.
+- **The crossover was not reached.** The construction modifies every tenth file, so after
+  ten generations the eleventh-oldest is fully overwritten and the working set saturates at
+  10 — below the 16 descriptors borge caches. A history that keeps more than sixteen
+  generations live simultaneously would cross it, and what happens there is predicted by
+  the control (badly) but not measured.
+- One machine, one corpus, warm cache, `none-sha256`.
