@@ -192,12 +192,28 @@ measures itself and reports that its verdicts are noise is doing the job the cal
 requirement exists for. What R2 delivers either way is the anchors, the generated help,
 the grade breakdown, the two labelled sets, and the audit rules that keep them honest.
 
-After Stage 9 and R0, a GitHub project is created and the completed project is pushed to
-`origin`. R2 completing does not trigger it: the port is not finished while Stage 9's
-baseline is unmeasured, and R0 changes the on-disk format, which is not a thing to do
-first in public. After that first push, `main` is protected: work lands on `develop` and is
-merged into `main` by pull request, which is the branch model `plans/PORTING_PLAN.md` §2
-settled on.
+~~After Stage 9 and R0~~ **After Stage 9, and before R0 rather than after it**, a GitHub
+project is created and the project is pushed to `origin`. **Done 2026-08-30:**
+[renesugar/borge](https://github.com/renesugar/borge), public, `main` and `develop` and
+`v0.8.0`, with `develop` merged to `main` by pull request #1 and both branches at
+`a33e5a5`.
+
+**The order changed, and the reason it was safe is the reason the order existed.** This
+paragraph said to push after R0. The stated ground was that "R0 changes the on-disk format,
+which is not a thing to do first in public" — an argument about what the *first public act*
+should be, not about waiting for R0 as such. Pushing the borg-compatible port first
+satisfies it more directly than waiting would have: what is public is the version whose
+correctness the interoperability gate can still check. R0 will land in public as a version
+bump with a migration, which is what it should look like.
+
+After that first push, `main` is protected: work lands on `develop` and is merged into
+`main` by pull request, which is the branch model `plans/PORTING_PLAN.md` §2 settled on.
+**Protected 2026-08-30**, with force-pushes and deletion blocked and a pull request
+required. Two settings are deliberately left open on a solo project and should not be
+"fixed" by a later reader without deciding to: `enforce_admins` is off, so the owner can
+still push directly to `main` in an emergency, and `required_approving_review_count` is 0,
+because a lone maintainer cannot approve their own pull request. Required status checks are
+absent for a different reason — there is nothing to require yet, which is R4.
 
 ## After the port closes
 
@@ -376,6 +392,58 @@ Safety and architecture gates:
 Acceptance for a first release: the GUI can connect, browse, create, and restore through
 the public CLI JSON contract; every destructive workflow has a non-vacuous end-to-end test;
 no repository-format code is duplicated in the frontend.
+
+### R4. Continuous integration, and status checks worth requiring
+
+State: **not started.** Added 2026-08-30, when `main` was protected and the branch
+protection rule had no required status checks to list — because the project has no CI at
+all. Nothing on GitHub currently blocks a pull request that breaks the suite.
+
+**The obstacle is not writing a workflow file.** It is that this repository's suite, as it
+stands, cannot run on a hosted runner, and the reasons are worth stating before anyone
+tries:
+
+- **It needs borg.** Every differential test compares borge against a *pinned build of borg
+  2* — a Cython extension built from a specific commit in a virtualenv (`tests/borg2/`).
+  That is buildable in CI, but it is a build step measured in minutes, and
+  `plans/PORTING_PLAN.md` §0.1 pins the commit precisely so it cannot drift underneath the
+  gate. A CI that silently built a different borg would be worse than no CI: it would turn
+  the strongest check in the project into a source of false failures.
+- **It needs corpora that cannot be published.** The interoperability matrix runs against
+  real directories on the author's machine — a Joplin archive, an Obsidian vault, a Google
+  Drive folder, a 118,866-file recipe corpus. They are personal data and are not going to a
+  public runner. What CI can have is the synthetic and pathological corpora the suite
+  builds for itself; what it cannot have is the evidence that borge handles *real* trees,
+  which is the evidence that has actually caught bugs here.
+- **It takes about 75 minutes**, dominated by `internal/cli` (3071 s) and `tests/interop`
+  (1496 s) in the stage-9 bundle. A required check that takes over an hour on a solo
+  project will be waited on, worked around, or disabled.
+- **Some of it must never run in CI.** `tests/bench` measures wall time and peak RSS and is
+  meaningless on a shared runner — §12.1g put this machine's floor at about 50 MB of RSS
+  and 0.5 s of wall, and a noisy neighbour swamps that. The two advisory documentation
+  checkers need a local model on a GPU. Both already decline to run without an explicit
+  environment variable, which is the right shape; CI simply must not set it.
+
+**So the work is choosing what to require, not automating everything.** The likely answer
+is a fast tier that gates merges — `gofmt`, `go vet`, `check-spdx`, `check-layering`,
+`docaudit`, and the packages that need neither borg nor private corpora — plus a slower
+tier that runs the borg-dependent suite on a schedule or on demand and reports rather than
+blocks. The gate should be the part that is fast, deterministic, and reproducible off this
+machine; everything else stays an evidence bundle, which is what evidence bundles are for.
+
+- [ ] Split the suite into a tier that can run on a hosted runner and a tier that cannot,
+      and make the split explicit in the code rather than in a CI config that drifts from
+      it.
+- [ ] Build and cache the pinned borg 2 interpreter, verifying the commit it actually
+      built rather than the one it recorded — the failure `mkbundle.sh` already guards
+      against, and which materialised once on 2026-08-17.
+- [ ] Add the workflow, then add its checks to `main`'s protection rule as required.
+- [ ] Keep `tests/bench` and the model-backed documentation checkers out, and add a test
+      that fails if CI ever sets the variables that would turn them on.
+
+Acceptance: a pull request that breaks the fast tier cannot be merged; the slow tier runs
+somewhere and its failures are visible; no benchmark number in the repository was ever
+produced by a hosted runner.
 
 ## Later maintenance
 
