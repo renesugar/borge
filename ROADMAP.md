@@ -360,13 +360,18 @@ review of known items rather than a fresh audit.
   (DIVERGENCES #8), because a borge archive that could not express it would be
   indistinguishable from one taken with the option.
 
-  What a format borge owns could do is carry the distinction without paying per item: it
+  ~~What a format borge owns could do is carry the distinction without paying per item: it
   costs roughly 9 to 18 bytes on every item, so a backup of a million files spends 10 to
-  18 MB of item stream saying "nothing here". An archive-level "these attributes were
-  examined" flag plus per-item values only where non-empty says the same thing in a few
-  bytes. Recorded here rather than acted on because the question can only be asked from a
-  faithful baseline: until borge records the fields, any measurement of the saving is
-  measuring the bug.
+  18 MB of item stream saying "nothing here".~~ **Measured 2026-08-30 (R0 T5) and closed:
+  the saving is 0.4 MiB per million files, not 10 to 18 MB.** The per-item arithmetic was
+  right — 18 bytes of msgpack, confirmed — but the item stream is compressed and the two
+  keys are byte-identical on every item, so 97.9% of the cost never reaches the disk. The
+  real figure is 0.38 bytes per item under `zstd,1` and 0.29 under `lz4`; both codecs agree,
+  so it is compression in general rather than the new default. That does not buy a format
+  version, a migration and a second on-disk format to support forever. The distinction
+  itself is real, is worth keeping, and is already expressed correctly. `PLAN.md` has the
+  measurement, including the lesson: an on-disk cost argued from an in-memory encoding is
+  not an on-disk cost, and here the gap was a factor of 47.
 
 #### R0.2 Large directories must not slow restore down
 

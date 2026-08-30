@@ -163,7 +163,12 @@ Sized so each is committable on its own, and ordered so the measurements that co
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
   behaviour, so each lands with the entry rewritten rather than deleted — the record of why
   borge reproduced a bug for a year is worth keeping.
-- [ ] **T5 — Stop paying per item for "checked, found none".** *(Design and measurement
+- [x] **T5 — Measured 2026-08-30 and closed: the saving is 0.4 MiB per million files, not
+  10 to 18 MB.** The premise was arithmetic on the *uncompressed* item stream; compression
+  swallows 97.9% of it, because the keys are byte-identical on every item. **This does not
+  justify a format version**, which is what the task asked to be told. Findings at the end
+  of this file. Original text:
+- ~~**T5 — Stop paying per item for "checked, found none".**~~ *(Design and measurement
   here; the bytes change after T3.)* Every item carries an empty `xattrs` dict and a zero
   `bsdflags`, because in borg the *presence* of the key is what says the attribute was
   examined (DIVERGENCES #8). That distinction is real and must survive, but it costs roughly
@@ -851,3 +856,65 @@ is its own small lesson about what a green differential gate does and does not p
 
 `TestEscapedGroupCharactersAreLiterals` then says what borge does instead, because a skipped
 comparison proves nothing on its own.
+
+---
+
+## What T5 found, 2026-08-30
+
+**Closed. The saving is real but two orders of magnitude smaller than the estimate, and it
+does not justify a format version.** T5 was one of only two tasks that could make T3
+necessary; after this, only T8 can.
+
+### The estimate, and where it went wrong
+
+R0.1 records that every item carries an empty `xattrs` dict and a zero `bsdflags` — the
+*presence* of the key is what says the attribute was examined (DIVERGENCES #8) — and that
+this "costs roughly 9 to 18 bytes on every item, so a backup of a million files spends 10 to
+18 MB of item stream saying 'nothing here'".
+
+**The per-item arithmetic is exactly right.** Encoding one realistic item with and without
+the two keys: 158 bytes against 140, a delta of **18 bytes** — the top of the stated range.
+
+**What it forgot is that the item stream is compressed**, and the two keys are byte-identical
+on every item in the archive, which is the best case a compressor can be handed.
+
+### Measured end to end, on the corpus R0.1 names
+
+The same 118,866-file corpus archived twice, by two binaries differing only in whether they
+omit an empty `xattrs` and a zero `bsdflags`. Content chunks are identical between the two,
+so the whole difference is item-stream metadata:
+
+| compression | baseline | without the keys | saving | per item |
+|---|---:|---:|---:|---:|
+| `zstd,1` (the default) | 148,222,583 | 148,176,901 | 45,682 B | **0.38 B** |
+| `lz4` | 197,874,160 | 197,839,784 | 34,376 B | **0.29 B** |
+
+**0.38 bytes stored against 18 bytes encoded: compression absorbs 97.9% of the cost.** Both
+codecs agree, so this is compression in general rather than an artifact of T6 making zstd
+the default — worth checking, because T6 had landed days earlier and would otherwise have
+been a plausible explanation.
+
+Extrapolated to the sizes R0.1 talks about:
+
+| archive | R0.1 estimated | measured |
+|---|---:|---:|
+| 1 million files | 10–18 MB | **0.4 MiB** |
+| 10 million files | 100–180 MB | **3.7 MiB** |
+
+### The verdict
+
+A format version bump costs a migration, a second on-disk format to support and test
+indefinitely, and the loss of the interoperability gate for anything written in the new
+format. **0.4 MiB per million files does not buy that**, and the task said explicitly to say
+so and close if it did not.
+
+The distinction itself — "checked, found none" against "not recorded" — is real, is worth
+keeping, and is already expressed correctly. Nothing changes.
+
+### The lesson worth keeping
+
+The estimate was not careless: 18 bytes per item is correct, and was measured here to
+confirm it. It was reasoning about the wrong layer. **An on-disk cost argued from an
+in-memory encoding is not an on-disk cost**, and the gap was a factor of 47. R0.1 was right
+that the question could only be asked from a faithful baseline; it turns out the answer also
+depended on asking it about bytes that actually reach the disk.
