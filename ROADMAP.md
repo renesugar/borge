@@ -359,6 +359,9 @@ Anything worse than linear in that path defeats the intent. What is known so far
   millisecond cost on the *create* side, worth ~3.5 minutes on that corpus alone.
 - **Parallel writers**, added to this list 2026-08-30 because T2 found the headroom the
   other two did not have: about 2.1x, and the only one of the three mechanisms that paid.
+- **The requirement itself is met**, measured 2026-08-30 (R0 T4) rather than inferred from
+  the three mechanisms above. All three are now answered and none of them needed the format
+  to move, which is the outcome this item said to prefer.
 - ~~**Restore-side ordering** is item 1 above and is the one with real headroom.~~
   **Measured 2026-08-30 (R0 T1): no headroom.** It was the one of the three with a
   plausible story and no measurement, which is why it was worth running first. If a backup
@@ -370,8 +373,14 @@ them down together is that only one of them needs a format change, and it is not
 expensive one.
 
 **Gate:** a migration path exists and is tested (borge reads the old format, converts,
-verifies); the change is justified by benchmark JSON in the evidence bundle; and the
-pathological-directory scenario shows per-file restore cost flat against directory size.
+verifies); the change is justified by benchmark JSON in the evidence bundle; and
+~~the pathological-directory scenario shows per-file restore cost flat against directory
+size~~ — **that last clause is met as of 2026-08-30 (R0 T4), and was met without any format
+change.** Per-file restore cost is flat across a 2,400x range of directory sizes: from
+10,000 files to 240,000, per-file cost rises 6.5%, where O(n log n) would predict about 34%.
+Most of even that drift is ext4's own directory index rather than borge — the same
+file-creation loop without borge drifts about 7%, and non-monotonically. The remaining two
+clauses still bind whatever format change R0 eventually makes, if it makes one.
 
 ### R3. Build a GUI frontend
 
@@ -457,6 +466,15 @@ machine; everything else stays an evidence bundle, which is what evidence bundle
       built rather than the one it recorded — the failure `mkbundle.sh` already guards
       against, and which materialised once on 2026-08-17.
 - [ ] Add the workflow, then add its checks to `main`'s protection rule as required.
+- [ ] **Authenticate as the workflow, not as a person.** Noted 2026-08-30, from a failure
+      rather than from principle: the `gh` token authenticating pushes went invalid partway
+      through a working session, and git fell back to a desktop askpass dialog that no
+      unattended job could ever answer. A scheduled or triggered workflow authenticating as
+      the maintainer would hit exactly that, and would hit it silently - as a job that hangs
+      or fails on credentials, days after the token was fine. Use Actions' own
+      `GITHUB_TOKEN`, which is minted per run and scoped to the repository, or a
+      repo-scoped token if something genuinely needs more; never a personal token carried
+      from a developer's machine.
 - [ ] Keep `tests/bench` and the model-backed documentation checkers out, and add a test
       that fails if CI ever sets the variables that would turn them on.
 
