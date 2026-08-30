@@ -44,6 +44,28 @@ change rather than a format change (T6, zstd), and one that is a new capability 
 search). Writing that down now is the point: it is much easier to justify breaking a format
 before the measurements than after them.
 
+## Two kinds of compatibility, which this plan first conflated
+
+Recorded 2026-08-30, when T3 was moved after T9 and the reason turned out to be sharper
+than "do the cheap things first".
+
+**On-disk format compatibility** is what `tests/interop` guards: borge writes a repository
+borg can read, and reads one borg wrote. Lifting it needs a version bump and a migration,
+and that is T3.
+
+**Behavioural compatibility** is what the differential tests guard - `TestShellPatternMatchesBorg`
+and its neighbours run *real borg* and require borge to agree on every pattern and path
+pair. Lifting it needs a decision and a `DIVERGENCES.md` entry, and no version of anything.
+
+R0.1 says its quirks wait "until compatibility is lifted" without saying which. They are the
+second kind: fixing `shellpattern.translate`'s vacuous guard changes which files a pattern
+selects, and `tests/interop` never looks at pattern selection. So T9 does not wait for T3 -
+it waits for a decision to diverge, which is a different and much cheaper thing to arrange.
+
+The distinction matters beyond the ordering: it says the format bump is needed by exactly
+two of the nine tasks, T5 and T8, and both of those are still contingent on their own
+measurements.
+
 ## What replaces the interop gate
 
 For seven stages, `tests/interop` answered "is borge still correct?" by asking "does borg
@@ -51,7 +73,8 @@ agree?". Once borge writes a format borg cannot read, that answer is unavailable
 archives, and losing it silently is the largest risk in R0 — larger than any individual
 format decision.
 
-It is replaced by three things, and **T3 builds them before any format change lands**:
+It is replaced by three things, and **T3 builds them before any format change lands** -
+which, since T3 moved after T9 on 2026-08-30, means before T5 and T8 and nothing else:
 
 1. **The old format stays fully supported and fully gated.** borge continues to read and
    write repository version 4, and `tests/interop` keeps running against it unchanged. A
@@ -87,15 +110,13 @@ Sized so each is committable on its own, and ordered so the measurements that co
   costs more than it saves, and a knob rather than a `NumCPU` rule — the create default is
   two workers on this i5-9300H, chosen because more bought no measurable time and cost
   measurable memory (§12.1h).
-- [ ] **T3 — The version bump, the migration, and the replacement gates.** Repository
-  version 5 behind an explicit opt-in, `borge transfer`-based migration from version 4, and
-  the three gates above wired into the suite. **Nothing that changes on-disk bytes may land
-  before this.** A format change with no migration is not a feature, and a format change
-  with no gate is not checkable.
-- [ ] **T4 — Restore-side batching and deferred metadata, if T1 and T2 justify it.**
-  Explicitly conditional. If T1 and T2 land the requirement without touching the format,
-  this task is closed as unnecessary and R0.2's gate is met without a format change — which
-  is the outcome the roadmap says to prefer.
+- [ ] **T4 — R0.2's gate, measured; then batching and deferred metadata only if it fails.**
+  Reframed 2026-08-30. T1 and T2 answered the *mechanism* questions but **nobody has
+  measured R0.2's actual gate**, which is not "is restore fast" but "does per-file restore
+  cost stay flat as the directory grows". That needs a scaling run - 100 files, 10,000,
+  118,866 - and the per-file cost compared, not the totals. Do that first. If the curve is
+  flat, this task closes and R0.2 is met with no format change; if it bends, the batching
+  and deferred-metadata ideas are back, and *then* their cost is worth paying.
 - [ ] **T5 — Stop paying per item for "checked, found none".** Every item carries an empty
   `xattrs` dict and a zero `bsdflags`, because in borg the *presence* of the key is what
   says the attribute was examined (DIVERGENCES #8). That distinction is real and must
@@ -123,9 +144,29 @@ Sized so each is committable on its own, and ordered so the measurements that co
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
   behaviour, so each lands with the entry rewritten rather than deleted — the record of why
   borge reproduced a bug for a year is worth keeping.
+- [ ] **T3 — The version bump, the migration, and the replacement gates. Only if anything
+  above still needs it.** Moved here from third place on 2026-08-30. Repository version 5
+  behind an explicit opt-in, `borge transfer`-based migration from version 4, and the three
+  replacement gates wired into the suite. **Nothing that changes on-disk bytes may land
+  before this** — that rule is unchanged; what changed is that nothing above it changes
+  on-disk bytes until T5 and T8, and both of those have to survive their own measurement
+  first.
 
-T1, T2, T5, T6 and T7 are measurements before they are changes. Every one of them can come
-back "no", and a task list that cannot record a "no" is a list of intentions.
+  It was third because the original plan assumed R0 would need a format change. Nothing
+  measured since has needed one: T1 found the read order already optimal, T2 took 2.1x with
+  a writer pool, T6 is a default rather than a format, T7 is an index beside the repository,
+  and T9 is a behaviour decision. Designing a migration before knowing what it migrates
+  *to* is speculative work, and the version it would have bumped might have held nothing.
+
+T1, T2, T4, T5, T6 and T7 are measurements before they are changes. Every one of them can
+come back "no", and a task list that cannot record a "no" is a list of intentions. Two have
+now come back: T1 no, T2 yes.
+
+**The order is deliberate and was changed once.** Everything that cannot break
+compatibility comes first, so that T3 - the version bump and its migration - is reached
+knowing exactly what it has to carry, or is never reached at all. As it stands **no
+measurement in this project requires the format to move**, and the two tasks that would,
+T5 and T8, are each contingent on a measurement not yet taken.
 
 ## Gate
 
