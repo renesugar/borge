@@ -124,6 +124,33 @@ Sized so each is committable on its own, and ordered so the measurements that co
   that `borge find`'s cost is not matching but re-decoding item streams, and a path cache
   would take it from 7,069 ms to about 85 ms with no dependency at all. Findings at the end
   of this file. borghash is retained for the chunk index, which was never in doubt.
+- [ ] **T10 — A path cache for `find`.** Added 2026-08-30 out of T7, which measured the
+  opportunity while rejecting the tool proposed for it. `borge find` spends its time
+  decoding item streams, not matching: 7,069 ms over 200,020 items across 20 archives, where
+  a regex scan of the same paths already in memory takes 85 ms. Cache the paths beside the
+  repository - `cache.Dir(repoID)` already exists for the files cache - so a second `find`
+  never re-decodes them. **No format change**; nothing is stored in the repository.
+
+  **The design question is which shape, and it is a measurement rather than a preference.**
+  Per-archive path lists are simple and win the decode cost, but store every path once per
+  archive. A global path table with per-archive membership also wins the *storage*: the
+  repository T7 measured held 200,020 items over 10,001 distinct paths, a factor of exactly
+  the archive count, and a year of daily backups makes that 365. The second is worth more
+  and invalidates less obviously. Measure both on a real multi-archive repository before
+  choosing.
+
+  **The correctness property is the whole risk, and it is not performance.** A path cache
+  that is stale, truncated or absent must change only how long `find` takes and never what
+  it returns - the files cache's own package comment is about exactly this class of bug,
+  where a cache that lies makes the tool silently wrong. Archives are immutable once
+  written, so keying on archive id rather than name avoids the hazard the files cache lives
+  with. Soft-deleted archives and `--deleted` have to be handled, since `find` can search
+  them.
+
+  Gate: `find` returns byte-identical output with the cache warm, cold, deleted mid-run and
+  deliberately corrupted; a test damages the cache and requires the output to be unchanged;
+  and the speedup is measured on a real repository rather than assumed from T7's numbers.
+
 - [ ] **T9 — The R0.1 quirk list.** `shellpattern.translate`'s vacuous guard (a literal
   `(` cannot currently be matched by an `sh:` pattern) and `stat.filemode`'s `?` for an
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
@@ -169,7 +196,7 @@ come back "no", and a task list that cannot record a "no" is a list of intention
 now come back: T1 no, T2 yes.
 
 **The order is deliberate and was changed twice.** Everything that cannot break
-compatibility comes first (T4, T6, T7, T9), then the only two tasks that can require a
+compatibility comes first (T4, T6, T7, T10, T9), then the only two tasks that can require a
 format version (T5, T8), then T3 itself. So T3 is reached knowing exactly what it has to
 carry, or is never reached at all - and the two tasks that could summon it sit directly
 above it, where the decision is visible rather than buried six items up.

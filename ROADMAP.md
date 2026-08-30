@@ -278,10 +278,12 @@ none", 10 to 18 MB on a million files — and that case is arithmetic, not a ben
    And paths repeat once per archive, so a repository of 20 archives holds 200,020 items
    over 10,001 distinct paths.
 
-   **So the open opportunity is a path cache**, not an inverted index: distinct paths per
-   archive, stored beside the repository, no format change, worth roughly 80x on this
-   workload for one flat file. It is not built yet, and `PLAN.md` records why bluge is not
-   the way to get there. Full-text search over file *contents* remains the one thing bluge
+   **So the open opportunity is a path cache**, not an inverted index: distinct paths
+   stored beside the repository, no format change, worth roughly 80x on this workload. It is
+   now **`PLAN.md` T10**, added 2026-08-30, with the shape left to measurement - per-archive
+   lists win the decode cost, a global path table with per-archive membership also wins the
+   storage - and with the correctness property named as the real risk: a stale or missing
+   path cache must change how long `find` takes and never what it returns. Full-text search over file *contents* remains the one thing bluge
    would genuinely add, and it costs a full decompression pass per backup to index.
 3. ~~**zstd as the default compression** (borg #10085) once the benchmark supports it —
    the reference numbers give zstd `SpeedFastest` a better ratio *and* comparable
