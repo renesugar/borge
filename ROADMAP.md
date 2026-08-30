@@ -457,6 +457,15 @@ machine; everything else stays an evidence bundle, which is what evidence bundle
       built rather than the one it recorded — the failure `mkbundle.sh` already guards
       against, and which materialised once on 2026-08-17.
 - [ ] Add the workflow, then add its checks to `main`'s protection rule as required.
+- [ ] **Authenticate as the workflow, not as a person.** Noted 2026-08-30, from a failure
+      rather than from principle: the `gh` token authenticating pushes went invalid partway
+      through a working session, and git fell back to a desktop askpass dialog that no
+      unattended job could ever answer. A scheduled or triggered workflow authenticating as
+      the maintainer would hit exactly that, and would hit it silently - as a job that hangs
+      or fails on credentials, days after the token was fine. Use Actions' own
+      `GITHUB_TOKEN`, which is minted per run and scoped to the repository, or a
+      repo-scoped token if something genuinely needs more; never a personal token carried
+      from a developer's machine.
 - [ ] Keep `tests/bench` and the model-backed documentation checkers out, and add a test
       that fails if CI ever sets the variables that would turn them on.
 
