@@ -87,6 +87,10 @@ func buzhash64Table(key []byte) ([256]uint64, error) {
 
 func (c *Buzhash64) Algorithm() string { return AlgoBuzhash64 }
 
+// Reset points the chunker at a new stream, keeping the keyed table and its rotated
+// twin - the two things that cost 4.35 ms to build.
+func (c *Buzhash64) Reset(r io.Reader) { c.d.reset(r) }
+
 func (c *Buzhash64) Next() (Chunk, error) {
 	data, err := c.d.next(c.hashWindow, c.scan)
 	if err != nil {
@@ -170,6 +174,9 @@ func newBuzhash(p Params, seed uint32, r io.Reader) (*Buzhash, error) {
 
 func (c *Buzhash) Algorithm() string { return AlgoBuzhash }
 
+// Reset points the chunker at a new stream, keeping the seeded table.
+func (c *Buzhash) Reset(r io.Reader) { c.d.reset(r) }
+
 func (c *Buzhash) Next() (Chunk, error) {
 	data, err := c.d.next(c.hashWindow, c.scan)
 	if err != nil {
@@ -237,6 +244,15 @@ func newFixed(p Params, r io.Reader) (*Fixed, error) {
 }
 
 func (c *Fixed) Algorithm() string { return AlgoFixed }
+
+// Reset points the chunker at a new stream. Fixed has no table, but it does have a buffer
+// worth keeping, and the header state has to go or the next stream would be read as a
+// continuation of the previous one.
+func (c *Fixed) Reset(r io.Reader) {
+	c.r = r
+	c.headerDone = false
+	c.done = false
+}
 
 func (c *Fixed) Next() (Chunk, error) {
 	if c.done {

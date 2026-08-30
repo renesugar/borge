@@ -142,6 +142,14 @@ func (e *Env) openRepoRaw(loc *location.Location, exclusive bool) (*openedRaw, e
 
 // ---------------------------------------------------------------- info
 
+// SSH_ORIGINAL_COMMAND is read by "borge debug info" only, to report what a remote
+// invocation was asked to run.
+//
+//borge:doc user
+//borge:help environment/not-borges
+//borge:about cmdDebugInfo
+var _ = helpText
+
 // cmdDebugInfo prints what a bug report needs.
 //
 // borg prints its Python, msgpack and FUSE versions here because those are the things that

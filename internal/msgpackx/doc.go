@@ -26,7 +26,7 @@
 //
 // # Why a hand-written codec
 //
-// The plan (docs/PORTING_PLAN.md, stage 1.1) left open whether to use an existing Go
+// The plan (plans/PORTING_PLAN.md, stage 1.1) left open whether to use an existing Go
 // msgpack library. A hand-written codec won on three counts, each of which is a
 // correctness requirement rather than a preference:
 //

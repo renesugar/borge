@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Enforce the import layering from docs/PORTING_PLAN.md section 1.
+# Enforce the import layering from plans/PORTING_PLAN.md section 1.
 #
 # borg's helpers/__init__.py is an import shim that made its dependency graph cyclic
 # (borg issue #10016). Go forbids import cycles outright, so the compiler already
@@ -74,7 +74,7 @@ if go list -deps ./internal/... 2>/dev/null | grep -q "^$MOD/cmd/"; then
 fi
 
 if [ "$fail" -ne 0 ]; then
-    echo "check-layering: FAILED - see docs/PORTING_PLAN.md section 1" >&2
+    echo "check-layering: FAILED - see plans/PORTING_PLAN.md section 1" >&2
     exit 1
 fi
 echo "check-layering: ok"

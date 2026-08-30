@@ -18,6 +18,24 @@ import (
 	"strings"
 )
 
+// helpText marks a declaration that exists only to carry user-facing documentation.
+//
+// The doc comment above such a declaration is help text and nothing else: docgen renders
+// it into "borge help", so a maintainer's note in it would be printed at a user. Notes
+// belong in the code below it. The carrier sits beside what it describes, which is the
+// point of the whole arrangement - a change to the behaviour puts the sentence in the
+// same diff, where a reviewer can see that it went false.
+const helpText = "user-facing help text"
+
+// Which files a command acts on is decided by patterns. They appear as --exclude and
+// --pattern options, in a --patterns-from or --exclude-from file, and as the positional
+// PATH arguments of list, extract, diff, export-tar and find.
+//
+//borge:doc user
+//borge:help patterns/intro
+//borge:about Matcher.Match
+var _ = helpText
+
 // The five file-pattern styles, named by their two-letter prefix.
 //
 // The prefix is what a user writes: "sh:home/*/.cache". Without one, the caller's default
@@ -38,6 +56,14 @@ const (
 	// StylePathFull is "pf:", one exact path and nothing else.
 	StylePathFull = "pf"
 )
+
+// Paths are stored without a leading slash, so an archive of /home/me holds "home/me/...".
+// A pattern is matched against that stored form.
+//
+//borge:doc user
+//borge:help patterns/stored-paths
+//borge:about normalizePattern
+var _ = helpText
 
 // Pattern matches archived paths.
 type Pattern interface {
@@ -150,6 +176,26 @@ func preparePathPattern(pattern, suffix string) string {
 	return strings.TrimPrefix(path.Clean(pattern)+suffix, "/")
 }
 
+// A pattern may carry a two-letter style prefix. Without one, the style depends on where
+// the pattern appears: --exclude and --pattern default to "fm", and a positional PATH
+// defaults to "pp".
+//
+//borge:doc user
+//borge:help patterns/styles
+//borge:about ParsePattern
+var _ = helpText
+
+// The prefix is recognised on positional PATH arguments too, not only on --pattern. borge
+// got this wrong once - a positional "sh:**/*.txt" was read as a literal path beginning
+// with the characters "sh:" and quietly matched nothing at all - so it is worth stating
+// plainly: "borge list ARCHIVE sh:**/*.txt" works.
+//
+//borge:doc user
+//borge:help patterns/prefix-on-positionals
+//borge:claim patterns/prefix-on-positionals
+//borge:about ParsePattern
+var _ = helpText
+
 // ParsePattern reads a pattern with an optional "xx:" style prefix.
 //
 // fallback is the style to use when there is no prefix.
@@ -204,6 +250,20 @@ type entry struct {
 	pattern Pattern
 	cmd     Command
 }
+
+// Patterns are applied in the order given, and the first one that matches decides. In a
+// --patterns-from file each line is one pattern, prefixed with its action:
+//
+//	"+" PATTERN    include
+//	"-" PATTERN    exclude
+//	"!" PATTERN    exclude and do not descend into it at all
+//
+// Blank lines and lines starting with # are ignored.
+//
+//borge:doc user
+//borge:help patterns/match-order
+//borge:about Matcher.Match
+var _ = helpText
 
 // Matcher decides whether a path is included.
 //
@@ -466,4 +526,34 @@ func LoadExcludeFile(r io.Reader) ([]Pattern, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Style describes one file-pattern style for the documentation.
+type Style struct {
+	// Prefix is the two letters a user writes, without the colon.
+	Prefix string
+	// Description is the user-facing explanation, as "borge help patterns" prints it.
+	Description string
+}
+
+// Styles lists the file-pattern styles, in the order the documentation presents them:
+// the two defaults first, then the rest.
+//
+// This is the source. The help topic renders this list rather than restating it, so a
+// style added here appears in the documentation and a style removed here disappears from
+// it - neither can be forgotten, because there is nowhere to forget it.
+//
+//borge:enumerates pattern-styles
+func Styles() []Style {
+	return []Style{
+		{StyleFnmatch, "fnmatch. * matches anything including /, ? matches one character, " +
+			"[abc] matches a character class. This is the default for --exclude."},
+		{StyleShellPath, "shell style. * stops at a directory separator, ** crosses them, " +
+			"? matches one character, and {a,b} alternates."},
+		{StyleRegexPath, "a regular expression, matched against the whole path (Go's regexp " +
+			"syntax, which is RE2 - no backreferences and no lookaround)."},
+		{StylePathPrefix, "path prefix. Matches PATH and everything under it. This is the " +
+			"default for a positional PATH argument."},
+		{StylePathFull, "path full. Matches that one path exactly and nothing under it."},
+	}
 }

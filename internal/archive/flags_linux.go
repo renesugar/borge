@@ -100,6 +100,19 @@ func setFlags(path string, bsdFlags int64, mode uint32) error {
 		return nil
 	}
 	defer unix.Close(fd)
+	return setFlagsFd(fd, bsdFlags, mode)
+}
+
+// setFlagsFd is setFlags for a descriptor the caller already holds.
+//
+// Splitting it out is what lets writeFile do the whole attribute sequence on one
+// descriptor; see restoreFlagsFd. The mode test is repeated here because a caller with a
+// descriptor still must not try this on a device or a symlink.
+func setFlagsFd(fd int, bsdFlags int64, mode uint32) error {
+	switch mode & unix.S_IFMT {
+	case unix.S_IFBLK, unix.S_IFCHR, unix.S_IFLNK:
+		return nil
+	}
 
 	current, err := unix.IoctlGetInt(fd, unix.FS_IOC_GETFLAGS)
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 // executed. Nothing executed these until 2026-08-17, when running the fifteen of them by
 // hand found three wrong - and one of the three was not a documentation bug at all but a
 // defect that silently stored data the user had asked to exclude (docs/DIVERGENCES.md
-// #20). See docs/PORTING_PLAN.md §2.1.2.
+// #20). See plans/PORTING_PLAN.md §2.1.2.
 //
 // So: every "borge ..." in every help topic is extracted, substituted against a scratch
 // repository built for the purpose, run, and checked - not only for its exit status but
@@ -552,22 +552,6 @@ var matchArchivesExamples = map[string]exampleCheck{
 		},
 	},
 
-	// From "\"borge repo-list --short\" prints ids".
-	`borge repo-list --short`: {
-		wantExit: ExitOK,
-		check: func(t *testing.T, f *helpFixture, stdout, stderr string) {
-			lines := nonEmptyLines(stdout)
-			if len(lines) < 4 {
-				t.Fatalf("expected the fixture's archives, got %d lines:\n%s", len(lines), stdout)
-			}
-			for _, line := range lines {
-				if !archiveIDLine.MatchString(line) {
-					t.Errorf("--short printed something that is not an id: %q", line)
-				}
-			}
-		},
-	},
-
 	// From "tag one with \"borge tag --add @PROT ARCHIVE\"".
 	`borge tag --add @PROT ARCHIVE`: {
 		wantExit: ExitOK,
@@ -746,6 +730,15 @@ func helpExampleChecks(t *testing.T) map[string]exampleCheck {
 // Each one gets a repository of its own, rebuilt from scratch, so the order the examples
 // run in cannot matter and a destructive example - delete, prune - can be run for real
 // rather than with --dry-run, which would test something other than what is documented.
+//
+// Every topic's examples are executed here, which is the "executed" grade in the doc
+// audit: the one a user actually relies on, because they copy the example.
+//
+//borge:checks patterns/examples
+//borge:checks match-archives/examples
+//borge:checks placeholders/examples
+//borge:checks compression/examples
+//borge:checks environment/examples
 func TestHelpExamplesRun(t *testing.T) {
 	found := helpExamplesFromTopics(t)
 	checks := helpExampleChecks(t)
@@ -763,7 +756,7 @@ func TestHelpExamplesRun(t *testing.T) {
 		if perTopic[topic.name] == 0 {
 			t.Errorf("\"borge help %s\" contains no command a reader can copy; "+
 				"prose that carries no example is the grade users do not rely on "+
-				"(docs/PORTING_PLAN.md §2.1.2)", topic.name)
+				"(plans/PORTING_PLAN.md §2.1.2)", topic.name)
 		}
 	}
 

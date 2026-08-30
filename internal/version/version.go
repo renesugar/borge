@@ -14,7 +14,7 @@ import (
 // "dev" means an unreleased build.
 var Version = "dev"
 
-// The upstream borg commit this port targets. See docs/PORTING_PLAN.md section 0.1:
+// The upstream borg commit this port targets. See plans/PORTING_PLAN.md section 0.1:
 // the commit is pinned so the interoperability gate has a fixed meaning. Changing it
 // is a deliberate, reviewed rebase, never an incidental edit.
 const (

@@ -184,6 +184,15 @@ func storePack(s *store.Store, pieces []piece) ([]PackResult, error) {
 	// Build the pack bytes once. borg joins rather than concatenating incrementally to
 	// avoid quadratic copying; the same reasoning applies to a Go append loop without a
 	// pre-sized buffer.
+	//
+	// An earlier version released each chunk's buffer here, on the theory that holding the
+	// pieces and the assembled pack across the Store call cost peak memory. Measured over
+	// eight interleaved pairs on an idle machine, it changed neither wall time (mean
+	// -0.10 s, sd 0.42) nor peak RSS (mean -5 MB, sd 24) - the same binary varies by 50 MB
+	// between runs, which is what the original before-and-after had actually measured. The
+	// likely reason it does nothing: pieces is last read in the results loop below, which
+	// runs before the Store, so the collector already treats those buffers as dead there.
+	// See §12.1g.
 	packData := make([]byte, 0, total)
 	for _, p := range pieces {
 		packData = append(packData, p.data...)

@@ -77,7 +77,16 @@ func (e *Env) lookup(name string) (string, bool) {
 	return os.LookupEnv(name)
 }
 
-// lookupBorg reads BORGE_<name>, falling back to BORG_<name> (docs/PORTING_PLAN.md §0.5).
+// Every variable is read as BORGE_<NAME> first and BORG_<NAME> second, so an existing borg
+// setup works unchanged and a machine running both can tell them apart.
+//
+//borge:doc user
+//borge:help environment/intro
+//borge:claim environment/prefix-fallback
+//borge:about Env.lookupBorg
+var _ = helpText
+
+// lookupBorg reads BORGE_<name>, falling back to BORG_<name> (plans/PORTING_PLAN.md §0.5).
 func (e *Env) lookupBorg(name string) (string, bool) {
 	if v, ok := e.lookup("BORGE_" + name); ok {
 		return v, true
@@ -257,10 +266,16 @@ func newFlagSet(e *Env, name string) *flagSet {
 	}
 	fs := &flagSet{FlagSet: inner, env: e, name: name}
 	// Registered here rather than in commonFlags because borg's --log-json is on every
-	// command, including the six that take no repository: version, help, completion, and
-	// the key, debug and benchmark parents. Every borge command builds its options through
-	// this function, so this is the one place that reaches all of them - borge's
-	// equivalent of borg's common parser.
+	// command, including the ones borge builds without a repository: version, help and
+	// completion. Every borge command that builds a FlagSet does so through this
+	// function, which makes it borge's equivalent of borg's common parser.
+	//
+	// It does not reach the key, debug and benchmark parents, which dispatch straight to
+	// a subcommand and build no FlagSet at all; takeParentLogJSON handles the option for
+	// those three. This comment claimed it reached them until 2026-08-28, nine days after
+	// DIVERGENCES #41 was corrected to say it does not - the correction went to the entry
+	// and not to the code beside the mistake, which is the failure the doc anchors exist
+	// to make impossible.
 	inner.BoolVar(&fs.logJSON, "log-json", false,
 		"write stderr as one JSON object per line instead of text")
 	return fs

@@ -1,0 +1,16 @@
+{
+  "id": "patterns-find-after",
+  "actionable": true,
+  "task": "search the repository for files whose paths match the shell pattern **/invoice-*.pdf",
+  "why": "The corrected topic drops --pattern.",
+  "expect": "the command succeeds and names the invoice",
+  "probe": "find sh:**/invoice-*.pdf",
+  "probe_works": true,
+  "topic": {
+    "commit": "aba8087a8c5754b26c548463189f1dbaef3a26e4",
+    "file": "internal/cli/help.go",
+    "first_line": 109,
+    "last_line": 175,
+    "text": "const helpPatterns = `borge help patterns\n\nWhich files a command acts on is decided by patterns. They appear as --exclude and\n--pattern options, in a --patterns-from or --exclude-from file, and as the positional\nPATH arguments of list, extract, diff, export-tar and find.\n\nSTYLES\n\nA pattern may carry a two-letter style prefix. Without one, the style depends on where\nthe pattern appears: --exclude and --pattern default to \"fm\", and a positional PATH\ndefaults to \"pp\".\n\n  fm:PATTERN   fnmatch. * matches anything including /, ? matches one character,\n               [abc] matches a character class. This is the default for --exclude.\n\n  sh:PATTERN   shell style. * stops at a directory separator, ** crosses them, ? matches\n               one character, and {a,b} alternates.\n\n  re:PATTERN   a regular expression, matched against the whole path (Go's regexp syntax,\n               which is RE2 - no backreferences and no lookaround).\n\n  pp:PATH      path prefix. Matches PATH and everything under it. This is the default\n               for a positional PATH argument.\n\n  pf:PATH      path full. Matches that one path exactly and nothing under it.\n\nThe prefix is recognised on positional PATH arguments too, not only on --pattern. borge\ngot this wrong once - a positional \"sh:**/*.txt\" was read as a literal path beginning\nwith the characters \"sh:\" and quietly matched nothing at all - so it is worth stating\nplainly: \"borge list ARCHIVE sh:**/*.txt\" works.\n\nPATHS INSIDE AN ARCHIVE\n\nPaths are stored without a leading slash, so an archive of /home/me holds \"home/me/...\".\nA pattern is matched against that stored form.\n\nOPTIONS COME BEFORE PATHS\n\nborge stops reading options at the first non-option argument, so every option has to\nprecede the paths:\n\n  borge create -r REPO --exclude 'sh:**/.cache' archive ~     correct\n  borge create -r REPO archive ~ --exclude 'sh:**/.cache'     WRONG\n\nborg accepts the second form. borge treats \"--exclude\" and the pattern after it as two\nmore paths to archive, warns that they do not exist, and archives everything the exclude\nwas meant to leave out. Use \"--\" to end the options when a path itself begins with a dash.\nThis is a known defect, not a design decision; see docs/DIVERGENCES.md #20.\n\nORDER\n\nPatterns are applied in the order given, and the first one that matches decides. In a\n--patterns-from file each line is one pattern, prefixed with its action:\n\n  + PATTERN    include\n  - PATTERN    exclude\n  ! PATTERN    exclude and do not descend into it at all\n\nBlank lines and lines starting with # are ignored.\n\nEXAMPLES\n\n  borge create -r REPO --exclude 'sh:**/.cache' archive ~\n  borge extract ARCHIVE 'sh:home/me/**/*.txt'\n  borge list ARCHIVE 're:\\.(jpg|png)$'\n  borge find 'sh:**/invoice-*.pdf'\n`\n"
+  }
+}

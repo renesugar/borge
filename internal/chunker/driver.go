@@ -48,8 +48,31 @@ type driver struct {
 
 func (d *driver) init(cfg *config, r io.Reader) {
 	d.cfg = cfg
-	d.r = r
 	d.backing = make([]byte, cfg.maxSize)
+	d.reset(r)
+}
+
+// reset points the driver at a new stream, keeping the buffer it already has.
+//
+// Everything below the buffer is per-stream state and must go, or the next file would
+// inherit the previous one's and be chunked differently - a correctness failure, not a
+// performance one. TestResetChunksIdentically holds it, and was checked by omitting each
+// assignment in turn: n, pending, eof, done and bytesRead each make it fail.
+//
+// pos is the exception and is reset defensively rather than necessarily. Both scan loops
+// assign it (d.pos = cfg.minSize) before reading it, so a stale value is unobservable
+// today and omitting the line here does not fail the test. It is reset anyway, because
+// "unobservable today" is a property of the two call sites rather than of the field, and
+// the cost is one store per file.
+func (d *driver) reset(r io.Reader) {
+	d.r = r
+	d.n = 0
+	d.pos = 0
+	d.pending = 0
+	d.eof = false
+	d.done = false
+	d.bytesRead = 0
+	d.bytesYielded = 0
 }
 
 // buf is the live window: the current chunk so far plus everything buffered after it.

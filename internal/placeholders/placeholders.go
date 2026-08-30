@@ -27,6 +27,7 @@ package placeholders
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -34,6 +35,31 @@ import (
 // DefaultTimeFormat is what {now} and {utcnow} produce with no format spec. It is borg's
 // ISO_FORMAT_NO_USECS (src/borg/constants.py).
 const DefaultTimeFormat = "%Y-%m-%dT%H:%M:%S"
+
+// helpText marks a declaration that exists only to carry user-facing documentation.
+//
+// The doc comment above such a declaration is help text and nothing else: docgen renders
+// it into "borge help", so a maintainer's note in it would be printed at a user. Notes
+// belong in the code below it.
+const helpText = "user-facing help text"
+
+// An archive name, a comment, an archive selector (-a) and the repository path may contain
+// placeholders, which borge substitutes before using them.
+//
+//borge:doc user
+//borge:help placeholders/intro
+//borge:claim placeholders/substituted
+//borge:about Values.Expand
+var _ = helpText
+
+// Every placeholder in one command sees the same instant, so a name built from {now} and
+// {unixtime} cannot straddle a second boundary.
+//
+//borge:doc user
+//borge:help placeholders/one-instant
+//borge:claim placeholders/one-instant
+//borge:about Default
+var _ = helpText
 
 // Values are the substitutions available to a template.
 type Values struct {
@@ -96,14 +122,68 @@ func lookup(name string) string {
 	return ""
 }
 
-// Names lists every placeholder, sorted, for error messages and documentation.
-func Names() []string {
-	return []string{
-		"borgmajor", "borgminor", "borgpatch", "borgversion",
-		"fqdn", "hostname", "now", "pid", "reverse-fqdn",
-		"unixtime", "user", "utcnow", "uuid4",
+// Placeholder describes one substitution for the documentation.
+type Placeholder struct {
+	// Name is what goes between the braces.
+	Name string
+	// Syntax is what a user writes, which is "{name}" except where a format is accepted.
+	Syntax string
+	// Description is the user-facing explanation, as "borge help placeholders" prints it.
+	Description string
+	// TakesFormat is true for the two that accept a strftime format after a colon.
+	TakesFormat bool
+}
+
+// All lists every placeholder, in the order the documentation presents them: the times
+// first, because they are what an archive name is usually built from.
+//
+// This is the source. Names() is derived from it and the help topic renders it, so a
+// placeholder cannot exist in one of the three and not the others.
+//
+//borge:enumerates placeholders
+func All() []Placeholder {
+	return []Placeholder{
+		{Name: "now", Syntax: "{now}", Description: "the current local time, as YYYY-MM-DDTHH:MM:SS", TakesFormat: true},
+		{Name: "utcnow", Syntax: "{utcnow}", Description: "the same instant in UTC", TakesFormat: true},
+		{Name: "now", Syntax: "{now:FORMAT}", Description: "the current local time in a chosen format", TakesFormat: true},
+		{Name: "utcnow", Syntax: "{utcnow:FORMAT}", Description: "the same in UTC", TakesFormat: true},
+		{Name: "unixtime", Syntax: "{unixtime}", Description: "seconds since the epoch"},
+		{Name: "hostname", Syntax: "{hostname}", Description: "this machine's hostname (BORGE_HOSTNAME overrides it)"},
+		{Name: "fqdn", Syntax: "{fqdn}", Description: "its fully qualified name"},
+		{Name: "reverse-fqdn", Syntax: "{reverse-fqdn}", Description: "the same with the components reversed"},
+		{Name: "user", Syntax: "{user}", Description: "the current user (BORGE_USERNAME overrides it)"},
+		{Name: "pid", Syntax: "{pid}", Description: "this process's id"},
+		{Name: "uuid4", Syntax: "{uuid4}", Description: "a random UUID"},
+		{Name: "borgversion", Syntax: "{borgversion}", Description: "borge's version"},
+		{Name: "borgmajor", Syntax: "{borgmajor}", Description: "its major part"},
+		{Name: "borgminor", Syntax: "{borgminor}", Description: "its minor part"},
+		{Name: "borgpatch", Syntax: "{borgpatch}", Description: "its patch part"},
 	}
 }
+
+// Names lists every placeholder, sorted and without repeats, for error messages and
+// documentation. It is derived from All so the two cannot disagree.
+func Names() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range All() {
+		if seen[p.Name] {
+			continue
+		}
+		seen[p.Name] = true
+		out = append(out, p.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Write {{ and }} for a literal { and }. An unknown placeholder is an error, not a literal:
+// "{hostnmae}" fails rather than quietly becoming part of the name.
+//
+//borge:doc user
+//borge:help placeholders/braces
+//borge:about Values.Expand
+var _ = helpText
 
 // Expand substitutes the placeholders in text.
 //

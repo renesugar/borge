@@ -2,7 +2,7 @@
 
 Every place borge knowingly behaves differently from the pinned borg, and why.
 
-The rule (docs/PORTING_PLAN.md §0.5) is that the **on-disk format is binding** and
+The rule (plans/PORTING_PLAN.md §0.5) is that the **on-disk format is binding** and
 everything else is negotiable. So a divergence is only acceptable here if borg can
 still read what borge writes and borge can still read what borg writes. Each entry
 below says explicitly why that holds.
@@ -130,7 +130,7 @@ which is the part that is format-visible.
 
 ## 4. Cache and config directories are not shared
 
-**Stage 0 · `docs/PORTING_PLAN.md` §0.5 · by design**
+**Stage 0 · `plans/PORTING_PLAN.md` §0.5 · by design**
 
 borge uses `~/.cache/borge` and `~/.config/borge`, not borg's. Sharing them would let a
 borge bug damage a working borg installation, and the interop tests need the two tools

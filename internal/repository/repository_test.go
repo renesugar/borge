@@ -23,7 +23,7 @@ import (
 )
 
 // Unit tests that run without the borg venv. The pack writer's concurrency invariant is
-// the reason most of them exist: docs/PORTING_PLAN.md §16 calls a mistake there a race
+// the reason most of them exist: plans/PORTING_PLAN.md §16 calls a mistake there a race
 // that corrupts repositories under load and reproduces rarely, so it is pinned down
 // deliberately rather than left to chance.
 

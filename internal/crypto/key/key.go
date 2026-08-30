@@ -41,7 +41,7 @@
 // borg arrived at that separation after coupling them for years, and it is easy to
 // re-couple by accident, so nothing here derives one from the other.
 //
-// The MAC modes were built first, per docs/PORTING_PLAN.md §7: they exercise the whole
+// The MAC modes were built first, per plans/PORTING_PLAN.md §7: they exercise the whole
 // object and archive path with no crypto risk, so stage 3 could be interop-tested before
 // the AEAD modes landed.
 package key

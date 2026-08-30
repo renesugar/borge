@@ -136,6 +136,8 @@ func (a *Archive) Extract(opts ExtractOptions) (*ExtractStats, error) {
 		dest:      dest,
 		safeDirs:  map[string]bool{dest: true},
 		hardlinks: map[string]string{},
+		uids:      map[string]int{},
+		gids:      map[string]int{},
 		stats:     &ExtractStats{},
 	}
 
@@ -165,6 +167,22 @@ type extractor struct {
 	hardlinks map[string]string
 	// pendingDirs is the stack of directories whose attributes are still to be applied.
 	pendingDirs []*item.Item
+	// uids and gids cache name lookups, including the ones that fail.
+	//
+	// resolveOwner asked the system for a name on every item. os/user goes through cgo -
+	// getpwnam_r and getgrnam_r - and over the 118,866-file corpus of §12.1b that was
+	// 12.5 seconds, 21% of the extract, in a port whose design premise is that it needs
+	// no C. An archive holds a handful of distinct names however many files it has.
+	//
+	// Failures are cached too: a name that does not exist on this machine is the common
+	// case when restoring somebody else's backup, and looking it up 118,866 times to be
+	// told so each time is the same bug wearing a different hat.
+	//
+	// Unguarded maps, like safeDirs and hardlinks above: an extractor belongs to one
+	// goroutine. Parallelising extract (§12.5 step 3) has to deal with all three
+	// together, and guarding only this one would suggest the others were already safe.
+	uids map[string]int
+	gids map[string]int
 
 	stats *ExtractStats
 }
@@ -564,15 +582,23 @@ func (x *extractor) writeFile(it *item.Item, path string) error {
 	if err := x.restoreAttrsFd(f, path, it); err != nil {
 		return err
 	}
+	// The whole attribute sequence runs on the descriptor that is already open, in the
+	// order the path versions document: times, then flags, because the immutable flag
+	// makes every further change to the inode impossible.
+	//
+	// The times used to be set after the close, on the grounds that "writing updates
+	// mtime, so setting it while the file is still open and unflushed would be undone".
+	// That is not how Linux behaves - mtime is stamped in write(), not in close() - and
+	// the claim was measured before this changed. Doing it here saves the kernel a second
+	// walk of the path, and doing the flags here saves the openat, four fcntls and close
+	// that setFlags spent reopening a file that was still open a moment earlier.
+	if err := x.restoreTimesFd(f, it); err != nil {
+		return err
+	}
+	if err := x.restoreFlagsFd(f, it); err != nil {
+		return err
+	}
 	if err := f.Close(); err != nil {
-		return err
-	}
-	// Times are set after the file is closed: writing updates mtime, so setting it while
-	// the file is still open and unflushed would be undone.
-	if err := x.restoreTimes(path, it); err != nil {
-		return err
-	}
-	if err := x.restoreFlags(path, it); err != nil {
 		return err
 	}
 	return x.checkSize(it, written)

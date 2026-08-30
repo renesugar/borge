@@ -125,10 +125,27 @@ echo "mkbundle: running the coverage gates"
 TEST_TIMEOUT="${BORGE_BUNDLE_TIMEOUT:-180m}"
 
 echo "mkbundle: running tests (timeout $TEST_TIMEOUT per package)"
-{ go test -timeout "$TEST_TIMEOUT" ./... 2>&1 || echo "[go test exited $?]"; } > "$OUT/go-test.txt"
-# The second pass is nearly free: Go caches a package's successful test result, so this
-# re-reports the same outcome in machine-readable form rather than re-running it.
-{ go test -timeout "$TEST_TIMEOUT" -json ./... 2>&1 || true; }                 > "$OUT/go-test.json"
+# One run, two artifacts. This used to run the suite twice - once plain, once with -json -
+# because "the second pass is nearly free: Go caches a package's successful test result".
+# That was false. -json is not one of the flags Go treats as cacheable, so the second pass
+# re-ran everything: on this repository, internal/cli (4009s) and tests/interop (2169s) a
+# second time, about 75 minutes of a bundle spent re-deriving a result it already had.
+# Measured 2026-08-30, on the stage-9 bundle, by watching cli.test start over.
+#
+# So the JSON is the record now and the text is rendered from it rather than produced by a
+# second run. stderr goes to its own file: appending it to the JSON would leave a
+# .json that is not JSON, and the point of the machine-readable artifact is that a reader
+# can parse it without knowing what else the script decided to put there.
+go_status=0
+{ go test -timeout "$TEST_TIMEOUT" -json ./... > "$OUT/go-test.json" 2> "$OUT/go-test-stderr.txt"; } \
+    || go_status=$?
+python3 ./scripts/gotest-json-to-text.py < "$OUT/go-test.json" > "$OUT/go-test.txt"
+if [ "$go_status" -ne 0 ]; then
+    echo "[go test exited $go_status]" >> "$OUT/go-test.txt"
+fi
+if [ -s "$OUT/go-test-stderr.txt" ]; then
+    { echo; echo "--- stderr ---"; cat "$OUT/go-test-stderr.txt"; } >> "$OUT/go-test.txt"
+fi
 # -short for the race pass only: the differential corpora take minutes on their own and
 # far longer under -race, and they exercise no concurrency for -race to find. The full
 # (non-race) run above still covers them.

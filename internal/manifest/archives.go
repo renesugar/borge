@@ -201,6 +201,67 @@ func (a *Archives) Item(id []byte) (*item.ArchiveItem, error) {
 	return item.UnmarshalArchiveItem(data)
 }
 
+// helpText marks a declaration that exists only to carry user-facing documentation.
+//
+// The doc comment above such a declaration is help text and nothing else: docgen renders
+// it into "borge help", so a maintainer's note in it would be printed at a user. Notes
+// belong in the code below it.
+const helpText = "user-facing help text"
+
+// Commands that act on archives take a selector, as -a or --match-archives, or as a
+// positional archive name. A selector is one of:
+//
+//borge:doc user
+//borge:help match-archives/intro
+//borge:about applyMatch
+var _ = helpText
+
+// Selectors combine with the ordering and limiting options:
+//
+//	--sort-by KEYS   comma-separated: timestamp, name, id, host, user, tags
+//	--first N        the N oldest of what matched
+//	--last N         the N newest
+//	--reverse        reverse the order
+//	--deleted        act on soft-deleted archives instead of live ones
+//
+//borge:doc user
+//borge:help match-archives/filters
+//borge:about Archives.List
+var _ = helpText
+
+// Selector describes one archive selector for the documentation.
+type Selector struct {
+	// Syntax is what a user writes, with its argument: "aid:HEX".
+	Syntax string
+	// Prefix is the part applyMatch dispatches on, with its colon, or "" for a bare name.
+	Prefix string
+	// Description is the user-facing explanation, as "borge help match-archives" prints it.
+	Description string
+}
+
+// Selectors lists the archive selectors, in the order the documentation presents them:
+// the two that name an archive, then the one that identifies it, then the patterns and
+// the metadata filters.
+//
+// This is the source the help topic renders. TestSelectorsCoverApplyMatch checks it
+// against applyMatch in both directions, so a selector cannot be implemented without
+// appearing here and a line here cannot describe a selector nothing accepts.
+//
+//borge:enumerates archive-selectors
+func Selectors() []Selector {
+	return []Selector{
+		{"NAME", "", "an exact archive name. Names are not unique: several archives may share one, and the most recent match wins."},
+		{"name:NAME", "name:", "the same thing, written explicitly."},
+		{"id:NAME", "id:", "the same thing again, in the spelling the name-pattern styles use. A name with no style prefix is matched this way."},
+		{"aid:HEX", "aid:", "an archive id, or a unique prefix of one. This is the only selector that is guaranteed to name exactly one archive, which is why repo-list --short prints ids."},
+		{"sh:PATTERN", "sh:", "a shell-style pattern over the name: * crosses nothing, ** crosses everything, ? is one character, {a,b} alternates."},
+		{"re:PATTERN", "re:", "a regular expression over the name."},
+		{"tags:A,B", "tags:", "archives carrying all of these tags."},
+		{"user:NAME", "user:", "archives created by this user."},
+		{"host:NAME", "host:", "archives created on this host."},
+	}
+}
+
 // ListOptions filter and order a listing.
 type ListOptions struct {
 	// Match selects archives. Each entry is one of borg's selectors: "aid:<hex prefix>",

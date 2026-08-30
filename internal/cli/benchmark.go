@@ -668,7 +668,7 @@ func (b *cpuBench) encryption() error {
 
 	// The two AEAD suites borge implements. borg also benchmarks its borg 1.x
 	// encrypt-then-MAC modes; borge does not implement those at all - see
-	// docs/PORTING_PLAN.md 0.1 - so there is nothing to measure.
+	// plans/PORTING_PLAN.md 0.1 - so there is nothing to measure.
 	for _, t := range []struct {
 		spec  string
 		suite crypto.Suite

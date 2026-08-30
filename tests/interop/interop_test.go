@@ -2,7 +2,7 @@
 
 //go:build linux
 
-// Package interop is the stage 7 gate: the matrix in docs/PORTING_PLAN.md §10.
+// Package interop is the stage 7 gate: the matrix in plans/PORTING_PLAN.md §10.
 //
 // # What this is for
 //
@@ -27,8 +27,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/renesugar/borge/tests/harness"
 )
 
 // ---------------------------------------------------------------- harness
@@ -42,6 +45,18 @@ type tools struct {
 	configDir  string
 	cacheDir   string
 	passphrase string
+}
+
+// requireCurrentBinary fails the gate when bin/borge is older than the source it is built
+// from. The reasoning, and the run that made it necessary, are in harness.StaleBinary.
+//
+// It fails rather than skips. A skip here would be the same silence in a different
+// costume: the gate that protects borg-2 format compatibility must not be quietly absent.
+func requireCurrentBinary(t *testing.T, root string, built time.Time) {
+	t.Helper()
+	if why := harness.StaleBinary(root, built); why != "" {
+		t.Fatal(why)
+	}
 }
 
 func newTools(t *testing.T, encryption string) *tools {
@@ -58,9 +73,11 @@ func newTools(t *testing.T, encryption string) *tools {
 		t.Skip("borg 2 venv not built; run 'make borg2' to enable the interop gate")
 	}
 	borge := filepath.Join(root, "bin", "borge")
-	if _, err := os.Stat(borge); err != nil {
+	info, err := os.Stat(borge)
+	if err != nil {
 		t.Skipf("borge binary not built at %s; run 'make build'", borge)
 	}
+	requireCurrentBinary(t, root, info.ModTime())
 
 	base := t.TempDir()
 	tl := &tools{

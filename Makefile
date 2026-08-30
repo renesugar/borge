@@ -16,10 +16,20 @@ BORG2       := tests/borg2/borg2
 # exceed: they drive a Python borg over a pipe across a whole corpus, and under -race
 # several of them take longer than that on their own. The deadline still exists - a test
 # that hangs must fail rather than run forever - it is just set to fit the work.
-TIMEOUT     ?= -timeout 60m
+#
+# Raised from 60m on 2026-08-27. "go test ./..." runs packages in parallel, so internal/cli
+# forks borg while tests/interop is doing the same for forty minutes, and the two share the
+# machine. A full run killed internal/cli at exactly 60m0s, 43 seconds into a test that
+# takes about a minute - a deadline hit while making progress, which reads exactly like a
+# hang and is not one. The next full run measured internal/cli at 4062s (67.7 min), so 60m
+# was not marginal, it was short. The guard only distinguishes a hang from real work if it
+# leaves room for the work.
+TIMEOUT     ?= -timeout 120m
 
-.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage \
-        borg2 upstream-licenses msgpack-fixtures item-fixtures evidence clean help
+.PHONY: all build test race cover bench fmt vet lint check spdx layering interop coverage docaudit docgen doccheck doccalibrate docactionable \
+        borg2 upstream-licenses msgpack-fixtures item-fixtures evidence \
+        evidence-verify evidence-verify-full evidence-attest evidence-negative \
+        evidence-isos clean help
 
 all: check
 
@@ -29,7 +39,11 @@ build:
 	go build -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/borge
 
 ## test: run the unit tests
-test:
+##   Depends on build because tests/interop runs bin/borge rather than compiling it, so a
+##   stale binary makes the compatibility gate pass without testing the current source.
+##   That happened: on 2026-08-28 the suite reported "ok tests/interop (cached)" against a
+##   binary from 2026-08-21.
+test: build
 	go test $(TIMEOUT) ./...
 
 ## interop: run the stage 7 interoperability gate (needs 'make build' and 'make borg2')
@@ -70,16 +84,44 @@ lint:
 		echo "lint: golangci-lint not installed, skipping (go vet still runs via 'make vet')"; \
 	fi
 
+## docgen: regenerate the help topics from the anchored documentation
+docgen:
+	go run ./cmd/docgen -root .
+	gofmt -w internal/cli/help_generated.go
+
+## docaudit: report how the user-facing documentation is verified (ROADMAP R2)
+docaudit:
+	go run ./cmd/docaudit -root .
+
+## doccheck: ask a local model whether the code contradicts the documentation (advisory)
+##   Needs a llama.cpp server; see AGENTS.md. Never part of "check": the verdicts move
+##   when the model does, and a build cannot fail on that honestly.
+doccheck:
+	go run ./cmd/doccheck -root .
+
+## doccalibrate: score that model against the labelled cases from git. Run it first -
+##   an uncalibrated checker's silence means nothing.
+doccalibrate:
+	go run ./cmd/doccheck -root . -calibrate
+
+## docactionable: generate a command from each help topic and run it (advisory)
+##   Needs a llama.cpp server; see AGENTS.md. Prints the command the model derived from
+##   each topic and what running it did, plus the calibration score that says how much
+##   the report is worth. Never part of "check".
+docactionable:
+	BORGE_DOCCHECK_URL=$${BORGE_DOCCHECK_URL:-http://127.0.0.1:8081} \
+	go test ./internal/cli/ -run 'TestDocActionable' -count=1 -v $(TIMEOUT)
+
 ## spdx: check every Go file's license header (docs/LICENSING.md section 5)
 spdx:
 	./scripts/check-spdx.sh
 
-## layering: check that imports point downward (docs/PORTING_PLAN.md section 1)
+## layering: check that imports point downward (plans/PORTING_PLAN.md section 1)
 layering:
 	./scripts/check-layering.sh
 
 ## check: the gate - formatting, vet, lint, license headers, layering, tests
-check: fmtcheck vet lint spdx layering test
+check: fmtcheck vet lint spdx layering docaudit test
 	@echo "check: all green"
 
 .PHONY: fmtcheck
@@ -130,6 +172,28 @@ option-coverage: build
 evidence:
 	@if [ -z "$(STAGE)" ]; then echo "usage: make evidence STAGE=stage-N"; exit 64; fi
 	./tests/evidence/mkbundle.sh $(STAGE)
+
+## evidence-verify: verify external evidence ZIPs against evidence/manifest.json
+evidence-verify:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 scripts/verify-evidence.py
+
+## evidence-verify-full: verify, and require every attestation to be present and good
+evidence-verify-full:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 scripts/verify-evidence.py \
+		--require-attestations
+
+## evidence-attest: sign and RFC 3161 timestamp anything not yet attested
+evidence-attest:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 scripts/attest-evidence.py
+
+## evidence-negative: prove the verifier's attestation checks can fail
+evidence-negative:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 python3 \
+		tests/evidence/attestation-negative.py
+
+## evidence-isos: build and read back the reserve evidence ISO master
+evidence-isos:
+	./scripts/build-evidence-isos.sh
 
 ## clean: remove build and test output
 clean:

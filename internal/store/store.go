@@ -85,6 +85,13 @@ func New(backend Backend, config map[string]NamespaceConfig, cache Backend) (*St
 	}
 
 	s := &Store{backend: backend, cache: cache}
+	// The primary backend's objects are immutable and content-addressed, so it may keep
+	// files open between reads; see PosixFS.SetReadCache. The cache backend may not - its
+	// files are meant to appear and vanish underneath it, and a held descriptor would
+	// serve bytes from a file that had already been evicted.
+	if rc, ok := backend.(interface{ SetReadCache(bool) }); ok {
+		rc.SetReadCache(true)
+	}
 	for prefix, ns := range config {
 		if len(ns.Levels) == 0 {
 			return nil, fmt.Errorf("store: namespace %q must configure at least one nesting level", prefix)

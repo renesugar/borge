@@ -15,12 +15,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 )
 
 // PosixFS stores objects as files under a base directory.
 //
 // This is the backend every local repository uses, and the only one borge implements
-// so far - sftp, rest, s3 and rclone are stage 8 (docs/PORTING_PLAN.md §5).
+// so far - sftp, rest, s3 and rclone are stage 8 (plans/PORTING_PLAN.md §5).
 type PosixFS struct {
 	basePath string
 	opened   bool
@@ -31,14 +32,46 @@ type PosixFS struct {
 	doFsync bool
 
 	permissions Permissions
+
+	// readCache enables the open-handle cache; see SetReadCache.
+	readCache bool
+	// handles keeps recently read files open. See the note on Load.
+	handles   map[string]*os.File
+	handleAge []string
+	handleMu  sync.Mutex
 }
+
+// maxOpenHandles bounds the read cache.
+//
+// A repository has few packs and an extract reads them over and over, so a handful of
+// handles catches nearly everything; the bound is what keeps a listing of ten thousand
+// objects from holding ten thousand descriptors. Evicted handles are closed.
+const maxOpenHandles = 16
 
 // NewPosixFS returns a backend rooted at an absolute path.
 func NewPosixFS(path string, permissions Permissions) (*PosixFS, error) {
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("store: path must be absolute: %q", path)
 	}
-	return &PosixFS{basePath: filepath.Clean(path), permissions: permissions}, nil
+	return &PosixFS{
+		basePath:    filepath.Clean(path),
+		permissions: permissions,
+		handles:     map[string]*os.File{},
+	}, nil
+}
+
+// SetReadCache turns the open-handle cache on. Off by default; see openForRead.
+//
+// The caller is asserting that objects in this store are immutable and are removed only
+// through Delete and Move. That is true of a repository's own backend - objects are
+// content-addressed and written by rename - and false of the local writethrough cache,
+// whose whole job is to have files appear and vanish underneath it. Store.New turns it on
+// for the first and not the second.
+func (b *PosixFS) SetReadCache(on bool) {
+	if !on {
+		b.closeHandles()
+	}
+	b.readCache = on
 }
 
 // SetFsync turns fsync-before-rename on. See the doFsync field.
@@ -138,6 +171,7 @@ func (b *PosixFS) Close() error {
 		return ErrMustBeOpen
 	}
 	b.opened = false
+	b.closeHandles()
 	return nil
 }
 
@@ -154,27 +188,32 @@ func (b *PosixFS) Load(name string, offset, size int64) ([]byte, error) {
 		return nil, err
 	}
 
-	f, err := os.Open(path)
+	f, err := b.openForRead(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, &ObjectNotFoundError{Name: name}
 		}
 		return nil, fmt.Errorf("store: %w", err)
 	}
-	defer f.Close()
+	if !b.readCache {
+		// Not cached, so this handle is ours to close.
+		defer f.Close()
+	}
 
-	if offset != 0 {
-		whence := io.SeekStart
-		if offset < 0 {
-			// A negative offset counts back from the end, matching borgstore.
-			whence = io.SeekEnd
-		}
-		if _, err := f.Seek(offset, whence); err != nil {
+	start := offset
+	if offset < 0 {
+		// A negative offset counts back from the end, matching borgstore.
+		info, err := f.Stat()
+		if err != nil {
 			return nil, fmt.Errorf("store: %w", err)
+		}
+		start = info.Size() + offset
+		if start < 0 {
+			return nil, fmt.Errorf("store: offset %d is before the start of %s", offset, name)
 		}
 	}
 	if size < 0 {
-		data, err := io.ReadAll(f)
+		data, err := readAllFrom(f, start)
 		if err != nil {
 			return nil, fmt.Errorf("store: %w", err)
 		}
@@ -182,13 +221,126 @@ func (b *PosixFS) Load(name string, offset, size int64) ([]byte, error) {
 	}
 
 	data := make([]byte, size)
-	n, err := io.ReadFull(f, data)
+	n, err := readFullAt(f, data, start)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, fmt.Errorf("store: %w", err)
 	}
 	// A short read is not an error: the pack reader asks for a header-sized slice at
 	// the end of a pack and uses the short result as its signal for a clean EOF.
 	return data[:n], nil
+}
+
+// openForRead returns a cached handle for a path, opening it if necessary.
+//
+// # Why this cache exists
+//
+// Load opened and closed the file on every object read. An extract of the corpus in
+// §12.1b read 118,866 chunks out of a handful of packs, so the same few files were opened
+// 118,866 times - each costing an openat, four fcntls as Go's runtime registers and
+// deregisters the descriptor with its poller, and a close. `strace -c` counted three
+// openat per restored file where one is needed.
+//
+// It is also evidence for ROADMAP R0.1, which proposes sorting a restore by
+// (pack_id, obj_offset) so each pack is read once. Part of what that would buy is
+// available without touching the format: keep the pack open.
+//
+// # Why this is safe
+//
+// Reads go through ReadAt, so a shared handle carries no file position and two readers
+// cannot disturb each other. Objects are immutable once written - Store creates a
+// temporary file and renames it into place - so a cached descriptor for a name that is
+// replaced still refers to the bytes the reader asked for, which is the old file rather
+// than a torn new one. The names that *can* go away are dropped from the cache by Delete
+// and Move, and Close drops all of them.
+//
+// Every path that changes what a name refers to drops the handle first: Store before its
+// rename, Delete before its unlink, Move before both, and Close for all of them. That list
+// is exhaustive by construction rather than by argument - the first version of this reasoned
+// about which names could be rewritten, concluded a cached descriptor was harmless because
+// it would serve "the old file rather than a torn new one", and
+// TestReadCacheSeesAReplacedObject failed on exactly that.
+func (b *PosixFS) openForRead(path string) (*os.File, error) {
+	if !b.readCache {
+		return os.Open(path)
+	}
+	b.handleMu.Lock()
+	defer b.handleMu.Unlock()
+	if f, ok := b.handles[path]; ok {
+		return f, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(b.handleAge) >= maxOpenHandles {
+		oldest := b.handleAge[0]
+		b.handleAge = b.handleAge[1:]
+		if old, ok := b.handles[oldest]; ok {
+			old.Close()
+			delete(b.handles, oldest)
+		}
+	}
+	b.handles[path] = f
+	b.handleAge = append(b.handleAge, path)
+	return f, nil
+}
+
+// forgetHandle closes and drops a cached handle, for a name that is being removed or
+// renamed. Called with the path, not the object name.
+func (b *PosixFS) forgetHandle(path string) {
+	b.handleMu.Lock()
+	defer b.handleMu.Unlock()
+	f, ok := b.handles[path]
+	if !ok {
+		return
+	}
+	f.Close()
+	delete(b.handles, path)
+	for i, p := range b.handleAge {
+		if p == path {
+			b.handleAge = append(b.handleAge[:i], b.handleAge[i+1:]...)
+			break
+		}
+	}
+}
+
+// closeHandles drops every cached handle.
+func (b *PosixFS) closeHandles() {
+	b.handleMu.Lock()
+	defer b.handleMu.Unlock()
+	for _, f := range b.handles {
+		f.Close()
+	}
+	b.handles = map[string]*os.File{}
+	b.handleAge = nil
+}
+
+// readFullAt fills buf from offset, reporting how much it got.
+func readFullAt(f *os.File, buf []byte, offset int64) (int, error) {
+	n, err := f.ReadAt(buf, offset)
+	if errors.Is(err, io.EOF) && n > 0 {
+		// A short read at the end of a file is not an error to the caller; see Load.
+		return n, io.ErrUnexpectedEOF
+	}
+	return n, err
+}
+
+// readAllFrom reads to the end of the file from offset.
+func readAllFrom(f *os.File, offset int64) ([]byte, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := info.Size() - offset
+	if size <= 0 {
+		return []byte{}, nil
+	}
+	buf := make([]byte, size)
+	n, err := f.ReadAt(buf, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return buf[:n], nil
 }
 
 // Store writes an object.
@@ -230,6 +382,10 @@ func (b *PosixFS) Store(name string, value []byte) error {
 		return fmt.Errorf("store: %w", err)
 	}
 
+	// The rename swaps the inode, and a cached descriptor would go on serving the old
+	// one. Invalidating here rather than reasoning about which names can be rewritten:
+	// TestReadCacheSeesAReplacedObject failed when this was left to reasoning.
+	b.forgetHandle(path)
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("store: %w", err)
@@ -274,6 +430,8 @@ func (b *PosixFS) Delete(name string) error {
 	if err := b.permissions.check(name, "D"); err != nil {
 		return err
 	}
+	// Before the unlink, so no reader can pick the handle up in between.
+	b.forgetHandle(path)
 	if err := os.Remove(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &ObjectNotFoundError{Name: name}
@@ -310,6 +468,9 @@ func (b *PosixFS) Move(oldName, newName string) error {
 		return err
 	}
 
+	// Both names change identity here: the source goes away and the target is replaced.
+	b.forgetHandle(oldPath)
+	b.forgetHandle(newPath)
 	if err := os.Rename(oldPath, newPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("store: %w", err)

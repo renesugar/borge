@@ -307,7 +307,7 @@ func packSizing(opts Options) (maxCount, maxSize int) {
 	return maxCount, maxSize
 }
 
-// lookupEnv reads BORGE_<name>, falling back to BORG_<name> (docs/PORTING_PLAN.md §0.5).
+// lookupEnv reads BORGE_<name>, falling back to BORG_<name> (plans/PORTING_PLAN.md §0.5).
 func lookupEnv(name string) (string, bool) {
 	if v, ok := os.LookupEnv("BORGE_" + name); ok {
 		return v, true

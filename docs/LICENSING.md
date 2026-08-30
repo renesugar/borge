@@ -74,7 +74,7 @@ Two things are *not* derivative and carry no obligation:
 
 ## 4. Obligations `borge` must actually meet
 
-These are tracked as Stage 0 acceptance criteria in `docs/PORTING_PLAN.md`.
+These are tracked as Stage 0 acceptance criteria in `plans/PORTING_PLAN.md`.
 
 1. **Ship the upstream license texts.** `licenses/borg/LICENSE`,
    `licenses/borg/AUTHORS` and `licenses/restic/LICENSE` are committed verbatim and

@@ -87,6 +87,22 @@ func (fs *flagSet) Parse(args []string) error {
 	return err
 }
 
+// Options may come before or after the paths; both of these exclude the same thing:
+//
+//	borge create -r REPO --exclude 'sh:**/.cache' archive ~
+//	borge create -r REPO archive ~ --exclude 'sh:**/.cache'
+//
+// An argument that begins with a dash and is not one of the command's options is an error,
+// not a filename. A path that really does begin with a dash needs "--" to end the options:
+//
+//	borge create -r REPO archive -- ~/-weird-name
+//
+//borge:doc user
+//borge:help patterns/option-order
+//borge:claim patterns/option-order
+//borge:about permute
+var _ = helpText
+
 // permute returns args with the options ahead of the positionals.
 func permute(fs *flag.FlagSet, args []string) []string {
 	var opts, positional []string

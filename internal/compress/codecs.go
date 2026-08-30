@@ -17,6 +17,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 	"github.com/ulikunitz/xz"
+	"sync"
 )
 
 // ---------------------------------------------------------------------------- none
@@ -61,6 +62,29 @@ func (c LZ4) Compress(meta *Meta, data []byte) ([]byte, error) {
 	})
 }
 
+// lz4Compressors holds compressors between calls.
+//
+// lz4.Compressor is 136 KiB - a 128 KiB hash table and an 8 KiB in-use bitmap - and borge
+// built one per chunk. Over the 118,866-file corpus of §12.1b that was 16.1 GB allocated
+// in a single create, 91% of everything the run allocated, and it is what paid for 22.2
+// seconds of garbage collection, a quarter of the run.
+//
+// # Why this is safe
+//
+// CompressBlock calls the compressor's own reset before it does anything, precisely so a
+// compressor can be reused: "Zero out reused table to avoid non-deterministic output"
+// (pierrec/lz4 issue #65). The in-use bitmap exists to make that reset cheap. Reuse is the
+// arrangement the library is designed for, and TestLZ4PooledOutputMatchesFresh checks that
+// the bytes are identical either way.
+//
+// # Why a pool rather than one instance
+//
+// The chunker of §12.1a is reused as a single instance, which is correct only because the
+// write path is serial and is noted there as something step 2 must revisit. This does not
+// need revisiting: a pool hands each goroutine its own, so parallelising create changes
+// nothing here. LZ4 is a value type with no field to hang state on in any case.
+var lz4Compressors sync.Pool
+
 // attempt returns the LZ4 block, or nil when LZ4 did not shrink the input.
 func (LZ4) attempt(data []byte) ([]byte, error) {
 	if len(data) == 0 {
@@ -69,7 +93,11 @@ func (LZ4) attempt(data []byte) ([]byte, error) {
 		return nil, nil
 	}
 	buf := make([]byte, lz4.CompressBlockBound(len(data)))
-	var compressor lz4.Compressor
+	compressor, _ := lz4Compressors.Get().(*lz4.Compressor)
+	if compressor == nil {
+		compressor = new(lz4.Compressor)
+	}
+	defer lz4Compressors.Put(compressor)
 	n, err := compressor.CompressBlock(data, buf)
 	if err != nil {
 		return nil, fmt.Errorf("compress: lz4 compress failed: %w", err)
@@ -162,13 +190,48 @@ func (Zstd) EncodeLevel(level int) (uint8, error) {
 // DecodeLevel reverses EncodeLevel, reading the byte as a signed int8.
 func (Zstd) DecodeLevel(clevel uint8) int { return int(int8(clevel)) }
 
+// zstdEncoders holds one pool of encoders per level.
+//
+// §12.2 measured a fresh encoder per chunk at 183.7 MB/s against 871.8 for a reused one -
+// 4.7x, "the single largest win available and the cheapest to take" - and then it was not
+// taken, because the default compression is lz4 and the benchmark corpus never reached
+// this path. Found on the way into the create pipeline, where it would have been worse
+// still: klauspost's encoder starts goroutines when it is constructed, so a worker pool
+// would have been building and tearing them down per chunk on every worker.
+//
+// Keyed by level because an encoder is built for one. EncodeAll on a reused encoder is
+// safe for concurrent use, which is what makes a single pool per level correct rather than
+// one per goroutine.
+var zstdEncoders sync.Map // zstd.EncoderLevel -> *sync.Pool of *zstd.Encoder
+
+func zstdEncoderPool(level zstd.EncoderLevel) *sync.Pool {
+	if p, ok := zstdEncoders.Load(level); ok {
+		return p.(*sync.Pool)
+	}
+	p := &sync.Pool{New: func() any {
+		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
+		if err != nil {
+			// NewWriter only fails on a bad option, and the option is this level.
+			return err
+		}
+		return enc
+	}}
+	actual, _ := zstdEncoders.LoadOrStore(level, p)
+	return actual.(*sync.Pool)
+}
+
 func (c Zstd) Compress(meta *Meta, data []byte) ([]byte, error) {
 	return decideCompress(meta, c, data, func() ([]byte, error) {
-		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstdLevel(c.level)))
-		if err != nil {
+		level := zstdLevel(c.level)
+		pool := zstdEncoderPool(level)
+		got := pool.Get()
+		if err, isErr := got.(error); isErr {
 			return nil, fmt.Errorf("compress: zstd: %w", err)
 		}
-		defer enc.Close()
+		enc := got.(*zstd.Encoder)
+		// Returned rather than closed: Close releases the encoder's goroutines, which is
+		// the cost this pool exists to stop paying per chunk.
+		defer pool.Put(enc)
 		out := enc.EncodeAll(data, nil)
 		if len(out) >= len(data) {
 			return nil, nil

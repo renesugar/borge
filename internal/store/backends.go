@@ -37,7 +37,7 @@ func NewBackend(loc *location.Location) (Backend, error) {
 		// reading those is a §0.6 non-goal. Saying so by name beats a message that
 		// suggests waiting for a later release.
 		return nil, fmt.Errorf("store: %s names a borg 1.x repository, and borge does not read "+
-			"borg 1.x repositories (docs/PORTING_PLAN.md §0.6)", loc.Canonical())
+			"borg 1.x repositories (plans/PORTING_PLAN.md §0.6)", loc.Canonical())
 	case "rclone":
 		// The scheme is stripped and the rest handed over exactly as written: rclone's
 		// remote syntax is rclone's business (see NewRclone).

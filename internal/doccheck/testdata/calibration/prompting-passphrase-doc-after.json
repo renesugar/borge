@@ -1,0 +1,22 @@
+{
+  "id": "prompting-passphrase-doc-after",
+  "verdict": "supported",
+  "why": "The corrected text, against the same function.",
+  "claim": {
+    "commit": "094e7b44def97381eb6b2747caaaf2df54a922cb",
+    "file": "internal/cli/cli.go",
+    "first_line": 252,
+    "last_line": 258,
+    "text": "// passphrase is the passphrase to try first: one already typed at a prompt during this\n// command, otherwise the environment's.\n//\n// It does not prompt. Prompting happens on failure instead - see passphrase.go for why -\n// so this stays a plain lookup that every caller can make without deciding anything.\n//\n// borg also reads a file descriptor and runs a command to obtain a passphrase; borge does\n"
+  },
+  "code": [
+    {
+      "commit": "094e7b44def97381eb6b2747caaaf2df54a922cb",
+      "file": "internal/cli/cli.go",
+      "first_line": 258,
+      "last_line": 269,
+      "text": "// borg also reads a file descriptor and runs a command to obtain a passphrase; borge does\n// not do either yet.\nfunc (e *Env) passphrase() string {\n\tif e.prompted != nil {\n\t\treturn *e.prompted\n\t}\n\tif v, ok := e.lookupBorg(\"PASSPHRASE\"); ok {\n\t\treturn v\n\t}\n\treturn \"\"\n}\n\n"
+    }
+  ],
+  "unit": "Env.passphrase"
+}

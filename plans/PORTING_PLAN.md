@@ -1,7 +1,9 @@
 # borge — plan for porting `borg` to Go
 
-Status: **Stages 0-8 complete.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9's investigation is done (§12.1-12.5): the largest wins are pure Go and are borge's own bugs, and no cgo dependency is currently justified** - the work itself is not started. Stage 10 (format changes) is not started; §2.4 records what a `v1.0.0` tag would have to be accompanied by.**
-Last updated: 2026-08-17.
+Status: **Complete. All nine stages are done, and this plan is an archive.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9 closed 2026-08-29** (§12.6): create 5.5x and extract 4.2x faster than borg on the pathological corpus, one regression in create peak RSS that a pack-size knob bounds below borg, no cgo dependency taken, and the prediction of §12.2 confirmed - the largest wins were pure Go and were borge's own bugs. Stage 10 became ROADMAP R0 on 2026-08-27; §2.4 records what a `v1.0.0` tag would have to be accompanied by.
+
+**This file was archived to `plans/PORTING_PLAN.md` on 2026-08-29 and is no longer edited.** What to do next lives in [`ROADMAP.md`](../ROADMAP.md) and in `PLAN.md`; what is here is why the code is the shape it is, which is why so much of the source still cites it by section.
+Last updated: 2026-08-29.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
 the repo, and on the working habits that have actually caught bugs here. Read it before
@@ -10,6 +12,16 @@ touching anything; read this plan for why the code is the shape it is.
 This is the working plan. It is versioned in git alongside the code and is expected to
 be edited as facts are learned — when a stage's reality diverges from what is written
 here, the plan is wrong and gets fixed, not the record.
+
+**Scope, and where this plan ends.** This document owns the port itself: stages 0 through
+9, from an empty repository to a Go borge that reads and writes borg 2 repositories at a
+measured speed. It does not own work that only begins once the port is done. That work
+lives in [`ROADMAP.md`](../ROADMAP.md): format and indexing changes (R0, which was stage
+10 until 2026-08-27), evidence preservation (R1, whose design record is §2.5), the
+documentation system (R2, whose design record is §2.1), and the GUI (R3). When stage 9
+closes, this plan is archived in `plans/` and the current documents become `ROADMAP.md`
+plus a `PLAN.md` for the roadmap item being implemented. `AGENTS.md` describes that
+workflow.
 
 ---
 
@@ -96,7 +108,7 @@ domains). Environment variables are a judgment call and are treated in §0.5.
 ### 0.3 License
 
 Apache-2.0 for borge as a whole, with the upstream BSD notices preserved. Full
-analysis in [`LICENSING.md`](LICENSING.md). Settled; not revisited per stage.
+analysis in [`LICENSING.md`](../docs/LICENSING.md). Settled; not revisited per stage.
 
 ### 0.4 Language and dependency policy
 
@@ -132,7 +144,7 @@ analysis in [`LICENSING.md`](LICENSING.md). Settled; not revisited per stage.
   performance-critical. A drop-in substitute (e.g. `github.com/restic/chunker`, which
   is a *different* Rabin chunker with different parameters) would produce different
   chunk boundaries and destroy dedup compatibility. Substitutes get considered only
-  in Stage 10, when the format is allowed to change.
+  in ROADMAP R0, when the format is allowed to change.
 - **Every dependency addition is a commit of its own** with a one-line rationale in
   the message, so the dependency set stays auditable.
 
@@ -142,7 +154,7 @@ Three surfaces, and they are *not* equally binding:
 
 | Surface | Binding? | Rule |
 | --- | --- | --- |
-| On-disk format | **Hard** | Byte-for-byte until Stage 10. Interop gate enforces it. |
+| On-disk format | **Hard** | Byte-for-byte until ROADMAP R0. Interop gate enforces it. |
 | CLI (command names, options, output) | **Soft** | Match borg where it costs nothing; diverge where borg is awkward, and record every divergence in `docs/CLI_DIFFERENCES.md`. |
 | Environment variables | **Soft, dual-read** | borge reads `BORGE_*` first, then falls back to `BORG_*`. Both are documented. This avoids surprising a user who has `BORG_PASSPHRASE` exported, without squatting on borg's namespace. |
 
@@ -285,6 +297,12 @@ organised so that an interruption is cheap:
 
 ### 2.1 Doc anchors: tying help text to the code that implements it
 
+**Tracking moved 2026-08-24.** The design and the stage-8 findings stay here because they
+came out of the port. The unfinished implementation is non-porting documentation work and
+is now tracked in [`ROADMAP.md`](../ROADMAP.md) R2. The two documents must not maintain
+independent completion counts; the roadmap is the current tracker for the seven work items
+below.
+
 **The problem this solves.** Four documentation claims went false during stage 8 while the
 code around them was correct: the placeholders topic (twice, in opposite directions), the
 stage tracker, and `borge help environment` telling users that borge never prompts for a
@@ -366,26 +384,79 @@ drift, just in a new location. Testing the rendered text against golden files pi
 text *is*, not whether it is *true*. Colocation is the mechanism: it puts the user-visible
 sentence into the diff of the change that falsifies it.
 
-**Work items** (not started; sized deliberately so the first is useful alone):
+**Work items** (all seven done by 2026-08-28; sized deliberately so the first is useful
+alone, and each is annotated below with what it turned out to cost and find):
 
 1. **`docaudit`** — a read-only tool and a test. Parse anchors, report the three grades per
    topic, fail on a `//borge:help` naming a topic that does not exist and on a
    `//borge:claim` with no registered check. No generation yet. This alone makes the
    existing hand-written topics auditable and would have caught the prompting claim, because
    the sentence would have carried a claim id with no check behind it.
+
+   **Done 2026-08-27**, second of the seven, in `internal/docs` with `cmd/docaudit` and
+   `TestDocAuditIsClean`. Two things the design above did not anticipate. First, the
+   vocabulary needed a fifth directive: `//borge:checks` on the test, so that a claim and
+   its check each fail when the other disappears — a claim id alone cannot say where it is
+   verified. Second, and more useful, the first report was *flattering*: five topics each
+   anchored in one piece graded five-of-five "executed" and printed "unverified share: 0%"
+   over several thousand words nothing verifies. The audit now counts section anchors and
+   reports `topic-anchored-as-a-whole` where there are none. A measurement that reads as
+   reassurance while measuring almost nothing is worse than no measurement, and it took
+   running the tool on the real tree to see it.
 2. **`//borge:enumerates`** — convert the lists that are already checked ad hoc
    (environment variables, pattern styles, compression specs, placeholders,
    `TestHelpEnvironmentTopicListsEveryVariable` and `TestHelpTopicsCoverTheCode`) into
    generated fragments. Deletes those bespoke tests in favour of one mechanism.
+
+   **Done 2026-08-27**, third of the seven. "Deletes those bespoke tests" turned out to be
+   half right, and the half it got wrong is the useful part: generation removes the drift
+   between a *table and the text*, not between a table and the *code*. Which environment
+   variables borge reads can only be answered by the source, so that scan stays — it now
+   checks `cli.envVars` instead of the rendered topic. What the bespoke tests really were
+   is checks written in the wrong place, comparing the topic against a list inside the
+   test; each is now a check of the table against the behaviour, living beside the
+   behaviour: `patterns.Styles` against the pattern parser, `compress.SpecDocs` against
+   `parseSpec`, `placeholders.All` against the expander. `placeholders.Names()` was itself
+   a second list beside the expander's switch and is now derived from the documented
+   table.
 3. **`docgen --help`** plus per-topic templates and `TestDocsAreCurrent`; move the five
    topics out of `help.go` string constants and into anchored comments.
+
+   **Done 2026-08-27**, fourth of the seven. The mechanism works as designed; what the
+   design did not anticipate is that **gofmt edits doc comments**. It moves `//borge:`
+   directives to the end of a comment, which rules out a comment that is part rationale and
+   part user text - the two must be separate declarations. It rewrites a line starting with
+   `-`, `+` or `*` into a list, which silently changed the `--patterns-from` action
+   characters until the rendered output was compared. And it strips the indentation from a
+   code block that starts a comment, so a fragment of pure examples cannot carry its own
+   indentation. All three are recorded in AGENTS.md, because each is invisible until it has
+   already changed what a user reads.
+
+   The honest measurement arrived with the granularity: five whole-topic anchors reported
+   0% unverified; thirty-one fragments report 39%.
 4. **`docgen --api`** → `docs/INTERNALS.md`. Lowest value of the four: borge has no exported
    API — everything is under `internal/` — so this is maintainer documentation that
    `go doc ./internal/...` already serves. Do it last, or not at all.
+
+   **Decided 2026-08-27: not at all**, and the measurement backs the guess this item was
+   written on. 21 packages under `internal/`, all 21 carrying package comments, ~794
+   exported declarations already rendered by `go doc`; outside `internal/` there are three
+   `package main`s and nothing importable. The cross-package narrative a generator cannot
+   produce is already written — §1 here, `FORMAT.md`, `DIVERGENCES.md`, AGENTS.md's map of
+   the tree. The decision is enforced rather than recorded: `//borge:doc api` is now an
+   audit error that names it, because an audience nothing renders is exactly the silent
+   no-op §2.3 is about.
 5. **`doccheck`** — the contradiction pass of §2.1.1, over `//borge:doc user` blocks only.
    Build the five-case calibration set from git *first*, then the checker. Advisory output,
    not a gate. Worth doing after item 1 and independently of items 2–4: it needs the anchors
    for pairing, and nothing else.
+   **Done 2026-08-28**, sixth of the seven, in `internal/doccheck` with `cmd/doccheck`,
+   `make doccheck` and `make doccalibrate`. Building the set first is what paid: two of the
+   five cases §2.1.1 named never happened (see the correction there), a comment inside
+   `newFlagSet` had been false for nine days, and the checker's own first run over the tree
+   found no blocks at all because every user fragment sits on a carrier — closed by
+   `//borge:about`. **The 1.5B model fails the calibration**, 4 of 13 against a 5 of 13
+   constant-answer baseline, and the tool says so rather than emitting a confident silence.
 6. **`TestHelpExamplesRun`** — §2.1.2(a). **Done 2026-08-18**, first of the seven, in
    `internal/cli/help_examples_test.go`. 25 commands from the five topics: 23 run against a
    scratch repository, 2 are prose fragments marked unrunnable with the reason. It found
@@ -393,6 +464,13 @@ sentence into the diff of the change that falsifies it.
    the effort is in §2.1.2 below.
 7. **`docactionable`** — §2.1.2(b). Generate a command from each topic and run it. Advisory.
    Last, because it depends on item 6's scratch-repository harness for execution.
+   **Done 2026-08-28**, seventh of the seven, in `internal/cli/docactionable_test.go` with
+   `make docactionable`. It **passes** its calibration — 3 of 4 against a 2 of 4 baseline —
+   where item 5 fails its own: producing a command line from a manual page is much closer
+   to what a coding model does than judging entailment. Building the set found that two of
+   the three known-answer cases §2.1.2 names had stopped discriminating, because `permute`
+   fixed the flag-order defect that broke those commands; a labelled example can decay
+   because the *code* was corrected, and `TestActionableCasesStillDiscriminate` catches it.
 
 **Gate:** `docaudit` reports zero dangling anchors and zero orphan claims; every help topic
 has a grade breakdown recorded; and the unverified share is stated in the plan rather than
@@ -533,6 +611,14 @@ read" is not entailed by any code and never will be. Checking it produces perman
 *not determinable* noise that trains everyone to ignore the report. Only blocks marked
 `//borge:doc user` are checked; rationale stays unmarked and unchecked.
 
+**Which code a fragment is about has to be recorded** (added 2026-08-28). This section
+assumes the prose sits on the declaration that implements it. It mostly does not: gofmt
+relocates `//borge:` directives to the end of a doc comment, so user-facing fragments live
+on `var _ = helpText` carriers beside the code instead. `//borge:about Decl` names the
+function, the audit rejects a name nothing answers to, and it warns when a user fragment
+has neither. Without it `doccheck` had an empty target list and reported a clean tree by
+checking none of it.
+
 **Advisory, never a gate.** The check is non-deterministic and cannot fail a build
 honestly. It emits a triage list — claim, anchor, verdict, the reading that disagreed — for
 review by whoever is making the change, and by the human co-author. A *contradicted* verdict
@@ -552,6 +638,22 @@ whose silence means nothing. Stage 8 supplies real labelled cases, which is unus
 Run the checker against those five before trusting it on anything else. A version that
 cannot separate the before-and-after pairs is not ready, and the pairs are cheap to keep as
 a regression suite because they are recorded in git.
+
+> **Corrected 2026-08-28, when the set was built.** The placeholders rows above are not
+> real. `1a97426` *introduced* the placeholders topic; there is no text before it, and no
+> claim anywhere in the tree at `1a97426~1` that borge does not substitute. The table was
+> written from memory and nothing checked it — in a section arguing that unchecked prose
+> goes false, which is the joke this paragraph exists to record.
+>
+> What git does hold is better: `094e7b4` corrected the same false claim in **four** places
+> (the environment topic, `Env.passphrase`, `key.go`'s header, and a test's stated reason),
+> and `6d14209` corrected a claim about `--log-json` and `newFlagSet` that has nothing to do
+> with passphrases — which matters, because a set where every case is about prompting cannot
+> tell a checker from a checker that has learned one word. The set is thirteen cases:
+> five contradicted, five supported, three rationale. It lives in
+> `internal/doccheck/testdata/calibration`, is built by
+> `scripts/build-doccheck-calibration.py`, and every case is re-read from git by
+> `TestCalibrationMatchesGit` so that none can be edited into agreeing with the checker.
 
 **Honest limits.** An independent reading can share the author's wrong assumption and agree
 with a false claim — correlated error, not eliminated by any of the above. It cannot see
@@ -640,7 +742,7 @@ bundle's sha256, so a reader can pair the tag with the evidence without being th
 | --- | --- | --- |
 | `v0.8.0` | stage 8's gate | The borg-compatible feature set: 33 of borg's 36 commands, every remote backend, both evidence gates at zero unexplained gaps, and the interoperability gate green in both directions. The three commands not implemented — `mount`, `umount`, `webdav` — are §0.6 non-goals, not shortfalls |
 | `v0.9.0` | stage 9's gate | Performance work only (§12). No format change, no interface change: a repository written by 0.9.0 is one 0.8.0 and borg both read. The claim rests on the baseline numbers in the bundle, so the bundle must carry benchmark JSON |
-| `v1.0.0` | stage 10's gate | The first version that may write something borg cannot read (§13). **A tag is not enough to make this safe** — see below |
+| `v1.0.0` | the format gate | The first version that may write something borg cannot read (ROADMAP R0). **A tag is not enough to make this safe** — see below |
 
 **Rules that apply to all of them.**
 
@@ -658,7 +760,7 @@ bundle's sha256, so a reader can pair the tag with the evidence without being th
 - **Before 1.0.0, semver's 0.x rule applies**: no interface stability is promised, and the
   plan's §0.6 non-goals are not promises to keep either.
 
-**Why `v1.0.0` needs more than a tag.** If stage 10 changes the format, a version number in
+**Why `v1.0.0` needs more than a tag.** If ROADMAP R0 changes the format, a version number in
 git protects nobody: the *repository* has to announce it. Both tools refuse a repository
 whose stored version they do not know — borge's own message is `repository version %d is not
 supported` — so a format change must bump `config/version`, and that refusal must be
@@ -672,16 +774,67 @@ version 4 repository and fails somewhere worse than at the door.
 2. **Is the new format the default, or opt-in for a release?** Opt-in costs a flag and
    buys the ability to change one's mind; default-on makes the break sharp and legible.
 3. **What does borg actually do** when it meets the new version — a clean refusal, or
-   something worse? §13 must answer this with a measurement, in both directions, before
+   something worse? ROADMAP R0 must answer this with a measurement, in both directions, before
    the format lands.
-4. **Where do the evidence bundles live once the project is on GitHub?** They are outside
-   the repository today (`/home/renes/evidence/borge`) and are not in git. Either they
-   become release assets, or the tag's sha256 is the only link between a claim and its
-   evidence — which is enough to *verify* a bundle somebody has, and no help to somebody
-   who has none.
-5. **Are tags signed?** Unsigned tags are fine for a local repository and weak once a
-   project is public and its releases are backups people trust. Needs a key decision, not
-   a code decision.
+4. ~~**Where do the evidence bundles live once the project is on GitHub?**~~ **Partly
+   settled 2026-08-24.** The ZIPs remain outside git at
+   `/home/renes/evidence/borge`; every one, including failed superseded runs, is inventoried
+   by SHA-256 in `evidence/manifest.json`. A reserve ISO master on
+   `/media/renes/SEAGATE2TB` carries those ZIPs and a Git bundle of `v0.8.0` plus its
+   complete reachable history, so the commits they name are preserved before the first
+   GitHub push. The first master is
+   `borge-evidence-stages-0-8-20260825.iso` (4,714,496 bytes), SHA-256
+   `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01`.
+   That is preservation, not public availability: release assets or immutable object
+   storage remain a ROADMAP R1 item.
+5. ~~**Are tags signed?**~~ **Decision still required before the next release, but the
+   historical claim is settled.** No signing key is configured and the stage 0-8 ZIPs have
+   no contemporaneous signatures or RFC 3161 tokens. They are catalogued honestly as
+   retrospective and unsigned; generating a fresh anonymous key would add ceremony, not
+   identity. ROADMAP R1 owns the persistent-key and TSA-policy decision.
+
+### 2.5 Evidence preservation and optical masters — added 2026-08-24
+
+The stage bundles are evidence of engineering work and test results, **not evidence of a
+strict clean-room firewall**. This port read and translated borg source under its BSD
+license; `LICENSING.md` says so. Hashes demonstrate byte identity, signatures identify a
+key subject to key custody, and an RFC 3161 token binds a TSA assertion to a message
+imprint. None proves by itself that a test result is true or makes an artifact legally
+admissible. [`docs/EVIDENCE.md`](../docs/EVIDENCE.md) records the scope and authoritative sources.
+
+The preservation set created before the first GitHub push has three layers:
+
+1. `evidence/manifest.json` is checked into git and inventories all 18 historical ZIPs by
+   SHA-256, size, stage, commit, UTC creation time and disposition. Failed stage-7 and
+   stage-8 runs stay in the catalog; the clean successors are marked canonical.
+2. `scripts/verify-evidence.py` checks the outer bytes, ZIP CRCs, each internal manifest,
+   and `PROVENANCE.txt`. It rejects an unlisted ZIP by default, because an artifact that
+   falls between the directory and the catalog is exactly what the archive must expose.
+3. `scripts/build-evidence-isos.sh` creates a CD-sized ISO 9660/Rock Ridge master
+   containing the ZIPs, catalog, documentation and a Git bundle of the `v0.8.0` release
+   ref. It fixes image timestamps, extracts the finished ISO, verifies every payload hash,
+   and writes the ISO's own SHA-256 beside it. The sidecar is necessarily outside the image
+   whose bytes it hashes.
+
+The current collection is about 3 MB and fits one CD easily. The builder uses a
+650,000,000-byte ceiling and refuses an oversized collection; ZIPs are never split. When a
+future collection approaches the ceiling, partition it into numbered volumes and put the
+catalog plus Git bundle on each volume while they still fit.
+
+The first reserve master was built and extracted for readback on 2026-08-25 UTC at
+`/media/renes/SEAGATE2TB/borge-evidence-isos/borge-evidence-stages-0-8-20260825.iso`.
+It is 4,714,496 bytes and its SHA-256 is
+`913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01`.
+The sidecar and content listing are beside the image. The fixed `v0.8.0` Git ref prevents
+this after-the-fact documentation record from changing the preserved Git bundle.
+
+**What was not done at the original stage gates:** no ZIP was signed or timestamped when
+its stage closed, and no claim to a contemporaneous attestation is made. Signatures and
+RFC 3161 tokens were added on 2026-08-27 (ROADMAP R1) and every one of them is marked
+retrospective in the catalog; the ISO timestamp is likewise the date of preservation, not
+the date the tests ran. Physical CD-R copies, independent-location storage, burn/readback
+logs and public artifact hosting remain outside this plan — R1 and the roadmap's later
+maintenance own them.
 
 ## 3. Stage 0 — foundation
 
@@ -1009,7 +1162,7 @@ it is a filesystem, and it is where naive per-object I/O will show up first.
 > | one object-header read, cached | **115 µs** (**25×** faster) |
 >
 > **A single object write costs 2.7 seconds on this mount.** That is the number that
-> matters for stage 10, and it is far worse than the 5 ms per operation the simulated
+> matters for ROADMAP R0, and it is far worse than the 5 ms per operation the simulated
 > test assumed. It says the restore-side problem the whole project is aimed at is
 > dominated by *operation count*, not bandwidth: 118,866 files in one directory at
 > anything like this cost is hopeless no matter how fast the chunker is. Pack-oriented
@@ -1335,7 +1488,7 @@ of a borge-created archive matches the source tree under the strict comparator.
 
 ## 10. Stage 7 — the interoperability gate  ⭐
 
-**This is the gate the whole project turns on.** Nothing in Stage 10 starts until it
+**This is the gate the whole project turns on.** Nothing in ROADMAP R0 starts until it
 is green. It is automated in `tests/interop/` and re-run on every commit thereafter.
 
 The matrix, for each corpus × each key mode × each compression setting:
@@ -2161,20 +2314,25 @@ form of `--format` is ignored, but keys used in it are added" — with four alwa
 (`name`, `archive`, `id`, `time`) and nine optional. borge sent all thirteen every time,
 which happens to match borg for `repo-list`'s default format and matches nothing else.
 
-**The work that remains, in order:**
+**The work that remained, in order — all four closed during stage 8, and this list was
+left stale until stage 9 closed. Recorded rather than quietly struck through: a list
+headed "the work that remains" that no longer does is the same defect §2.1 is about,
+sitting in the section that argues for fixing it.**
 
-1. **`repo-info` and `info` onto borg's schema.** Both are structural rewrites rather than
-   added keys, and `info` needs `command_line`, `cwd` and `chunker_params` read back from
-   the archive metadata — which borge stores and does not currently read.
-2. **`version` and `analyze`.** `version` is the smallest: drop four keys or move them
-   somewhere that is not the API surface.
-3. **`--log-json`**, which is a whole feature rather than an option: structured log lines
-   with the message IDs `frontends.rst` documents. It is one of the 15 absent common
-   options and the only one that is part of the API.
-4. **The non-unicode rule is already half-ported.** `frontends.rst` describes how borg 2
-   represents a path that is not valid unicode; `internal/cli/pydump.go` reproduces exactly
-   that for `debug dump-*`. Whatever it does there is what the JSON commands must do, and
-   the two should share one implementation rather than agreeing by luck.
+1. ~~**`repo-info` and `info` onto borg's schema.**~~ **Done 2026-08-19.** `info` reads
+   `command_line`, `cwd`, `chunker_params` and `duration` back from the archive metadata it
+   was storing all along; see `infoArchiveJSON` and DIVERGENCES #42.
+2. ~~**`version` and `analyze`.**~~ **Done 2026-08-18.** `version --json` sends borg's two
+   keys, `client` and `server`.
+3. ~~**`--log-json`**~~ **Done 2026-08-19**, and extended to the three command *groups* on
+   2026-08-19 after the first version claimed a reach it did not have — see §12.1e's note
+   on the comment inside `newFlagSet`, which stayed wrong for nine days afterwards.
+4. ~~**The non-unicode rule is already half-ported.**~~ **Answered 2026-08-18, and the
+   answer was no.** The proposal here was to share one implementation between `debug
+   dump-*` and the JSON objects. Measuring borg shows the two genuinely differ - surrogate
+   escapes in one, `?` plus `_b64` in the other - so unifying them would have made borge
+   wrong in a way that matched neither. `jsonapi.go`'s `putText` records it: "What they
+   share is the question, not the answer."
 5. ~~**`original_size` and the stored `{size}`**~~ — **done 2026-08-18.** The stored figure
    counted the item metadata stream where borg's does not, and the reported one was sampled
    before the archive was saved. Both fixed and held by tests; the residual difference in
@@ -2975,6 +3133,23 @@ project brief singles out. The fix is a `Reset(io.Reader)` on the chunker so a B
 constructs one and reuses it. This is why the chunker rows report setup separately: borg's
 benchmark puts construction in the timeit setup and would never show it.
 
+> **Corrected 2026-08-28, when the fix was implemented and measured.** The diagnosis above
+> is right about the cost and wrong about the cause. Construction is dominated not by the
+> keyed tables but by `driver.init`'s backing buffer, which is allocated at exactly
+> `maxSize` - 8 MiB at the default `ChunkMaxExp` of 23 - and zeroed by Go. Measured on this
+> machine with `BenchmarkNewFastCDC` and `BenchmarkNewFastCDCSmallBuffer`, which differ
+> only in that maximum:
+>
+> | construction | time | allocated |
+> |---|---:|---:|
+> | default (8 MiB max chunk) | **2.85-3.06 ms** | 8,398,982 B |
+> | 64 KiB max chunk (tables only) | 0.09-0.14 ms | 75,841 B |
+>
+> So the tables are about 4% of it and the buffer is the rest. For the 118,866-file
+> directory that is **roughly 5.7 minutes**, not 3.5, and only about 12 seconds of it is
+> table derivation. The fix is the same fix - reuse keeps both - but the estimate above was
+> low and the reason it gave was the smaller half.
+
 **3. borge's zstd levels collapse.** `klauspost/compress` has four encoder levels against
 libzstd's twenty-two, so `zstd,16` and `zstd,22` produce identical output, as do `lzma,0`,
 `lzma,6` and `lzma,9`. Visible in the ratio column, which is why it is there:
@@ -2987,6 +3162,490 @@ DIVERGENCES #16.
 
 Two of these three are ordinary bugs with ordinary fixes; only the first is an argument for
 cgo. None were visible from the interop gate, which is the point of having stage 9 at all.
+
+### 12.1a Step 0 done 2026-08-28: the chunker is built once and reset
+
+`Chunker` gained `Reset(io.Reader)`; `archive.Builder` keeps one content chunker and resets
+it per file, `itemStream` keeps one across flushes, and `transfer`'s re-chunking goes
+through the same cache. The two `chunker.New` calls left in `benchmark.go` are deliberate:
+that command measures construction on purpose.
+
+Per 4 KiB file, on this machine:
+
+| | per call | throughput | allocated | allocs |
+|---|---:|---:|---:|---:|
+| a chunker per file (fastcdc) | 3.58-4.87 ms | 0.8-1.2 MB/s | 8,398,921 B | 8 |
+| one chunker reset (fastcdc) | **1.0-1.7 µs** | 2.6-4.0 GB/s | **48 B** | **1** |
+| a chunker per file (buzhash64) | 7.69 ms | 0.5 MB/s | 8,421,950 B | 22,509 |
+| one chunker reset (buzhash64) | **2.7 µs** | 1.5 GB/s | **48 B** | **1** |
+
+The ratio is not a speedup anyone will see end to end - it is the per-file *overhead*
+disappearing, and how much that matters depends on how much of a create is chunking. What
+is unambiguous is the allocation: 8.4 MB per file becomes 48 bytes, and buzhash64's 22,509
+allocations per file become one.
+
+**The correctness obligation, and how it is discharged.** A reset chunker must cut exactly
+where a fresh one would; if it did not, every archive written after this change would
+deduplicate against nothing that came before, and the interop gate would be comparing borge
+against a borge that no longer chunks like borg. `TestResetChunksIdentically` checks all
+four algorithms over an empty stream, one below the minimum chunk size, a run-heavy stream
+with few cut points, and 20 MiB of random data; `TestResetAfterAPartialReadStartsClean`
+covers the abandoned-read path. Both were checked by mutation - omitting any of `n`,
+`pending`, `eof`, `done` or `bytesRead` from `driver.reset` makes them fail. `pos` is the
+one field they do not pin, because both scan loops assign it before reading it; it is reset
+defensively and `driver.reset` says so rather than implying otherwise.
+
+**One thing this hands to step 2.** A chunker owns a buffer that `Next` returns by
+reference, so one cannot serve two goroutines. Reuse is correct now because the write path
+is serial. Pipelining `create` makes this one chunker per worker, and `Builder.contentChunker`
+carries that note so it is revisited rather than inherited.
+
+### 12.1b Step 1 done 2026-08-29: the first baseline, and where the time goes
+
+`tests/bench` runs both tools over one corpus and emits JSON: wall, user and system time,
+peak RSS per operation, repository size, and the timings each tool records for itself. It
+is the *minimum* §12 asks for - one scenario, warm cache - because a profile taken against
+a scenario nobody can re-run produces numbers nobody can check. `BORGE_BENCH=1` runs it;
+it is not in the suite.
+
+**The scenario is `deutsche-rezepte`**: 118,866 files in one directory, 190.5 MiB of
+content. Not the 479 MB `du` reports - that counts 4 KiB blocks, and at 1.6 kB average the
+files round up nearly threefold. Unencrypted, deliberately: AES-OCB is 17x behind borg
+because of a ceiling that is not borge's (§12.2, [golang/go#81029][go81029]), and measuring
+it here would swamp everything the write path does.
+
+| tool | op | wall | user | sys | peak RSS |
+|---|---|---:|---:|---:|---:|
+| **borge** | create | **93.4 s** | 72.7 s | 25.3 s | 378 MiB |
+| **borge** | extract | **82.4 s** | 44.4 s | 41.3 s | 70 MiB |
+| borg | create | 215.2 s | 203.3 s | 13.1 s | 248 MiB |
+| borg | extract | 183.9 s | 145.3 s | 37.3 s | 267 MiB |
+
+borge is **2.3x faster on create and 2.2x on extract**. Two caveats attach to that number
+before anyone quotes it. Run-to-run variance on this machine is about 10% (an earlier run
+of the same scenario gave 85.4 s and 72.4 s), so differences below that are not
+differences. And **borge's peak RSS on create exceeds borg's** - 378 MiB against 248 - which
+is the first measurement showing borge is the heavier of the two on the corpus that matters,
+and §12.3 wants memory bounded for the desktop and mobile goal.
+
+**Where borge's 93.4 s goes** (`BORGE_TESTONLY_CPUPROFILE`, added for this):
+
+| | | |
+|---|---:|---|
+| syscalls | 23.7 s (25%) | 118,866 files, each opened, read and closed |
+| **garbage collection** | **22.2 s (23.5%)** | see below |
+| sha256 | 10.9 s (11.5%) | chunk ids |
+| lz4 | 10.4 s (11%) | |
+| msgpack | 5.5 s (5.8%) | item metadata |
+
+**The statistic borge reports for chunking is not what it sounds like.** `create --json`
+gave `chunking_time: 34.478s`, 37% of the run - but `FastCDC.Next` is 9.5 s in the profile.
+The timer wraps `Next()`, and `Next()` pulls from the file, so the reads are inside it. The
+number is comparable with borg's, which is defined the same way, and it is not a measure of
+the chunking algorithm. Anyone tuning fastcdc on the strength of that 34 s would be tuning
+the wrong thing.
+
+**What the profile found, which is a bug and not a tuning question.**
+`compress.LZ4.attempt` allocated **16.1 GB in one create - 91% of everything the run
+allocated**. `lz4.Compressor` is 136 KiB (a 128 KiB hash table and an 8 KiB in-use bitmap)
+and borge constructs one per chunk: 118,866 x 136 KiB is 15.4 GiB, which is the profile's
+number. The library is built for reuse - the `inUse` bitmap exists so the table can be
+*reset* rather than reallocated - and that allocation is what pays for the 22.2 s of
+collection.
+
+Same shape as the chunker of §12.1a, in a different package, found the same way. It is the
+next fix, and it comes before step 2: an allocation of that size distorts every measurement
+taken while it stands.
+
+### 12.1c Step 1a done 2026-08-29: the lz4 compressor is pooled
+
+`compress.LZ4.attempt` built a 136 KiB `lz4.Compressor` per chunk. It now takes one from a
+`sync.Pool`.
+
+The library is designed for this: `CompressBlock` calls its own reset before anything else,
+with the comment *"Zero out reused table to avoid non-deterministic output"* (pierrec/lz4
+issue #65), and the in-use bitmap exists to make that reset cheap. A pool rather than one
+shared instance, because unlike §12.1a's chunker this then needs no revisiting when step 2
+parallelises - and `LZ4` is a value type with nowhere to keep state anyway.
+
+**Allocation, which is the number that does not depend on the machine:**
+
+| | before | after |
+|---|---:|---:|
+| `LZ4.attempt` | 16,142 MB | **242 MB** |
+| whole run | ~17.7 GB | ~1.9 GB |
+
+The 242 MB that remains is the output buffer, which is work rather than waste.
+
+**Time, with borg as the control.** borg's code did not change between these runs, so what
+it did change by is the machine:
+
+| | before | after | |
+|---|---:|---:|---|
+| borge create | 93.4 s | 34.6 s | 2.7x raw |
+| borg create | 215.2 s | 154.9 s | 1.39x — *nothing changed but the machine* |
+| borge/borg | 0.434 | 0.223 | **1.9x, normalised** |
+
+**So the honest figure is about 1.9x on create, not 2.7x.** A third of the raw improvement
+is the machine being in a better state for the second run, and only a same-run comparison
+sees that. Run-to-run variance here is much worse than the 10% §12.1b estimated: borg alone
+moved 39%.
+
+**And extract did not improve at all.** Its borge/borg ratio went 0.448 to 0.475 - slightly
+*worse*, which is noise either way. The raw numbers say 82.4 s to 67.6 s and would have
+been reported as a win by anyone not holding a control. Decompression never touches
+`lz4.Compressor`, so there was no reason to expect one; the absence is the confirmation
+that the control is working rather than a disappointment.
+
+**In the profile**, garbage collection went from 22.2 s (23.5% of the run) to about 1.3 s,
+and the top is now syscalls 12.2 s (30%), sha256 8.2 s (20%) and lz4 itself 4.3 s (11%) -
+real work, in proportions that suit 118,866 small files.
+
+**One earlier reading is now corrected.** §12.1b said the reported `chunking_time` of
+34.5 s was dominated by the reads inside `Next()`. It was mostly garbage collection: with
+the allocation gone the same statistic reads **2.0 s**, and the chunker was never touched.
+Go charges collection assists to the goroutine that allocates and background marking steals
+from everyone, so time the statistic attributed to chunking belonged to the collector. The
+reads are still inside that timer - that part was right - but they are a small part of it.
+
+### 12.1d Step 3, first part, 2026-08-29: extract stopped calling C once per file
+
+Profiling extract - the slower half after steps 0-1a - put **`runtime.cgocall` at 20.7%**,
+and `pprof -peek` named it: `os/user._Cfunc_mygetgrnam_r`, **12.5 seconds** of
+`getgrnam_r`. `extractor.resolveOwner` asked the system to resolve the stored user and
+group *names* on every item, and the corpus has 118,866 items and about two distinct names.
+
+**This is worth more than its seconds, because it contradicts something §12.3 says.** That
+section argues borge is cgo-free and offers `CGO_ENABLED=0 go build ./...` as the evidence.
+The build does succeed - but `os/user` uses cgo when it is available, so the binary anyone
+actually ships was spending a fifth of every extract inside C. "It can be built without
+cgo" and "it does not use cgo" are different claims, and only the first was ever checked.
+§12.3's conclusion survives; its evidence needed this correction.
+
+The fix is the cache `safeDirs` already demonstrates two fields above - once per extraction
+rather than once per item - and it caches failures as firmly as hits, because restoring
+another machine's archive is the case where most names do not resolve and is exactly where
+an uncached lookup costs most.
+
+| | before | after | |
+|---|---:|---:|---|
+| borge extract | 67.6 s | 53.4 s | 1.27x raw |
+| borg extract | 142.4 s | 136.7 s | 1.04x — the control, well behaved this time |
+| borge/borg | 0.475 | 0.391 | **1.22x, normalised** |
+
+User time fell 36.4 s to 27.0 s, which is 9.4 s against the 12.5 s the profile attributed
+to cgo - consistent, given profiling overhead and that the two runs are not the same run.
+create's ratio stayed put (0.223 to 0.227), which is the check that matters here: a change
+to extract that moved create would have meant the measurement was drifting rather than the
+code improving.
+
+**What extract is now**: 53.4 s, of which 29.2 s is system time - 118,866 files, each
+created, written, closed, and given its mode, times and ownership. That is the wall
+ROADMAP R0.1 item 1 predicts, and it is now the largest thing left in the restore path.
+Two of my three predictions before profiling were wrong, which is worth recording: there
+was **no** third allocation bug, and **no** evidence of repeated pack reads, so the
+sort-by-`(pack_id, obj_offset)` idea R0.1 proposes has no support from this measurement
+yet. It is not refuted either; nothing here looked for it.
+
+### 12.1e Extract keeps the pack open, and the harness stopped flattering borg
+
+**`strace -c` on an extract counted three `openat` per restored file where one is needed**,
+and eight `fcntl`. Tracing the sequence named all three: the output file, **the pack -
+reopened for every chunk** - and the output file again for `ioctl(FS_IOC_GETFLAGS)`. Each
+open also costs four `fcntl`s while Go registers and deregisters the descriptor with its
+poller.
+
+`PosixFS.Load` opened and closed on every object read: 118,866 opens of a handful of packs.
+It now keeps a bounded cache of handles and reads with `ReadAt`, which carries no file
+position and is therefore safe to share.
+
+| | before | after | |
+|---|---:|---:|---|
+| borge extract | 53.4 s | **45.8 s** | |
+| borg extract | 136.7 s | 136.4 s | control |
+| borge/borg | 0.391 | 0.336 | **1.16x normalised** |
+
+**This is evidence for ROADMAP R0.1.** That item proposes sorting a restore by
+`(pack_id, obj_offset)` so each pack is read once - which needs format work. A large part
+of what that would buy is available by keeping the pack open, and does not. R0 has that
+much less to justify.
+
+**Two things the tests caught that the code comments had argued away.** The first version
+cached handles unconditionally and `TestWritethroughCache` failed at once: the local cache
+has files removed behind the backend by design, and a held descriptor kept answering. Hence
+`SetReadCache`, off by default, on only for the primary backend. The second version
+reasoned that a handle held across a rewrite was harmless because it would serve "the old
+file rather than a torn new one"; `TestReadCacheSeesAReplacedObject`, written to check
+exactly that, failed. Every path that changes what a name refers to now drops the handle
+first, and the comment says that list is exhaustive by construction rather than by
+argument.
+
+#### The harness was flattering borg, and a "regression" that was not one
+
+The first measurement after this change showed create at 55.3 s against 35.3 - a 57%
+regression - while borg stayed flat. I called it real on that basis. It was not: three
+back-to-back creates measured **35.3, 34.8 and 34.1 s**, and the profile showed
+`store.Load` nowhere near create's path.
+
+The reasoning was the error. borg runs *later in the same invocation*, so a transient load
+early in a run hits borge and spares borg entirely. A same-run control catches drift
+*between* runs and cannot catch a disturbance *within* one, which is a weaker guarantee
+than the one §12.1c claimed for it.
+
+Fixing that exposed a real defect underneath. **The harness always ran borge first**, so
+the first tool faulted the corpus into the page cache and every later tool inherited it
+warm. Cold against warm is worth about 20 s here, so this was never negligible, and every
+ratio the harness produced was mildly in borg's favour. `warmCorpus` now reads the corpus
+before anything is measured - 190.5 MiB in 5.9 s, which is the cost that used to be
+absorbed silently - and the tool order is recorded in the JSON so two result files can be
+compared knowing whether they were measured the same way.
+
+The allocation figures elsewhere in §12 are unaffected: they do not depend on timing. The
+timing ratios quoted before this section were measured unwarmed and are slightly generous
+to borg.
+
+### 12.1f One descriptor per restored file, and what that did not buy
+
+`strace` had counted three `openat` per restored file. The second was the pack, fixed by
+§12.1e. The third was `setFlags`, reopening the file that `writeFile` had closed a moment
+earlier purely to read and write its flags - an `openat`, four `fcntl`s and a `close` each
+time.
+
+The obstacle was a comment saying the times had to be set after the close, because "writing
+updates mtime, so setting it while the file is still open and unflushed would be undone".
+**That is not true.** Linux stamps mtime in `write()`, not in `close()`; times set on an
+open descriptor survive it, which was measured before anything changed. The other unstated
+assumption - that `FS_IOC_GETFLAGS` and `FS_IOC_SETFLAGS` need a read-only descriptor - was
+checked too, and they work on the `O_WRONLY` one `writeFile` already holds.
+
+So the whole sequence now runs on one descriptor: write, chown, chmod, times, flags, close.
+The ordering that *is* real is kept - flags strictly last, because the immutable flag makes
+every further change to the inode impossible - and is now enforced where it is documented.
+
+| per restored file | before | after |
+|---|---:|---:|
+| `openat` | 3.0 | **1.0** |
+| `close` | 3.0 | **1.0** |
+| `fcntl` | 8.0 | **4.0** |
+| `lseek` | 1.0 | 0 (now `pread64`) |
+
+One `openat` per file remains: the output file, which is irreducible.
+
+| | before | after | |
+|---|---:|---:|---|
+| borge extract | 45.8 s | 42.6 s | |
+| borg extract | 136.4 s | 135.1 s | control |
+| borge/borg | 0.336 | 0.315 | **1.065x normalised** |
+| system time | 24.9 s | 22.0 s | |
+
+**The interesting part is how little that was.** About 1.07 million syscalls disappeared and
+roughly three seconds came back. Syscall *count* was not what dominated extract; the
+remaining 22 s of system time is the kernel genuinely creating, writing and stamping 118,866
+files.
+
+**That is a caution for ROADMAP R0.1.** If per-file syscall overhead were the wall, the
+deferred-metadata and batching ideas that item proposes would be promising. This measurement
+says the wall is the work itself, so they should be expected to buy less than the item
+assumes. One dimension has been measured, not all of them - read *order* still has not been
+looked at - but the cheap-overhead theory of large-directory restore now has evidence
+against it rather than merely no evidence for it.
+
+**One lead deliberately not taken.** `newfstatat` stays at one per file, 118,878 of 118,899
+of them failing. It is what makes `--continue` able to skip an already-extracted item, and
+what removes a pre-existing entry before `O_CREATE|O_TRUNC` runs - without it an existing
+*symlink* at the target would be followed and written through. That is a security property,
+and one ENOENT on a cached dentry is the right price for it.
+
+### 12.1g Peak RSS: what it is made of, and the knob that already bounds it
+
+borge's peak RSS on create was the one number where borg won - 409 MiB against 246 - and
+§12.3 wants it bounded for the desktop and mobile goal. Measured rather than guessed.
+
+**It is the Go heap, and it is pack buffering.** `gctrace=1` puts the live heap peak at
+163 MB with a collector goal of 327 MB, which is what a 409 MiB resident set is made of.
+Sweeping `BORGE_PACK_MAX_SIZE` over the corpus of §12.1b:
+
+| pack size | peak RSS | wall |
+|---:|---:|---:|
+| 50 MB (the default, and borg's) | 383 MB | 36.6 s |
+| 8 MB | 307 MB | 34.8 s |
+| 2 MB | **244 MB** | 35.4 s |
+
+RSS tracks pack size and wall time does not move. **At 2 MB packs borge sits below borg**,
+so the metric borge loses on is a tuning default rather than a structural deficit, and the
+knob §12.3 says a phone needs is already there and works.
+
+The default stays at 50 MB because it is borg's. Diverging on repository layout to win a
+benchmark would trade interoperability for a number.
+
+**One copy removed - and then put back, because it did nothing.** `storePack` held every
+chunk's buffer *and* the assembled pack across the `Store` call, and releasing the buffers
+as they were copied looked like it cut peak RSS from 409 MiB to 337.
+
+**It did not.** That was two unpaired runs, and the effect is inside this machine's noise.
+Measured properly - two binaries differing only in that loop, run interleaved, eight pairs,
+on an idle machine (the desktop's browser and system monitor closed for it):
+
+| | mean difference | sd | direction |
+|---|---:|---:|---|
+| wall time | -0.10 s | 0.42 | 7 of 8 negative |
+| peak RSS | -5 MB | 24 | 5 of 8 negative |
+
+Neither is a difference. The same binary spans 335-385 MB across repetitions, so a 70 MB
+before-and-after was measuring the machine.
+
+The likely reason it changes nothing is Go's liveness analysis: `pieces` is last read in the
+results loop, which runs *before* the `Store`, so the collector already treats those buffers
+as dead there. Telling it so explicitly told it what it had worked out.
+
+So the code is reverted. What is kept is the measurement, and the method: **an unpaired
+before-and-after cannot see an effect smaller than this machine's run-to-run spread**, which
+is about 50 MB for RSS and about 0.5 s for wall time on this workload. The pack-size sweep
+elsewhere in this section survives that standard - 383/307/244 MB across a 25x change in
+`BORGE_PACK_MAX_SIZE` is far outside the spread - but a lone 70 MB delta does not.
+
+**This also settles the wall-time question §12.1g left open.** It was owed a quiet-machine
+measurement; it got one, and the answer is that the change cost nothing because the change
+did nothing.
+
+### 12.1h Step 2 done 2026-08-29: a create pipeline that mostly declines to run
+
+`internal/archive/pipeline.go` spreads the per-chunk work - the id hash and
+`repoobj.Format`, which is compression and encryption - over a worker pool. Cutting stays
+serial because the chunker is stateful, and the tail stays serial and in chunk order
+because the dedup check, the pack append and the index all touch state shared across the
+archive.
+
+**The result is two-sided, and quoting one side would be a lie by omission.** Measured on
+one binary with `BORGE_CREATE_WORKERS`, back to back:
+
+| corpus | wall | CPU | |
+|---|---:|---:|---|
+| 118,866 files averaging 1.6 kB | 1.07x | 1.52x | a bad trade |
+| one 1.2 GB file, 2 MB chunks | ~1.6x | 1.20x | a good one |
+
+**Chunk size decides it.** Hashing 1.6 kB takes microseconds, about what the channel
+handover, the scheduling and the mandatory copy cost, so per-chunk overhead swamps
+per-chunk work; at 2 MB the overhead disappears into real work. So the pool runs only for
+files of at least 8 MiB (`pipelineMinFileSize`), and the small-file corpus is back on the
+serial path - 39.4 s against 38.1 s serial, CPU 33.9 against 32.7, RSS unchanged - where
+always-on had cost 58.9 s, 60.3 s of CPU and 50 MB more resident.
+
+The threshold is conservative and **its crossover is not measured**. Two extremes were; the
+point between them was not. Eight MiB is four default chunks, enough to fill the workers
+once, and it errs towards the serial path because that is the side that costs nothing when
+the guess is wrong.
+
+**Two workers, and two withdrawn claims.** The first sweep sampled 1, 4 and 8 workers,
+reported 1.69x, and explained the shape by contention - four physical cores saturated by
+the workers plus the cutting goroutine and the collector. Asked whether two might beat four
+on this CPU, both the figure and the explanation turned out to be unsupported. Sweeping 1,
+2, 3, 4 and 6 on a 1.2 GB create, twice:
+
+| workers | run 1 | run 2 | peak RSS (run 2) |
+|---:|---:|---:|---:|
+| 1 | 1.00x | 1.00x | 243 MB |
+| 2 | 1.57x | 1.64x | 356 MB |
+| 3 | 1.59x | 1.51x | 386 MB |
+| 4 | 1.35x | 1.60x | 429 MB |
+| 6 | 1.17x | 1.59x | 491 MB |
+
+The honest figure is about **1.6x**, and it arrives at two workers. Run 1 alone fits the
+contention story; run 2 puts four and six back at 1.6x, so the differences among 2, 3, 4
+and 6 are inside this machine's noise. It was an explanation satisfying enough to stop
+questioning, which is why it needed a second sweep rather than a better paragraph.
+
+What survives both sweeps is narrower and enough: one worker to two is a large, repeatable
+step; nothing past two adds measurable time; and **RSS climbs monotonically with every
+worker**, because memory hardly moves with machine load while wall time does. So two is the
+default because more buys no measurable time and costs measurable memory - a reason that
+holds where §12.3 needs it to, on a phone, where memory and battery are the binding
+constraints, whereas "four cores are saturated" would have been a claim about this laptop
+generalised without evidence. `BORGE_CREATE_WORKERS` is the knob, and the default is
+documented as measured on this i5-9300H rather than as a scaling rule extrapolated from one
+machine - which is how a plausible constant becomes a permanent wrong default on hardware
+nobody tested.
+
+**The deeper mistake was sampling rather than measuring.** Choosing points that bracket the
+answer is a different discipline from measuring them carefully, and the first attempt did
+the second while skipping the first.
+
+**Why chunk order is kept.** A first draft justified it as preserving a byte-reproducible
+repository. That was wrong, and is corrected here rather than quietly: two *serial* creates
+of the same tree already produce different pack names, because the archive's metadata
+carries timestamps and its chunks share packs with file chunks. Order matters for a sharper
+reason - a file's chunk list *is* the file, and extraction concatenates in list order, so a
+list out of order restores a corrupted file from a set of chunk ids that every integrity
+check accepts.
+
+`Chunker.Next` returns a slice aliasing its own buffer, valid only until the next call, so
+every chunk is copied before handover. That is noise in time and `workers x depth` chunks in
+memory, which is why the queue depth is two.
+
+What makes the concurrency safe was already there, and predates the pipeline: `IDHash` is
+pure, the AEAD nonce counter is mutex-guarded with the cipher outside the lock and its
+comment names a worker pool as the reason, and both compressors are pooled - with race
+tests, because a compressor per call was the bug that made them pools (§12.1c, and the zstd
+encoders §12.2 had flagged a week earlier).
+
+Tests: identical chunk lists between serial and pooled across sizes chosen for fewer chunks
+than workers, more, and evenly divisible, at 2, 3 and 8 workers under `-race`; extracted
+trees identical to each other and to the source; a chunker error mid-file propagating rather
+than truncating the archive silently; and the adaptive rule itself.
+
+### 12.1i AES-OCB measured for [golang/go#81029][go81029], 2026-08-29
+
+§12.5 step 1 owed the issue a number from a real workload, on the grounds that its own
+reproducer understates what a mode implementation pays. It does. Everything below is one
+machine, an idle i5-9300H, same 1 GiB or same 854 MB corpus.
+
+**The isolated encryption benchmark**, each tool's own `benchmark cpu`:
+
+| mode | borge | borg (OpenSSL) | borge vs borg |
+|---|---:|---:|---:|
+| **aes-256-ocb** | **46.0 MB/s** | **881.6 MB/s** | **19.2x slower** |
+| chacha20-poly1305 | 260.2 MB/s | 447.9 MB/s | 1.7x slower |
+
+**The inversion is the finding, not the ratio.** In borg, and in any implementation with
+multi-block AES, OCB is the *fast* mode - 881.6 against ChaCha's 447.9, nearly 2x ahead. In
+borge it is 5.7x *slower* than ChaCha. The mode that should win on AES-NI hardware loses,
+and it loses inside a single Go binary where the only structural difference is that
+ChaCha20-Poly1305 is assembly end to end while OCB is built on `cipher.Block`. That
+controls for language, runtime, framing code, corpus and CPU in a way no cross-tool
+comparison can.
+
+**It is worse than the API ceiling itself.** §12.2 measured a bare `cipher.Block.Encrypt` at
+103.6 ns per 16-byte block, about 154 MB/s. borge's OCB reaches 46, a third of that, because
+a real mode also pays offset arithmetic and two XORs per block - work that the same
+pipelining would amortise and that the issue's loop does not include. Stdlib AES-GCM manages
+560 MB/s on the same CPU with its own private multi-block assembly, which is what shows the
+hardware is not the limit and the capability already exists in the standard library, out of
+reach behind the public interface.
+
+**In a real create**, 854 MB of incompressible data, `-C none`, comparing the two AEAD modes
+- which share HMAC-SHA-256 chunk ids, so only the cipher differs:
+
+| | AES-OCB | ChaCha20-Poly1305 | difference |
+|---|---:|---:|---:|
+| wall | 19.1 s | 16.6 s | +2.5 s (1.15x) |
+| CPU | 52.3 s | 35.2 s | **+17.1 s (1.49x)** |
+
+The isolated figures predict 15.3 s of extra CPU for that corpus; 17.1 s was measured, an
+agreement within 12%. So the 46 MB/s is not an artifact of a microbenchmark - it is
+seventeen seconds of real CPU in a backup of under a gigabyte.
+
+**And note which number is masked.** The create pipeline's two workers and the overlap with
+I/O hide most of the cost in elapsed time, +15%, while the CPU cost is +49%. On a server
+that is a modest slowdown; on the laptop and phone §12.3 is aimed at, CPU is battery and
+heat, and the mode borg defaults to is the one that costs it.
+
+**A confound worth recording, because it nearly went in as a result.** The first pass
+compared each mode against `none-sha256` and produced "OCB costs 10%, implied throughput
+490 MB/s". That baseline is wrong: `none-sha256` uses unkeyed plain SHA-256 for chunk ids
+while both AEAD modes use HMAC-SHA-256, so the comparison mixed a cipher difference with a
+hash difference - which is also why ChaCha appeared to use *less* CPU than the unencrypted
+mode. Comparing the two AEAD modes against each other is the controlled experiment, and it
+is the one above.
 
 ### 12.2 Can borge be fast without cgo? Measured 2026-08-17
 
@@ -3002,6 +3661,33 @@ described in each row.
 | a fresh chunker per file | 1.75–4.35 ms per file | `Reset(io.Reader)` | no |
 | OCB's byte-at-a-time XOR | 50.2 → 72.6 MB/s (1.45x) | `crypto/subtle.XORBytes` | no |
 | OCB's per-call AES ceiling | capped at ~154 MB/s | batched AES | no, but needs assembly |
+
+> **Taken 2026-08-29, a week later than it should have been.** The encoders are pooled per
+> level and the measurement is below. It went unfixed while three smaller findings around
+> it were fixed, because the default compression is lz4 and every benchmark run in Stage 9
+> went straight past this path. A finding recorded in a plan but not exercised by the
+> benchmark corpus is one nobody trips over a second time; the harness covering a single
+> compression mode is the gap, and it is worth closing before the next such claim.
+>
+> Measured here on a 2 MiB semi-compressible buffer:
+>
+> | | fresh per chunk | pooled |
+> |---|---:|---:|
+> | time | 15.0 ms | **5.0 ms** |
+> | throughput | 139.8 MB/s | **420.1 MB/s** |
+> | allocated | 27.7 MB | **4.9 MB** |
+> | allocations | 49 | 12 |
+>
+> **3.0x, not the 4.7x predicted below** - different data and a busier machine, so the
+> direction and the order of magnitude carry over and the exact ratio does not. It changes
+> nothing in the Stage 9 create numbers, which all use the default lz4. It matters for
+> anyone running `-C zstd`, and it matters more for ROADMAP R0 item 3, which proposes
+> making zstd the default and would have walked straight into it.
+>
+> It would also have been worse under the create pipeline of step 2, not better:
+> klauspost's encoder starts goroutines when it is constructed, so a worker pool would have
+> been building and tearing them down per chunk on every worker - and the result would have
+> read as "parallelism does not help much" rather than as a bug underneath it.
 
 **1. `compress.Zstd.Compress` calls `zstd.NewWriter` on every chunk.** A klauspost encoder
 allocates window buffers and starts goroutines at construction; the library is designed to
@@ -3030,6 +3716,23 @@ library does not expose. The options, in increasing order of commitment: generat
 ARMv8-crypto assembly with `mmcloughlin/avo`; adopt a third-party pure-Go AES exposing a
 bulk API; or reconsider the default mode (see §12.3).
 
+**Raised upstream** as [golang/go#81029][go81029], "proposal: crypto/cipher: evaluate
+multi-block pipelined assembly architecture for OCB mode optimizations" — filed by this
+project's author, because the ceiling is a property of `crypto/cipher`'s single-block API
+rather than of borge, and every Go implementation of OCB, EAX, SIV or any other mode built
+on `cipher.Block` pays it. It is the one finding in this stage that borge cannot fix in
+borge.
+
+**The issue's own benchmark understates it.** The reproducer measures the API overhead in
+isolation; borge's OCB path is worse, because each 16-byte block carries the surrounding
+offset arithmetic and XORs rather than being a bare `Encrypt` in a tight loop. Treat the
+numbers in the issue as a floor. Supplying the real figure is Stage 9 work: measure borge's
+own AES-OCB throughput against the isolated `cipher.Block` ceiling on the same machine, and
+attach it to the issue — a proposal argued from a real workload is worth more than one
+argued from a microbenchmark, and this port is exactly the workload the proposal is about.
+
+[go81029]: https://github.com/golang/go/issues/81029
+
 **What is not a problem.** `lukechampine.com/blake3`, which borge already uses, measured
 **930 MB/s at 2 MiB and 1199 MB/s at 64 MiB against `zeebo/blake3`'s 724 and 708** — the
 suggested replacement is 1.3–1.7x *slower* here, despite advertising wider SIMD coverage,
@@ -3048,9 +3751,13 @@ The goal: a laptop or phone app points borge at a directory — possibly a cloud
 writes a backup to the cloud or a USB drive. What that needs, and where borge stands:
 
 - **No cgo.** Already true: `CGO_ENABLED=0 go build ./...` succeeds today, and the port
-  reaches the OS through `golang.org/x/sys/unix` rather than through C. This is what makes
-  `android/arm64` and `ios/arm64` cross-compilation a `go build` away, and it is worth
-  protecting — a cgo AES would cost exactly this property. See §12.4.
+  reaches the OS through `golang.org/x/sys/unix` rather than through C. **Corrected
+  2026-08-29:** that is evidence borge *can* be built without cgo, not that it does not use
+  it. `os/user` goes through cgo when it is available, and until §12.1d a shipped extract
+  spent 21% of its time in `getgrnam_r`. The conclusion stands; the evidence for it was
+  weaker than it read. Buildability is what makes `android/arm64` and `ios/arm64`
+  cross-compilation a `go build` away, and it is worth protecting — a cgo AES would cost
+  exactly this property. See §12.4.
 - **Encryption mode matters more on ARM than on x86.** ChaCha20-Poly1305 already measures
   332 MB/s against borg's 435 — 1.3x, because Go's implementation is assembly end to end —
   while AES-OCB is 17x behind. On a phone, ChaCha20-Poly1305 is the better default
@@ -3058,7 +3765,11 @@ writes a backup to the cloud or a USB drive. What that needs, and where borge st
   mobile question largely independent of the OCB ceiling.**
 - **Memory has to be bounded.** The pack writer buffers whole packs, the chunk index is
   held in memory, and `analyze` walks every archive. A phone needs `BORGE_PACK_MAX_SIZE`
-  and an index that can spill. Not yet measured; it belongs in this stage's scenarios.
+  and an index that can spill. **Measured 2026-08-29, §12.1g:** peak RSS is the Go heap and
+  it is pack buffering; `BORGE_PACK_MAX_SIZE` bounds it, and at 2 MB packs borge sits below
+  borg at no cost in wall time. The prediction in this bullet was right. The index spilling
+  is still unmeasured - the chunk index is about 11 MB for this corpus, which is not what
+  dominates here.
 - **High-latency storage is already exercised.** The stage 7 Google Drive corpus runs over
   an rclone mount where a single object write measured 2.7 s, and the gate passes there.
   That is the same I/O shape a phone writing to cloud storage sees.
@@ -3084,6 +3795,19 @@ AES-OCB is still the bottleneck for users who need that specific mode, write bat
 with `avo` — pure Go assembly, no C toolchain, no loss of cross-compilation. BearSSL, named
 in the references, is a C library and would forfeit exactly what §12.3 needs.
 
+**A fourth option, and the only one that fixes it for everybody: upstream.**
+[golang/go#81029][go81029] proposes that `crypto/cipher` grow a multi-block pipelined path,
+which is what AES-GCM's assembly already does privately. If it lands, borge's `avo` work
+becomes unnecessary and every other Go OCB implementation gets the same lift.
+
+It changes what borge should do now only a little, and the reason is timing: a language
+proposal moves on its own schedule and borge cannot plan around a date. So the order stands
+— pure-Go fixes, then the pipeline, then re-measure — with two additions. Do not start
+writing `avo` assembly before checking the issue's state, because that is the work it would
+make redundant. And when Stage 9 measures AES-OCB on a real corpus, post the number:
+borge's degradation is larger than the issue's isolated benchmark shows, and a proposal
+argued from a backup tool's write path is a stronger argument than one argued from a loop.
+
 ### 12.5 The suggested references, checked
 
 Claims worth checking before acting on them. Verdicts are from this machine and this
@@ -3095,7 +3819,7 @@ repository, not from the descriptions.
 | `github.com/pkg/xattr` is needed for extended attributes | **Not needed.** borge calls `unix.Lgetxattr`/`Lsetxattr` directly — one fewer dependency than suggested. |
 | `unix.SyncFileRange`, `os/user` cover the rest | Correct; both are in use or available. |
 | `zeebo/blake3` is faster (AVX-512/AVX2/SVE2/NEON) | **False here.** 1.3–1.7x *slower* than the incumbent on AVX2 hardware. Digests match, so the swap is safe but would regress. Re-measure per target. |
-| `mmcloughlin/avo` for generating x86 assembly | **The right tool** if borge writes batched AES-NI. Pure Go, no C toolchain, keeps cross-compilation. |
+| `mmcloughlin/avo` for generating x86 assembly | **The right tool** if borge writes batched AES-NI. Pure Go, no C toolchain, keeps cross-compilation. Check [golang/go#81029][go81029] first: if `crypto/cipher` grows a multi-block path, this work is redundant. |
 | `Yawning/bsaes` (bitsliced constant-time AES) | Relevant for constant-time guarantees and for CPUs *without* AES instructions; it is slower than AES-NI, so not a speedup on the targets measured. |
 | BearSSL | A C library: cgo, and forfeits the cross-compilation §12.3 depends on. |
 | `ProtonMail/go-crypto` (OpenPGP fork of x/crypto) | Not applicable; borge uses no OpenPGP. |
@@ -3106,142 +3830,169 @@ conservative about how few dependencies that takes.
 
 Then, in order:
 
-0. **Fix the chunker-per-file construction** (finding 2). It is a bug, not a tuning
-   question, and it makes every later measurement of the small-file corpora wrong.
-1. **Profile before changing anything** (`pprof`, CPU + alloc).
-2. Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.
-3. Parallelise `extract` similarly.
-4. Tune `PackWriter` `max_count`/`max_size` and the pack cache size against the
-   pathological directory.
-5. Only if a Go hot path is measurably the bottleneck **and** a C implementation is
+0. ~~**Fix the chunker-per-file construction** (finding 2). It is a bug, not a tuning
+   question, and it makes every later measurement of the small-file corpora wrong.~~
+   **Done 2026-08-28**; see §12.1a. The cost turned out to be the 8 MiB backing buffer
+   rather than the tables, and larger than §12.1 estimated.
+1. ~~**Profile before changing anything** (`pprof`, CPU + alloc).~~ **Done 2026-08-29**;
+   see §12.1b. It found a 16 GB allocation in the lz4 path, which is now step 1a.
+
+   ~~While the profiles are in hand: **measure AES-OCB on a real corpus and post the number
+   to [golang/go#81029][go81029].**~~ **Measured 2026-08-29, §12.1i**; the comment is
+   drafted and awaits the author posting it under his own account. The isolated `cipher.Block` benchmark in that issue is
+   a floor; borge's OCB path is worse, because each block carries the offset arithmetic
+   and XORs around it. A proposal argued from a backup tool's write path is stronger than
+   one argued from a loop, and this is the single Stage 9 finding whose fix is not borge's
+   to make.
+1a. ~~**Reuse the lz4 compressor** (§12.1b).~~ **Done 2026-08-29**; see §12.1c. 16.1 GB of
+   allocation became 242 MB, collection went from 23.5% of create to about 3%, and create
+   is about 1.9x faster once borg is used as a control for the machine.
+2. ~~Pipeline `create` (read → chunk → compress/encrypt → pack) with bounded queues.~~
+   **Done 2026-08-29**; see §12.1h. About 1.6x on large files, nothing on small ones, and it
+   declines to run below 8 MiB because measurement said the pool costs more than it saves
+   there.
+3. **Partly done 2026-08-29, and the parallel part deliberately not taken**; see
+   §12.1d-f. Extract went 45.8 s to 42.6 s against a borg control that moved 136.4 to
+   135.1, by removing an `os/user` lookup per file, keeping the pack open across objects,
+   and doing every metadata operation on the descriptor `writeFile` already held. None of
+   that is parallelism. It was not attempted, because §12.1f measured that removing about
+   1.07 million syscalls returned only about three seconds: the remaining 22 s of system
+   time is the kernel genuinely creating and writing 118,866 files, and spreading that
+   over threads is a different experiment from the one that was run. **It stays open under
+   ROADMAP R0 item 1**, which already names parallel writers per directory, together with
+   the read-*order* question nothing has looked at yet.
+
+> **Taken out of order, 2026-08-29: extract before create.** After steps 0, 1 and 1a,
+> extract is the slower half - 67.6 s against create's 34.6 s - and half of it is system
+> time (34.4 s), which is a different shape from anything the create work touched. It is
+> also the half ROADMAP R0.1 item 1 is about: large-directory restore is the case that
+> might need a format change, and the decision on that is supposed to be informed by
+> measuring here first. Profiling the slower half before optimising the faster one is the
+> order the evidence asks for, whatever the list says.
+4. **`max_size` swept 2026-08-29 against the pathological directory** (§12.1g): 383 MB
+   resident at the 50 MB default, 244 MB at 2 MB packs, wall time flat across the range.
+   **The default is deliberately not changed** - it is borg's, and diverging on repository
+   layout to win a benchmark would trade interoperability for a number - so the outcome is
+   a documented knob rather than a new default. `max_count` was not swept, and the read
+   side moved for a different reason: §12.1e replaced the reopen-per-load with a bounded
+   handle cache, which is the pack-cache question in the form it actually mattered.
+5. ~~Only if a Go hot path is measurably the bottleneck **and** a C implementation is
    measurably better on the same corpus, introduce a cgo-gated implementation with a
-   pure-Go fallback — per §0.4, and with the benchmark JSON in the evidence bundle as
+   pure-Go fallback~~ **Not reached, and that is the finding** (§12.4): every win Stage 9
+   took was pure Go, and the one ceiling that a C library would clear is `crypto/cipher`'s
+   single-block API, where the right fix is `avo`-generated Go assembly or the upstream
+   proposal - neither of which is cgo. No cgo-gated implementation was introduced, so the
+   `CGO_ENABLED=0` cross-compilation §12.3 depends on is intact. The original condition
+   stands for whoever reaches it later — per §0.4, and with the benchmark JSON in the evidence bundle as
    justification. The Cython modules were `compress`, `hashindex`, `item`,
    `crypto/low_level` and the chunkers; those are the candidates.
-6. Re-run Stage 7 after every change. Performance work that breaks interop is
-   reverted, not patched.
+6. **Done, every time.** The interop gate is part of `go test ./...`, so every commit in
+   this stage ran it; the zstd pool additionally got a run with `zstd,3` and `auto,zstd,3`
+   in the matrix, because pooling an encoder is exactly the change that could produce
+   different bytes and still round-trip. Nothing was reverted for interop. One change was
+   reverted for a different reason - the pack-buffer release in §12.1g, because paired
+   measurement said it did nothing.
 
 **Gate:** borge ≥ borg on every scenario, with the JSON to show it. Regressions are
 listed with an explanation, not hidden.
 
+### 12.6 Stage 9 closed, 2026-08-29: the gate, and what it does not say
+
+**The gate:** *borge ≥ borg on every scenario, with the JSON to show it. Regressions are
+listed with an explanation, not hidden.*
+
+**Verdict: passed on wall time and CPU by a wide margin, with one regression, stated
+below and bounded by an existing knob.** The closing run is
+``tests/bench/out/baseline-20260830T000800Z.json``, taken on a quiet machine from a clean tree at
+``02178d9``, both tools against the same warmed corpus in one invocation with the
+order recorded:
+
+| | borge | borg | |
+|---|---:|---:|---|
+| create, wall | **35.3 s** | 192.9 s | **5.5x faster** |
+| create, CPU (user+sys) | **41.7 s** | 194.3 s | 4.7x less |
+| create, peak RSS | 337 MiB | **249 MiB** | **1.36x more - the one regression** |
+| extract, wall | **42.9 s** | 178.3 s | **4.2x faster** |
+| extract, CPU | **44.9 s** | 176.9 s | 3.9x less |
+| extract, peak RSS | **71 MiB** | 268 MiB | 3.8x less |
+
+118,866 files, 190.5 MiB, warm cache, `none-sha256`, borge first with the corpus warmed
+before either tool ran. borge's repository is 188.7 MiB, and it recorded 2.1 s of chunking
+and 3.1 s of hashing inside the 35.3.
+
+
+**The regression is create peak RSS**, and §12.1g is its explanation: it is pack
+buffering, it tracks `BORGE_PACK_MAX_SIZE` linearly, and at 2 MB packs borge sits below
+borg at 244 MB with wall time unchanged. The default stays at borg's 50 MB because
+diverging on repository layout to win a benchmark would trade interoperability for a
+number. So the metric borge loses is a tuning default rather than a structural deficit -
+which is a claim with a sweep behind it, not a hope.
+
+Extract peak RSS goes the other way and by more, and that is worth naming because it is the
+half of the workload R0.2 is about.
+
+#### What this number is not
+
+The gate is met on the corpus the gate names. Four limits, so that nobody reads more into
+it later than it says:
+
+1. **It is unencrypted.** `defaultMode` is `none-sha256` on purpose: AES-OCB is capped near
+   154 MB/s by a `crypto/cipher` ceiling that is not borge's ([golang/go#81029][go81029],
+   §12.1i), and including it would measure that ceiling rather than the write path. The
+   encrypted picture is §12.1i's, separately, and it is the one finding of this stage that
+   borge cannot fix.
+2. **It is one corpus on one machine.** 118,866 small files on an i5-9300H with four
+   physical cores. Every default this stage chose - two create workers, the 8 MiB pipeline
+   threshold - is documented as measured here rather than as a scaling rule, because that
+   is how a plausible constant becomes a permanent wrong default on hardware nobody tested.
+3. **The largest single lever was not tuned, deliberately.** Compression is lz4 throughout,
+   which is borg's default; the zstd encoders were pooled for a 3.0x gain that no create
+   number in this section reflects, and it is ROADMAP R0's to exploit.
+4. **Six of the seven wins were bugs, not tuning.** A chunker per file, an lz4 compressor
+   per chunk, a zstd encoder per chunk, an `os/user` lookup per file, a pack reopen per
+   object, and three `openat` per restored file where one would do. The seventh - the
+   create pipeline - is the only one that is engineering rather than repair, and it is the
+   one that helps least on this corpus. That is the honest summary of a 5x lead:
+   most of it was borge no longer doing things it should never have done. The remaining
+   headroom is therefore smaller than the ratio suggests, and Stage 9's own attempts to
+   find more - the pack-buffer release, four workers instead of two - came back null.
+
+**What the stage cost in withdrawn claims** is worth recording next to the wins, because it
+is the part a summary would drop. Seven statements were withdrawn or corrected on
+measurement, and six of them were written *during* this stage:
+
+| withdrawn | what it actually was |
+|---|---|
+| a create regression to 55.3 s (§12.1e) | transient machine load; three back-to-back runs gave 35.3, 34.8, 34.1 |
+| a 70 MB peak-RSS saving from releasing pack buffers (§12.1g) | run-to-run spread; eight interleaved pairs put it at -5 MB, sd 24 |
+| the pipeline's 1.69x (§12.1h) | sampling 1, 4 and 8 workers, which cannot tell "4 is best" from "the peak is below 4" |
+| the contention story explaining that curve (§12.1h) | an explanation satisfying enough to stop questioning; a second sweep contradicted it |
+| chunk order preserving a byte-reproducible repository (§12.1h) | two *serial* creates already produce different pack names; the real reason order matters is sharper |
+| "OCB costs 10%, implied 490 MB/s" (§12.1i) | a baseline that mixed a cipher difference with a hash difference |
+| that file times had to be set after `close` (§12.1f) | not written this stage, and false since it was: Linux stamps mtime in `write()` |
+
+Five of the seven were caught by the same method - pair the runs, interleave them, and treat
+any effect smaller than about 50 MB of RSS or 0.5 s of wall time on this machine as
+unmeasured. The other two were caught by being asked a question: whether two workers might
+beat four, and whether the OCB baseline was comparing like with like.
+
 ---
 
-## 13. Stage 10 — format and indexing changes
+## 13. Stage 10 — format and indexing changes — moved 2026-08-27
 
-Only after Stages 7 and 9. Everything here **breaks format compatibility**, so it goes
-behind an explicit repository version bump and a documented migration.
+**Moved to [`ROADMAP.md`](../ROADMAP.md) R0.** Stage 10 was always work that begins after
+the port is complete: it breaks format compatibility, so nothing in it can start until the
+interoperability gate (stage 7) and the performance baseline (stage 9) are closed. It is
+therefore not a porting stage and does not belong in a plan that is archived when porting
+ends.
 
-1. **Large-directory packing.** borg 2's `PackWriter` already packs *chunks*. The
-   remaining problem is the restore side: extracting 118,866 files from one directory
-   means 118,866 `create`+`write`+`close`+`utimes`+`chown` sequences, and on a slow or
-   high-latency filesystem that, not I/O bandwidth, is the wall. Investigate:
-   restore-side batching by pack (sort extraction order by `(pack_id, obj_offset)` so
-   each pack is read once and sequentially), deferred metadata application (write all
-   content, then apply modes/times/xattrs in a second pass), and parallel writers per
-   directory. **Note this is measurable and possibly deliverable without any format
-   change at all** — try it in Stage 9 first, and only change the format if Stage 9
-   proves it is not enough.
-2. **`blugelabs/bluge` for indexing.** Evaluate as a replacement for the chunk index
-   and/or as a new capability (content/metadata search across archives — `borg find`
-   is currently a linear scan). Bluge worked well in `movenotes-v3`. Be honest about
-   the fit: bluge is an inverted-index search engine, and the chunk index is a
-   256-bit-key hash table with a 48-byte value — a different data structure for a
-   different job. The likely outcome is **bluge for archive/file search, borghash
-   retained for the chunk index**, but measure before concluding.
-3. **zstd as the default compression** (borg #10085) once the benchmark supports it —
-   the reference numbers give zstd `SpeedFastest` a better ratio *and* comparable
-   speed versus lz4-class options.
-4. Any further on-disk changes the Stage 9 profiles justify.
+What moved, unchanged: the four work items (restore-side batching, `bluge` for indexing,
+zstd as the default compression, and whatever the stage 9 profiles justify), the list of
+borg quirks that are reproduced deliberately and may be corrected once compatibility is
+lifted (now R0.1), the large-directory restore requirement and its gate (now R0.2), and the
+migration gate.
 
-### 13.1 borg quirks to fix once compatibility is lifted
-
-Until this stage, borge reproduces borg's behaviour including its bugs — a port that
-"fixes" one silently is a port whose output no longer matches, which is the one thing the
-interop gate exists to prevent. Each of these is a place where the compatible behaviour is
-worse than the obvious one. The list is collected here so that lifting the constraint is a
-review of known items rather than a fresh audit.
-
-**Reproduced bugs, to be corrected:**
-
-- **`shellpattern.translate`'s vacuous guard.** borg's `(`, `|` and `)` passthrough checks
-  `pat[i-1] != "\\"` *after* `i` has already advanced, so the guard always passes and
-  `\(` becomes a backslash plus a group opener rather than a literal parenthesis. borge
-  reproduces it (see §6 and `internal/patterns`). A user cannot currently match a filename
-  containing a literal `(` with an `sh:` pattern. Fixing it changes which files a pattern
-  selects, which is why it waits.
-- **`stat.filemode` renders an unknown file type as `?`.** borg's C `_stat` and its
-  pure-Python fallback disagree on that character; borge reproduces the C one because that
-  is the one that runs. Cosmetic, but it is a difference between borge's output and its own
-  documentation.
-
-**Already fixed, recorded so they are not "corrected" back:**
-
-- **borg's `RobustUnpacker` is quadratic.** It rescans its whole buffer on every `feed`,
-  so resynchronising after damage costs O(n²) in the buffered bytes. borge keeps a scan
-  offset and is careful at the buffer's end instead — a provisional rejection near the end
-  is re-examined when more data arrives rather than skipped — and stays linear. See
-  `internal/archive/robust.go`. This is the quadratic behaviour worth naming: it is in the
-  *repair* path rather than the ordinary restore path, and borge does not have it.
-- **borge's `debug search-repo-objs` clamps two negative slice indices** that Python reads
-  as offsets from the end, so it does not blank the context before a hit or double-report
-  one-byte terms. DIVERGENCES #13.
-
-**Not bugs, but constraints worth revisiting:**
-
-- **Restore is lossy in borg's own terms.** The stage 5 gate compares borge's extraction
-  against *borg's*, not against the original tree, because borg's restore does not
-  reproduce everything it stored: `--sparse` restores holes only at chunk granularity
-  (DIVERGENCES #9). Once compatibility is lifted, "restore reproduces the source" becomes
-  an achievable gate rather than an aspiration.
-
-  **Corrected 2026-08-19.** This entry used to name `bsdflags` here too — "read and
-  preserved but never applied" — which is borge's gap and not borg's. borg captures them
-  with `FS_IOC_GETFLAGS` and applies them with `FS_IOC_SETFLAGS`, last of all attribute
-  restoration (`archive.py:1112`). The same wrong sentence stood in DIVERGENCES #8 and in
-  §11's work list; this was the third copy, and all three are now fixed. It belongs in
-  stage 8 as a fidelity gap, not here as a constraint of compatibility.
-- **Item decoding is lossy for unknown keys** at the `Item` struct boundary, which is why
-  `debug dump-archive` reads the raw msgpack instead. A format borge owns can make the
-  round trip total.
-- **Every item carries an empty `xattrs` dict and a zero `bsdflags`.** borg writes both on
-  every item it examined, and the *presence* of each key is what says it looked: with
-  `--noxattrs` or `--noflags` the key is absent instead. That is a real distinction —
-  "checked, found none" against "not recorded" — and borge reproduces it as of stage 8
-  (DIVERGENCES #8), because a borge archive that could not express it would be
-  indistinguishable from one taken with the option.
-
-  What a format borge owns could do is carry the distinction without paying per item: it
-  costs roughly 9 to 18 bytes on every item, so a backup of a million files spends 10 to
-  18 MB of item stream saying "nothing here". An archive-level "these attributes were
-  examined" flag plus per-item values only where non-empty says the same thing in a few
-  bytes. Recorded here rather than acted on because the question can only be asked from a
-  faithful baseline: until borge records the fields, any measurement of the saving is
-  measuring the bug.
-
-### 13.2 Large directories must not slow restore down
-
-This is the requirement the project brief opens with, restated as a gate rather than an
-aspiration: **restoring a directory of 118,866 files must not cost more per file than
-restoring a directory of 100.**
-
-borg reads a backup sequentially and recreates the tree as it goes, the way `tar -x` does.
-Anything worse than linear in that path defeats the intent. What is known so far:
-
-- The **directory-attribute stack** in `internal/archive/extract.go` is O(1) amortised: it
-  pops a directory when the next path leaves it, rather than searching. It does allocate a
-  string per item for the prefix comparison, which is 118,866 allocations on the
-  pathological corpus and trivially removable.
-- The **chunker-per-file construction** (§12.1) is a per-file millisecond cost on the
-  *create* side, worth ~3.5 minutes on that corpus alone.
-- **Restore-side ordering** is item 1 above and is the one with real headroom.
-
-Stage 9 measures all three before anything here changes the format. The point of writing
-them down together is that only one of them needs a format change, and it is not the
-expensive one.
-
-**Gate:** a migration path exists and is tested (borge reads the old format, converts,
-verifies); the change is justified by benchmark JSON in the evidence bundle; and the
-pathological-directory scenario shows per-file restore cost flat against directory size.
+References elsewhere in this plan to "§13" mean ROADMAP R0.
 
 ---
 
@@ -3261,9 +4012,18 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **investigated** 2026-08-17 (§12.1–12.5); no fix applied yet, no baseline run | not yet bundled |
-| 10 | Format / indexing changes | not started | — |
-| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **1 of 7 done** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–5 and 7 not started | — |
+| 9 | Performance baseline vs borg | **done 2026-08-29** (§12.6). Investigated 2026-08-17 (§12.1–12.5), then measured and fixed: the chunker built once and reset (§12.1a), the first profiles (§12.1b), the lz4 compressor pooled (§12.1c) and the zstd encoders with it, three serial extract fixes (§12.1d–f), peak RSS measured and bounded by `BORGE_PACK_MAX_SIZE` (§12.1g), and an adaptive create pipeline that declines to run below 8 MiB (§12.1h). Closing run: **create 5.5x and extract 4.2x faster than borg**, with **one regression — create peak RSS, 337 MiB against 249** — which tracks pack size and falls to 244 MiB at 2 MB packs; the default stays at borg's 50 MB. Six of the seven wins were borge's own bugs. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s, measured on a real corpus at §12.1i and drafted as a comment the author has yet to post | the stage-9 bundle is named in [`ROADMAP.md`](../ROADMAP.md) RP, because it is built from the commit that archives this file and an archive is not edited afterwards |
+| 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
+| — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
+| — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
+
+**On the gate running a stale binary.** `tests/interop` executes `bin/borge` rather than
+compiling it. On 2026-08-28 a full suite reported `ok tests/interop (cached)` against a
+binary from 2026-08-21 — Go's cache was correct, its input was stale — so the gate passed
+without testing the chunker change in front of it. `make test` now depends on `make build`,
+and `requireCurrentBinary` fails the gate when the binary predates any `.go` file. Worth
+recording next to the bundles below, because it is the same lesson: a green gate has to be
+green *about something*, and both times it took a person noticing rather than a check.
 
 **On the three stage-7 bundles.** `stage-7` and `stage-7-rerun` each record a FAIL that was
 not a real defect — the first was `/tmp` filling, the second an edit landing mid-build (see
@@ -3305,13 +4065,13 @@ harness §12 describes has not been built.
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| ~~**AES-OCB in pure Go**~~ | ~~Interop failure or, worse, a silent crypto bug~~ | **Downgraded 2026-08-16**: all 16 primary + all 9 appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across every suite and size tested. The ChaCha20-Poly1305 fallback is not needed. Independent review before Stage 7 remains worthwhile as a double-check. |
+| ~~**AES-OCB in pure Go**~~ | ~~Interop failure or, worse, a silent crypto bug~~ | **Downgraded 2026-08-16**: all 16 primary + all 9 appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across every suite and size tested. The ChaCha20-Poly1305 fallback is not needed. Independent review remains worthwhile as a double-check; it did not happen before Stage 7 and is carried to [`ROADMAP.md`](../ROADMAP.md) *Later maintenance* rather than left here, because this file is now an archive. |
 | **Upstream borg 2 checkout moving** — *materialised 2026-08-17* | Interop gate silently invalidated: every differential test failed at once with a traceback inside borg, which reads as a borge regression | Pin the commit; rebase deliberately with a reviewed diff. **Neither `borg --version` nor `borg-commit.txt` notices the checkout moving** — both are baked in at install time — so `mkbundle.sh` now reads the borg tree's real `HEAD` and warns on mismatch. See §0.1. |
 | ~~`borghash`/`borgstore` license unknown~~ | ~~Cannot port those components~~ | **Closed 2026-08-16**: both BSD-3-Clause, porting permitted (LICENSING.md §6) |
 | Surrogate-escaped path encoding | Silent path corruption on non-UTF-8 filenames | Fuzz round-trip in Stage 1.5; synthetic corpus in Stage 7 |
 | `PackWriter` concurrency ported wrong | Rare, load-dependent repository corruption | Preserve the "index touched only by the calling goroutine" invariant; `-race` in CI |
 | Chunker boundary drift | Total dedup loss, invisible until the repo is huge | Byte-exact boundary differential test (Stage 1.4) |
-| Scope creep across 10 stages | Never finishing | Explicit non-goals (§0.6); one stage at a time; ask before advancing |
+| Scope creep across the stages | Never finishing | Explicit non-goals (§0.6); one stage at a time; ask before advancing |
 | Usage limits interrupting work | Lost context, broken tree | Stage/task granularity, always-committable state, evidence bundles (§2) |
-| **Pure-Go performance shortfall** | Pressure to take a cgo dependency, which would forfeit the `CGO_ENABLED=0` cross-compilation that §12.3's mobile case depends on | Measured 2026-08-17 (§12.2): three of the four largest gaps are borge's own bugs and cost nothing to fix. Take those and the pipeline first, re-measure, and only then consider `avo`-generated assembly — which is still pure Go. A C library is the last resort, not the first. |
+| ~~**Pure-Go performance shortfall**~~ | ~~Pressure to take a cgo dependency, which would forfeit the `CGO_ENABLED=0` cross-compilation that §12.3's mobile case depends on~~ | **Closed 2026-08-29 (§12.6): the pressure never arrived.** §12.2 predicted on 2026-08-17 that three of the four largest gaps were borge's own bugs; Stage 9 found six such bugs, took them and the pipeline, and finished 5.5x ahead of borg on create and 4.2x on extract **with no cgo dependency**, so `CGO_ENABLED=0` is intact. One gap survives and is not borge's: `crypto/cipher`'s single-block API caps any Go OCB near 154 MB/s ([golang/go#81029][go81029], §12.1i). Its fix is `avo`-generated assembly or upstream — both still pure Go. A C library was never reached, which is what the mitigation ordering was for. |
 | **A stale plan** | The tracker said stages 4–10 were "not started" while 4–7 had shipped evidence bundles; a new reader trusts that table first | The tracker (§14) is part of finishing a stage, not a postscript. AGENTS.md says so. |

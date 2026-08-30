@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Prepare the local services the remote-backend tests use (docs/PORTING_PLAN.md §11.5).
+# Prepare the local services the remote-backend tests use (plans/PORTING_PLAN.md §11.5).
 #
 #   tests/remote/setup.sh
 #

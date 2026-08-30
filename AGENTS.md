@@ -4,27 +4,59 @@
 writes the same repositories as `borg`, and that constraint is the reason for most of what
 follows.
 
-Read `docs/PORTING_PLAN.md` first. It is the working plan, it is versioned alongside the
-code, and it is expected to be **corrected when reality disagrees with it** — a stage note
-that no longer matches the code is a bug in the plan, not a historical record to preserve.
+Read the current plan first — see the next section for which document that is. A plan is
+versioned alongside the code and is expected to be **corrected when reality disagrees with
+it**: a note that no longer matches the code is a bug in the plan, not a historical record
+to preserve.
 
 ---
 
-## The three documents
+## How work is planned and tracked
+
+There is exactly **one current plan** at a time, and one long-lived roadmap.
 
 | file | what it is |
 |---|---|
-| `docs/PORTING_PLAN.md` | the plan and the running record of what each stage actually did |
+| `ROADMAP.md` | the numbered items of work that are not porting stages, and their state |
+| `PLAN.md` | **the current plan**, for one roadmap item |
+| `plans/PORTING_PLAN.md` | the porting plan, archived 2026-08-29 when stage 9 closed: stages 0-9 and the running record of what each stage actually did. Still the reference for *why the code is this shape* — a great deal of the source cites it by section — but no longer a place to look up what to do next |
+| `plans/` | plans that are finished or superseded, archived unmodified |
 | `docs/DIVERGENCES.md` | every place borge deliberately differs from borg, numbered, with the reason |
 | `docs/FORMAT.md` | the on-disk format, with citations into borg's source |
 
+The workflow:
+
+1. ~~**While the port is open** (through stage 9), `docs/PORTING_PLAN.md` is the plan and
+   `ROADMAP.md` holds everything the port does not own.~~ **The port closed 2026-08-29.**
+   It was itself a roadmap milestone — `ROADMAP.md` RP — because every milestone belongs
+   there; it was added late, and its absence is what made "no `PLAN.md`" look like an
+   omission rather than like the porting plan being current.
+2. ~~**When stage 9 closes**, move `docs/PORTING_PLAN.md` to `plans/` unmodified and stop
+   editing it.~~ **Done 2026-08-29**, to `plans/PORTING_PLAN.md`. Two link targets inside
+   it were repointed from `docs/`-relative to `../docs/` and nothing else changed, because
+   a record nobody can follow is not serving the purpose the rule protects; the rest of the
+   rule stands for the next archive. Anything in a plan that describes unfinished work must
+   already have been moved into `ROADMAP.md` or a document under `docs/` before it is
+   archived — an archive is a record, not a place to look up what to do next.
+3. **After that**, pick an item from `ROADMAP.md`, write `PLAN.md` for it — what the item
+   is, how it is broken into committable tasks, and the gate that decides it is done — and
+   implement it one task at a time. **Current: R0**, planned in `PLAN.md`.
+4. **When the item is finished**, record the outcome in its `ROADMAP.md` entry, move
+   `PLAN.md` to `plans/<item>-<YYYYMMDD>.md`, and write the next one. Two plans are never
+   current at once, and `plans/` is never edited after the fact.
+
+Whichever plan is current, the same rules hold: a task is finished when it builds, its
+tests pass, and it is committed; the tree is never left broken across a stop; and after a
+gate passes, **stop and ask before starting the next task**.
+
 If you change behaviour that borg also has, you owe an entry in `DIVERGENCES.md`. If you
-finish a piece of a stage, you owe a note in `PORTING_PLAN.md` saying what you found — not
-just what you built — **and an update to the stage tracker in its §14**.
+finish a piece of work, you owe a note in the current plan saying what you found — not
+just what you built — **and an update to its tracker** (`PORTING_PLAN.md` §14 for stages,
+the item's own checklist in `ROADMAP.md` otherwise).
 
 The tracker is the table a new reader trusts before anything else, which is exactly why it
 has to be right: it once claimed stages 4 through 10 were "not started" while four of them
-had shipped evidence bundles. Updating it is part of finishing a stage, not a postscript.
+had shipped evidence bundles. Updating it is part of finishing the work, not a postscript.
 
 ---
 
@@ -36,9 +68,18 @@ make test           # the Go test suite
 make check          # fmt, vet, lint, spdx, layering, test
 make borg2          # build the pinned borg 2 reference interpreter (needed by most tests)
 make coverage       # the stage 8 gates: borge's commands and per-command options against borg's
-make option-coverage # just the per-command option comparison (docs/PORTING_PLAN.md 11.2)
+make option-coverage # just the per-command option comparison (plans/PORTING_PLAN.md 11.2)
 make interop        # the stage 7 gate: the real-corpus interoperability matrix
 make evidence STAGE=stage-N   # build an evidence bundle
+make evidence-verify          # check the evidence catalog against the ZIPs on disk
+make evidence-verify-full     # the same, and require every signature and token
+make evidence-attest          # sign and timestamp anything not yet attested
+make evidence-negative        # prove the attestation checks can fail
+make docaudit                 # report how the user-facing documentation is verified
+make docgen                   # regenerate the help topics from the anchored source
+make doccalibrate             # score the contradiction checker against the cases from git
+make doccheck                 # ask a local model whether the code contradicts the prose
+make docactionable            # generate a command from each help topic and run it
 ```
 
 Every source file needs an SPDX header; `scripts/check-spdx.sh` enforces it. A file ported
@@ -47,6 +88,50 @@ from borg carries `Apache-2.0 AND BSD-3-Clause` and names the borg file it came 
 `scripts/check-layering.sh` enforces the import direction: a package may import its own
 rank or lower, never higher. Ranks are in that script. A new helper package needs no edit
 (rank 0 is the default); a new domain package does.
+
+### doccheck needs a local model, and is advisory
+
+`make doccheck` asks a model whether a reading of the code contradicts the prose anchored
+to it. It is **not** in `make check` and never will be: the verdicts move when the model
+does, and a build cannot fail on that honestly. What it produces is a triage list.
+
+The model runs locally — the input is this repository's source, and sending it to a service
+to be told whether its comments are accurate is a poor trade.
+
+```
+/home/renes/projects/llama.cpp/build/bin/llama-server \
+  -m /home/renes/projects/llama.cpp/models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf \
+  --port 8081 --ctx-size 8192 --flash-attn on --chat-template qwen2 --no-kv-unified
+```
+
+`make doccalibrate` scores that model against thirteen labelled cases taken out of this
+repository's history — prose that was true, went false, and was corrected, plus rationale
+that no code can confirm. **Run it before believing a doccheck report.** A checker with no
+known-answer set is a checker whose silence means nothing, and this one is silent most of
+the time. The score to beat is the constant-answer baseline printed beside it; the 1.5B
+model above does not beat it, so its verdicts on this tree are noise.
+[`plans/r2-documentation-system-20260828.md`](plans/r2-documentation-system-20260828.md)
+records the
+measurements.
+
+The cases are verified against git by `TestCalibrationMatchesGit`, so one cannot be edited
+into agreeing with the checker. Rebuild them with
+`python3 scripts/build-doccheck-calibration.py`.
+
+`make docactionable` asks the other question, from `plans/PORTING_PLAN.md` §2.1.2: not *is
+this sentence true* but **does it tell a reader what to type**. It gives the model one
+topic and a task, runs whatever command comes back against the same scratch repository
+`TestHelpExamplesRun` uses, and checks what the command did. Its calibration
+(`TestDocActionableIsCalibrated`, four cases from git) **passes** on the 1.5B model, unlike
+doccheck's — generating a command line from a manual page is a much easier task than
+judging entailment.
+
+Read its output as a prompt to look, not as a verdict. On 2026-08-28 it called two of five
+topics unactionable and **both were the model's fault**: the placeholders topic contains
+exactly the example needed and the model copied a different one. Triage before believing.
+Its calibration cases carry a `probe` command and `TestActionableCasesStillDiscriminate`
+runs it, because a case stops being a case when *borge* is fixed — which has already
+happened to two of them.
 
 ### Tests need a real borg
 
@@ -58,12 +143,29 @@ check the output, not just the exit code.
 `go test -short` skips the borg gate deliberately. The evidence bundler uses `-short` for
 its `-race` pass only.
 
-**Use `make test`, not a bare `go test ./...`.** The Makefile passes `-timeout 60m`;
-Go's default is 10 minutes, and `internal/cli` alone now runs for about that long because
-almost every command has a differential test that forks borg. A bare `go test` fails with a
+**Use `make test`, not a bare `go test ./...`.** The Makefile passes `-timeout 120m`;
+Go's default is 10 minutes, and `internal/cli` alone measured 4062s — 68 minutes — on
+2026-08-27, because almost every command has a differential test that forks borg. A bare `go test` fails with a
 goroutine dump pointing at whichever test happened to be running when the deadline fired —
 which looks exactly like that test hanging, and is not. If you must invoke `go test`
-directly, pass `-timeout 60m`.
+directly, pass `-timeout 120m`. It was 60m until 2026-08-27, when a full run hit it
+exactly — the deadline fired 43 seconds into a test that takes about a minute, which reads
+exactly like a hang and was not one. The next run measured the package at 68 minutes, so
+the old limit was short rather than marginal.
+
+### The interop gate runs a binary, not the source
+
+`tests/interop` executes `bin/borge` rather than compiling it, so nothing ties its result
+to the tree. On 2026-08-28 a full suite reported `ok tests/interop (cached)` against a
+binary seven days old: Go's cache was right — `bin/borge` had not changed — and the gate
+that protects borg-2 format compatibility therefore passed without testing the change in
+front of it.
+
+`make test` now depends on `make build`, and `requireCurrentBinary` **fails** the gate when
+`bin/borge` is older than any `.go` file in the tree. It fails rather than skips: a skip
+would be the same silence in a different costume.
+
+If you invoke `go test ./tests/interop/` directly, build first.
 
 ### Temporary space
 
@@ -160,10 +262,60 @@ stdout and stderr separately, at least once per command.
 
 **Documentation goes stale silently, and prose is the part that does.** Four claims went
 false during stage 8; the two with tests behind them failed loudly, the two that were prose
-needed a human to notice. Until the rest of the doc-anchor work in `PORTING_PLAN.md` §2.1
-lands, the rule for prose is manual: **if you change behaviour, grep the help topics for
-what you just made false.** `borge help <topic>` renders them; `internal/cli/help.go` holds
-them.
+needed a human to notice. The mechanism against it is the **doc anchors**: a user-facing
+sentence carries a directive naming what verifies it, and `make docaudit` (gated by
+`TestDocAuditIsClean`) reports the grades and fails on a promise with nothing behind it.
+
+```go
+//borge:doc user                 this comment is user-facing documentation
+//borge:help topic[/section]     this comment is the source of that topic or section
+//borge:enumerates expr          the list here is generated from what the code defines
+//borge:claim id                 this prose asserts something the check with that id verifies
+//borge:checks id                this function is that check
+//borge:about Decl               this prose describes that function, in the same package
+```
+
+A claim whose check disappears fails the audit, and so does a check whose claim
+disappears. The lists in the help topics — pattern styles, compression specifications,
+placeholders, environment variables — are **generated** from the code that defines them:
+a topic writes `{{enum:name}}` (or `{{enum:name:part}}`) and `renderEnumerations` fills it
+in at startup, so there is no second list to keep in step. What still needs checking is
+each *table* against the behaviour, and that check lives beside the behaviour:
+`patterns.Styles` against the pattern parser, `compress.SpecDocs` against `parseSpec`,
+`placeholders.All` against the expander, and `cli.envVars` against every `BORGE_` name in
+the source. The grades, best first: **executed** (the suite runs the prose's own
+examples), **generated**, **claimed**, **unverified** — the last is permitted and counted,
+because the point is that the untested share is a number rather than an assumption.
+
+**The help topics are generated.** `internal/cli/help_generated.go` is written by
+`make docgen` and must not be edited: each paragraph lives in a doc comment beside the
+code that implements it and names that code with `//borge:about` — the prompting paragraph
+about `unlockWithPrompt`, the pattern styles about `ParsePattern` — and
+`internal/cli/helptemplate.go` says which fragments each topic wants and in what order.
+`TestDocsAreCurrent` fails when the checked-in file no longer matches, so editing a
+fragment without regenerating is a test failure rather than a shipped inconsistency. To change help text, change the comment beside the code and run
+`make docgen`.
+
+A fragment's doc comment is user-facing text **and nothing else** — docgen prints it at a
+user, so maintainer notes go in the code below it. Every user fragment sits on a
+`var _ = helpText` carrier for that reason; the ones that describe nothing in particular
+(a topic's examples) live on carriers in `help.go`, next to the templates.
+
+**A carrier needs `//borge:about`.** gofmt moves directives to the end of a comment, which
+is why the prose sits on a carrier rather than on the function itself — and a carrier says
+nothing about which function it describes. `//borge:about ParsePattern` restores that link;
+the audit errors on a name no function in the directory has, and warns on a user fragment
+that neither sits on a function nor names one. That warning is not cosmetic: without it,
+`doccheck` had nothing to check and reported a clean tree by checking none of it.
+
+Two constraints come from gofmt, and both bite silently:
+
+- **A line in a fragment must not begin with `-`, `+`, or `*`.** gofmt rewrites it into a
+  doc-comment list, changing the characters a user reads. Where the text needs a literal
+  bullet, quote it: `"+" PATTERN` rather than `+ PATTERN`.
+- **A fragment must not begin with an indented block.** gofmt strips the indentation off
+  it. A block of example commands is written unindented and the template indents it with
+  `block(...)` instead of `fragment(...)`.
 
 The *examples* in those topics are no longer manual. `TestHelpExamplesRun`
 (`internal/cli/help_examples_test.go`) runs every command in every topic against a scratch
@@ -275,10 +427,11 @@ the place to fix them is stage 10, when the compatibility constraint is lifted.
 ## Environment variables
 
 Every one is read as `BORGE_<NAME>` first and `BORG_<NAME>` second, so an existing borg
-setup works unchanged. `borge help environment` is the list, and
-`TestHelpEnvironmentTopicListsEveryVariable` scans the source to keep it honest in both
-directions — a variable the code reads and the topic omits fails, and so does a variable the
-topic documents and nothing reads.
+setup works unchanged. `cli.envVars` is the list and `borge help environment` renders it,
+so a variable documented in one place and not the other is not possible. What is still
+checked is the direction only the source can answer:
+`TestHelpEnvironmentTopicListsEveryVariable` scans for every `BORGE_` name the code reads
+and fails when the table omits one — or documents one nothing reads.
 
 `BORGE_TESTONLY_WEAKEN_KDF=1` makes the passphrase KDF cheap so tests are fast. It must
 never be set for a real repository.

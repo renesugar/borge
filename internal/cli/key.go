@@ -25,7 +25,7 @@ import (
 //
 // # Why this arrived last
 //
-// The library underneath was finished and gated at docs/PORTING_PLAN.md §1.3, paper key
+// The library underneath was finished and gated at plans/PORTING_PLAN.md §1.3, paper key
 // included, and the gate text there says "borge key export / borg key import cross-check
 // in both directions" - which was true of a *library* test and of nothing a user could
 // run. The command was simply never written, and nothing noticed until

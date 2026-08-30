@@ -1,0 +1,3 @@
+# Baseline JSON is a measurement of one machine at one moment, not a checked-in fact.
+# The numbers that matter are quoted in plans/PORTING_PLAN.md §12 with their date.
+*.json

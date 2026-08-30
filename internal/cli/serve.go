@@ -70,7 +70,7 @@ func cmdServe(e *Env, args []string) int {
 		// borg's other mode, and the reason it cannot be borge's: it speaks borg 1.x's
 		// RPC protocol to a borg 1.x repository.
 		e.errorf("borge serve without --rest serves a borg 1.x repository over the legacy " +
-			"protocol, and borge does not read borg 1.x repositories (docs/PORTING_PLAN.md §0.6). " +
+			"protocol, and borge does not read borg 1.x repositories (plans/PORTING_PLAN.md §0.6). " +
 			"Use 'borge serve --rest --backend FILE:<path>' to serve a current repository.")
 		return ExitError
 	}

@@ -132,6 +132,22 @@ func (m *Manager) keysDirs() ([]string, error) {
 
 // ---------------------------------------------------------------- keys directory
 
+// helpText marks a declaration that exists only to carry user-facing documentation.
+//
+// The doc comment above such a declaration is help text and nothing else: docgen renders
+// it into "borge help", so a maintainer's note in it would be printed at a user. Notes
+// belong in the code below it.
+const helpText = "user-facing help text"
+
+// With none of those set, keyfiles are looked for in the user configuration directory,
+// under borge/keys and then borg/keys - so a borg installation's keys are found without
+// being moved.
+//
+//borge:doc user
+//borge:help environment/keyfile-search
+//borge:about KeysDirs
+var _ = helpText
+
 // KeysDirs returns the keyfile search path: where borge writes first, then the places it
 // will also read from.
 //

@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The corpora of docs/PORTING_PLAN.md §10.
+// The corpora of plans/PORTING_PLAN.md §10.
 //
 // The real ones are on this machine and are skipped elsewhere, with the skip saying so
 // rather than passing quietly. The synthetic one is generated and is **not optional**:

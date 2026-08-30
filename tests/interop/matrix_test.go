@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-// The eight rows of docs/PORTING_PLAN.md §10.
+// The eight rows of plans/PORTING_PLAN.md §10.
 //
 // Rows 1-4 are each tool reading what the other wrote. Rows 5-8 put both tools into *one
 // repository*, which is where a shared chunk index, shared packs and a shared archive
@@ -301,7 +301,7 @@ func TestSparseRestore(t *testing.T) {
 	}
 }
 
-// TestRealCorpora runs rows 1 to 4 over the corpora named in docs/PORTING_PLAN.md §10.
+// TestRealCorpora runs rows 1 to 4 over the corpora named in plans/PORTING_PLAN.md §10.
 //
 // Each is a *subset* - a bounded number of regular files, copied out preserving layout -
 // because the whole of recipedb is 1.62M files and this gate has to be runnable on every

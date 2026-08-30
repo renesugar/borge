@@ -9,7 +9,7 @@
 // golang.org/x/crypto. borge cannot interoperate with borg's default mode without one,
 // so this is a from-scratch implementation of the RFC.
 //
-// docs/PORTING_PLAN.md names this the highest-risk component in the port, and that
+// plans/PORTING_PLAN.md names this the highest-risk component in the port, and that
 // assessment stands. A subtle bug here is silent - it produces ciphertext that looks
 // fine and cannot be decrypted later, or worse, accepts data it should reject. The
 // code below is therefore written for reviewability rather than speed: it follows the

@@ -98,6 +98,62 @@ func (x *extractor) restoreAttrsFd(f *os.File, path string, it *item.Item) error
 	return nil
 }
 
+// restoreTimesFd is restoreTimes for a file that is still open.
+//
+// # Why this is allowed to happen before the close
+//
+// The path version is called after the file is closed, and the comment on writeFile used
+// to explain that as "writing updates mtime, so setting it while the file is still open
+// and unflushed would be undone". That is not so: Linux stamps mtime in write(), not in
+// close(), and a close with nothing buffered stamps nothing. Measured before this was
+// written - set the times on the open descriptor, close, stat, and the times are the ones
+// that were set.
+//
+// Doing it here rather than by path saves the kernel a second walk of the path it has just
+// resolved, and - with restoreFlagsFd below - lets one descriptor serve the whole
+// sequence, which `strace -c` showed was costing three openat per restored file where one
+// is needed.
+func (x *extractor) restoreTimesFd(f *os.File, it *item.Item) error {
+	if x.opts.NoAttrs || it.MTime == nil {
+		return nil
+	}
+	mtime := *it.MTime
+	atime := mtime
+	if it.ATime != nil {
+		atime = *it.ATime
+	}
+	times := []unix.Timespec{
+		unix.NsecToTimespec(atime),
+		unix.NsecToTimespec(mtime),
+	}
+	// AT_EMPTY_PATH with an empty name is futimens: it acts on the descriptor itself.
+	err := unix.UtimesNanoAt(int(f.Fd()), "", times, unix.AT_EMPTY_PATH)
+	if err != nil && !errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EOPNOTSUPP) &&
+		!errors.Is(err, unix.EPERM) {
+		return err
+	}
+	return nil
+}
+
+// restoreFlagsFd is restoreFlags for a file that is still open.
+//
+// setFlags opened the file again purely to read and write its flags, which cost an openat,
+// four fcntls as Go registered the descriptor with its poller, and a close - per file. The
+// descriptor writeFile already holds answers both ioctls; FS_IOC_GETFLAGS and
+// FS_IOC_SETFLAGS work on an O_WRONLY descriptor, which was checked before this was
+// written.
+//
+// It stays last, after the times, for the reason the path version documents: the immutable
+// flag makes every further change to the inode impossible, so setting it earlier would lock
+// the file against the rest of its own restore.
+func (x *extractor) restoreFlagsFd(f *os.File, it *item.Item) error {
+	if x.opts.NoAttrs || x.opts.NoFlags || it.BSDFlags == nil || it.Mode == nil {
+		return nil
+	}
+	_ = setFlagsFd(int(f.Fd()), *it.BSDFlags, uint32(*it.Mode))
+	return nil
+}
+
 // restoreFlags applies the item's file flags, and is called after restoreTimes at every
 // site rather than from inside restoreAttrs.
 //
@@ -168,20 +224,49 @@ func (x *extractor) resolveOwner(it *item.Item) (uid, gid int) {
 		return uid, gid
 	}
 	if it.User != nil && *it.User != "" {
-		if u, err := user.Lookup(*it.User); err == nil {
-			if n, err := strconv.Atoi(u.Uid); err == nil {
-				uid = n
-			}
+		if n := x.lookupUID(*it.User); n >= 0 {
+			uid = n
 		}
 	}
 	if it.Group != nil && *it.Group != "" {
-		if g, err := user.LookupGroup(*it.Group); err == nil {
-			if n, err := strconv.Atoi(g.Gid); err == nil {
-				gid = n
-			}
+		if n := x.lookupGID(*it.Group); n >= 0 {
+			gid = n
 		}
 	}
 	return uid, gid
+}
+
+// lookupUID resolves a user name to a uid, remembering the answer.
+//
+// -1 means the name does not resolve here, and that is cached as firmly as a hit: see the
+// note on extractor.uids for why.
+func (x *extractor) lookupUID(name string) int {
+	if id, ok := x.uids[name]; ok {
+		return id
+	}
+	id := -1
+	if u, err := user.Lookup(name); err == nil {
+		if n, err := strconv.Atoi(u.Uid); err == nil {
+			id = n
+		}
+	}
+	x.uids[name] = id
+	return id
+}
+
+// lookupGID resolves a group name to a gid, remembering the answer.
+func (x *extractor) lookupGID(name string) int {
+	if id, ok := x.gids[name]; ok {
+		return id
+	}
+	id := -1
+	if g, err := user.LookupGroup(name); err == nil {
+		if n, err := strconv.Atoi(g.Gid); err == nil {
+			id = n
+		}
+	}
+	x.gids[name] = id
+	return id
 }
 
 // setXAttrs writes an item's extended attributes.

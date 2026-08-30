@@ -33,7 +33,7 @@ import (
 //
 // Upstream has SIMD kernels (NEON, AVX2, AVX-512) selected by BORG_FASTCDC_KERNEL, but
 // they are documented as bit-identical to the sequential loop and the sequential one is
-// the default. borge implements only the sequential loop; per docs/PORTING_PLAN.md §0.4
+// the default. borge implements only the sequential loop; per plans/PORTING_PLAN.md §0.4
 // a faster kernel is a stage 9 question, to be answered by measurement.
 type FastCDC struct {
 	cfg  config
@@ -71,6 +71,10 @@ func fastCDCGearTable(key []byte) ([256]uint64, error) {
 }
 
 func (c *FastCDC) Algorithm() string { return AlgoFastCDC }
+
+// Reset points the chunker at a new stream. The Gear table, which is the expensive part,
+// is derived from the repository key and does not depend on the stream.
+func (c *FastCDC) Reset(r io.Reader) { c.d.reset(r) }
 
 // Next returns the next chunk.
 func (c *FastCDC) Next() (Chunk, error) {
