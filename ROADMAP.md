@@ -236,9 +236,15 @@ none", 10 to 18 MB on a million files — and that case is arithmetic, not a ben
    this item is about was simply that `PosixFS.Load` reopened the pack on every object read
    - 118,866 opens for a handful of packs. Keeping the handle open bought 1.16x on extract
    with no format change, and `plans/PORTING_PLAN.md` §12.1e has the numbers. What remains
-   unmeasured is whether read *order* matters once the file stays open; nothing has looked
-   for that yet, so the sort-by-`(pack_id, obj_offset)` proposal below is neither supported
-   nor refuted. And a caution added 2026-08-29 from §12.1f: removing about 1.07 million
+   unmeasured was whether read *order* matters once the file stays open. **Measured
+   2026-08-30 by R0 T1, and it does not: the sort-by-`(pack_id, obj_offset)` proposal below
+   is withdrawn.** Extraction in item order already opens each pack exactly once, in every
+   configuration tested from 4 packs to 351 and from one generation of history to eighteen,
+   because `create` lays chunks down in the order extraction asks for them and dedup
+   interleaves monotonic streams rather than randomising them - backward seeks were zero
+   everywhere. An archive that switches packs on *every one* of its 118,866 reads extracts
+   in the same time as one that never switches: +0.30 s on 41 s, sd 1.54, paired and
+   interleaved. `PLAN.md` has the tables and the limits. And a caution added 2026-08-29 from §12.1f: removing about 1.07 million
    syscalls from an extract - three `openat` per file down to one - returned only about
    three seconds, so per-file syscall overhead is *not* what dominates a large-directory
    restore. The deferred-metadata and batching ideas below should be expected to buy less
@@ -246,10 +252,17 @@ none", 10 to 18 MB on a million files — and that case is arithmetic, not a ben
    remaining problem is the restore side: extracting 118,866 files from one directory
    means 118,866 `create`+`write`+`close`+`utimes`+`chown` sequences, and on a slow or
    high-latency filesystem that, not I/O bandwidth, is the wall. Investigate:
-   restore-side batching by pack (sort extraction order by `(pack_id, obj_offset)` so
-   each pack is read once and sequentially), deferred metadata application (write all
-   content, then apply modes/times/xattrs in a second pass), and parallel writers per
-   directory. **Note this is measurable and possibly deliverable without any format
+   ~~restore-side batching by pack (sort extraction order by `(pack_id, obj_offset)` so
+   each pack is read once and sequentially)~~ **- withdrawn 2026-08-30, it already is** -
+   deferred metadata application (write all content, then apply modes/times/xattrs in a
+   second pass), and parallel writers per directory. Of the three mechanisms this item
+   proposed, two are measured and are not where the time goes - read order (T1) and per-file
+   syscall count (§12.1f) - and the third **is** where it goes: **R0 T2 parallelised the
+   writers on 2026-08-30 for about 2.1x, with no format change.** "Per directory" was the
+   wrong frame, though: the corpus this requirement is about is a single flat directory, so
+   per-directory parallelism would have given one writer. The parallelism is *within* a
+   directory, and its ceiling is ext4 serialising creates on the parent inode lock - the
+   same device reaches 4.3x across separate directories and about 1.75x inside one. **Note this is measurable and possibly deliverable without any format
    change at all** — try it in Stage 9 first, and only change the format if Stage 9
    proves it is not enough.
 2. **`blugelabs/bluge` for indexing.** Evaluate as a replacement for the chunk index
@@ -344,7 +357,13 @@ Anything worse than linear in that path defeats the intent. What is known so far
   pathological corpus and trivially removable.
 - The **chunker-per-file construction** (`plans/PORTING_PLAN.md` §12.1) is a per-file
   millisecond cost on the *create* side, worth ~3.5 minutes on that corpus alone.
-- **Restore-side ordering** is item 1 above and is the one with real headroom.
+- **Parallel writers**, added to this list 2026-08-30 because T2 found the headroom the
+  other two did not have: about 2.1x, and the only one of the three mechanisms that paid.
+- ~~**Restore-side ordering** is item 1 above and is the one with real headroom.~~
+  **Measured 2026-08-30 (R0 T1): no headroom.** It was the one of the three with a
+  plausible story and no measurement, which is why it was worth running first. If a backup
+  history ever keeps more packs live at once than the 16 descriptors borge caches, the fix
+  is that constant rather than a reordering.
 
 Stage 9 measures all three before anything here changes the format. The point of writing
 them down together is that only one of them needs a format change, and it is not the
