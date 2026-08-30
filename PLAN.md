@@ -114,17 +114,43 @@ Sized so each is committable on its own, and ordered so the measurements that co
   closes.** Per-file restore cost is flat against directory size over a 2,400x range, so
   R0.2's requirement is met **with no format change**, and the restore-side batching and
   deferred-metadata ideas are not needed. Findings at the end of this file.
-- [ ] **T6 — zstd as the default compression** (borg #10085). Not a format change — both
-  codecs are already in the format and borge reads either — so it is a default change with
-  a compatibility cost only for readers older than borg 2. The encoders were pooled in
-  Stage 9 (3.0x, 139.8 to 420.1 MB/s on a 2 MiB buffer), which removes the objection that
-  the measurement would be reading a bug rather than the codec. Re-measure ratio *and*
-  speed against lz4 on the real corpora before switching.
-- [ ] **T7 — `bluge` for archive and file search.** A new capability, evaluated on its
-  merits: `borge find` is a linear scan today. Be honest about the fit — bluge is an
-  inverted-index search engine and the chunk index is a 256-bit-key hash table with a
-  48-byte value. The likely outcome is bluge for search and borghash retained for the
-  chunk index, and the way to be wrong about that is to decide it before measuring.
+- [x] **T6 — zstd as the default compression. Done 2026-08-30: switched to `zstd,1`.**
+  A quarter smaller on compressible data for 28% more create time; `DIVERGENCES.md` #62 and
+  the findings at the end of this file. Not a format change — the codec is recorded per
+  chunk and borg reads zstd, so the interoperability gate passes in both directions.
+- [x] **T7 — `bluge` evaluated and declined. Done 2026-08-30.** Measured rather than
+  argued: below ~200,000 paths a plain linear scan is *faster* than bluge, and at a million
+  it wins by about 2x for 3.9x the storage and 67 transitive modules. The real finding is
+  that `borge find`'s cost is not matching but re-decoding item streams, and a path cache
+  would take it from 7,069 ms to about 85 ms with no dependency at all. Findings at the end
+  of this file. borghash is retained for the chunk index, which was never in doubt.
+- [ ] **T10 — A path cache for `find`.** Added 2026-08-30 out of T7, which measured the
+  opportunity while rejecting the tool proposed for it. `borge find` spends its time
+  decoding item streams, not matching: 7,069 ms over 200,020 items across 20 archives, where
+  a regex scan of the same paths already in memory takes 85 ms. Cache the paths beside the
+  repository - `cache.Dir(repoID)` already exists for the files cache - so a second `find`
+  never re-decodes them. **No format change**; nothing is stored in the repository.
+
+  **The design question is which shape, and it is a measurement rather than a preference.**
+  Per-archive path lists are simple and win the decode cost, but store every path once per
+  archive. A global path table with per-archive membership also wins the *storage*: the
+  repository T7 measured held 200,020 items over 10,001 distinct paths, a factor of exactly
+  the archive count, and a year of daily backups makes that 365. The second is worth more
+  and invalidates less obviously. Measure both on a real multi-archive repository before
+  choosing.
+
+  **The correctness property is the whole risk, and it is not performance.** A path cache
+  that is stale, truncated or absent must change only how long `find` takes and never what
+  it returns - the files cache's own package comment is about exactly this class of bug,
+  where a cache that lies makes the tool silently wrong. Archives are immutable once
+  written, so keying on archive id rather than name avoids the hazard the files cache lives
+  with. Soft-deleted archives and `--deleted` have to be handled, since `find` can search
+  them.
+
+  Gate: `find` returns byte-identical output with the cache warm, cold, deleted mid-run and
+  deliberately corrupted; a test damages the cache and requires the output to be unchanged;
+  and the speedup is measured on a real repository rather than assumed from T7's numbers.
+
 - [ ] **T9 — The R0.1 quirk list.** `shellpattern.translate`'s vacuous guard (a literal
   `(` cannot currently be matched by an `sh:` pattern) and `stat.filemode`'s `?` for an
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
@@ -170,7 +196,7 @@ come back "no", and a task list that cannot record a "no" is a list of intention
 now come back: T1 no, T2 yes.
 
 **The order is deliberate and was changed twice.** Everything that cannot break
-compatibility comes first (T4, T6, T7, T9), then the only two tasks that can require a
+compatibility comes first (T4, T6, T7, T10, T9), then the only two tasks that can require a
 format version (T5, T8), then T3 itself. So T3 is reached knowing exactly what it has to
 carry, or is never reached at all - and the two tasks that could summon it sit directly
 above it, where the decision is visible rather than buried six items up.
@@ -511,3 +537,162 @@ still require one, and both are contingent on their own measurements.
   directory of n files, archive it, time the extraction", and the sizes, repetitions and
   device are recorded above so it can be rebuilt. T1's was kept because it encodes a cache
   model and a control that would be tedious to reconstruct.
+
+---
+
+## What T6 found, 2026-08-30
+
+**The default compression is now `zstd,1`, where borg uses lz4.** `DIVERGENCES.md` #62
+carries the decision; this is what was measured and what it cost.
+
+### The measurement
+
+Unencrypted, so the codec was the only variable, on two corpora chosen as opposites: 479 MB
+of small text files, and 106 MB of JPEGs that no codec can shrink.
+
+| spec | repository | vs lz4 | create wall | extract wall |
+|---|---:|---:|---:|---:|
+| lz4 | 188.7 MiB | — | 37.1 s | 20.4 s |
+| **zstd,1** | **141.4 MiB** | **−25.1%** | 47.5 s (+28%) | 21.4 s (+5%) |
+| zstd,3 | 138.2 MiB | −26.8% | 52.9 s (+43%) | 22.0 s (+8%) |
+| auto,zstd,3 | 138.2 MiB | −26.8% | 58.8 s (+59%) | 22.1 s (+8%) |
+
+On the JPEGs every spec produced the same repository to within 0.02%, at 6–11% more CPU for
+zstd. The ratio column only exists on data that compresses.
+
+### The reference claim was half right
+
+ROADMAP R0 item 3 said the reference numbers give zstd `SpeedFastest` "a better ratio *and*
+comparable speed versus lz4-class options". **Better ratio: yes, and by a lot. Comparable
+speed: no** — 28% more wall time on create. Recorded because the item is what justified
+doing this at all, and half of its premise did not survive contact with the corpus.
+
+### T2 made T6 cheaper, and the order mattered
+
+zstd costs **16% more extract CPU but only 5% more extract wall**, because R0 T2's writer
+pool overlaps decompression with the file creation that cannot be parallelised. Had T6 run
+before T2, the restore cost would have read as 16% and might reasonably have decided the
+question the other way. Two tasks whose independence was assumed and is not.
+
+### Why level 1, and why not auto
+
+Level 3 buys 1.7 more points of ratio for 14 more points of wall time. `auto,zstd,3` reaches
+exactly the same ratio as plain `zstd,3` while taking 59% longer than lz4 rather than 43%,
+because it compresses everything twice; it wins only on data nothing can compress, where
+every spec ties on size anyway.
+
+### Changing the default broke no test, which was the real finding
+
+The full suite passed with the default switched, before any new test existed. **Nothing
+anywhere asserted what borge compresses with when nobody asks** — the default could have
+been set to `lzma,9`, or reverted by a careless merge, and everything would still have been
+green. A default no test can see is a default nothing protects.
+
+`TestDefaultIsWhatItSaysItIs` now pins the codec *and* the level, and
+`TestDefaultActuallyCompresses` pins the property the default was chosen for, since a
+"default" that did not compress would satisfy the first test and still be wrong. Both are
+mutation-tested: reverting to lz4 fails three assertions, and a silent drift to `zstd,3`
+fails on the level with the trade quoted in the message.
+
+### Limits
+
+- Two corpora, one machine, `none-sha256`. Text and JPEGs bracket the range but do not
+  cover it — databases, VM images and already-compressed archives all sit somewhere between.
+- The saving is measured on stored bytes, not on transfer time to a remote backend, where
+  the argument for it is strongest. That case is untested.
+- The counter-argument from §12.3 — CPU is battery on mobile — is answered in #62 with the
+  observation that 25% fewer bytes is also 25% less radio. **That is an argument, not a
+  measurement**, and is labelled as one where it is made.
+
+---
+
+## What T7 found, 2026-08-30
+
+**bluge is declined, and the reason is not the one the task expected.** The task predicted
+"bluge for search and borghash retained for the chunk index". borghash is indeed retained -
+that was never a contest - but bluge loses the search half too, and it loses it on
+measurement rather than on taste.
+
+### What `borge find` costs today
+
+A repository of 20 archives over the same 10,000-file tree, so 200,020 items and 10,001
+distinct paths. `find` reads the item stream of every selected archive:
+
+| archives | items scanned | `sh:` pattern | `re:` pattern |
+|---:|---:|---:|---:|
+| 1 | 10,001 | 0.435 s | 0.346 s |
+| 5 | 50,005 | 1.717 s | 1.325 s |
+| 10 | 100,010 | 3.298 s | 2.461 s |
+| 20 | 200,020 | 7.069 s | 4.784 s |
+
+Linear in archives, about 35 µs per item. The command's own doc comment already said
+"minutes, not milliseconds" for hundreds of archives, and that is confirmed: 100 archives of
+118,866 items extrapolates to roughly seven minutes.
+
+### The structural fact: paths repeat once per archive
+
+200,020 items, **10,001 distinct paths** - a repetition factor of exactly 20, the number of
+archives. That is the whole opportunity: anything that indexes *distinct paths* is N times
+smaller than the scan it replaces, where N is how many archives you keep. A year of daily
+backups has N = 365.
+
+### bluge, measured on that path set and on a synthetic million
+
+| paths | plain regex scan | bluge term query | bluge index size | bluge build |
+|---:|---:|---:|---:|---:|
+| 10,001 | **3.1 ms** | 11.3 ms | 1.8 MB | 0.8 s |
+| 200,020 | **85 ms** | 193 ms | 26 MB | 16.0 s |
+| 1,000,000 | 258–326 ms | **133 ms** | 135 MB | 87.1 s |
+
+**Below a million paths, scanning them beats indexing them.** bluge only pulls ahead at a
+million, and then by about 2x on a term query, for an index 3.9x the size of the raw path
+text and 87 seconds to build.
+
+### The finding underneath: the cost is not the matching
+
+`borge find` takes 7,069 ms over 200,020 items. A plain regex scan of those same 200,020
+paths, already in memory, takes **85 ms** - 83x less. The time is going into reading and
+decoding item streams: decompress, verify the chunk id with SHA-256, msgpack-decode each
+item. A profile agrees, putting item decode, allocation and SHA-256 together above half.
+
+So the useful thing is not an inverted index. It is **not re-decoding the item streams**, and
+a flat cache of distinct paths per archive delivers that: 10,001 paths is 480 kB of text, and
+scanning it answers the same query in 3 ms.
+
+### What bluge would be for, and it is not this
+
+bluge is a full-text engine. Its strengths - relevance ranking, boolean and fuzzy queries,
+tokenised search over prose - answer questions borge does not ask. `borge find` matches
+*paths* with shell globs and regexes, and an inverted term index cannot accelerate an
+arbitrary regex at all; it would enumerate the term dictionary.
+
+The capability bluge would genuinely add is full-text search over file *contents* - "which
+archives contain a file mentioning X". That is a real feature, and it is also a different
+and much larger cost: it means decompressing every chunk of every file to index it, which
+is the price of a full restore, per backup.
+
+### The dependency, since it is part of the decision
+
+borge has **8 direct dependencies and 17 modules in total**, and §0.4 says to prefer the
+standard library. bluge brings **67 modules**, including gonum, `gonum.org/v1/plot`,
+`rsc.io/pdf` and `golang.org/x/image`. Most are indirect and would not all be compiled in,
+but the module graph is what a reader audits and what a supply-chain review has to cover.
+
+### Recommendation, and what is not being decided here
+
+**Decline bluge.** Keep `find` as it is for now, and note that a **path cache** - distinct
+paths per archive, stored beside the repository, no format change - is worth roughly 80x on
+this workload and costs one flat file. It is not built here because T7's question was
+whether bluge is the answer, and it is not; proposing the alternative is in scope, building
+it is a new task.
+
+### Limits
+
+- The bluge configuration is a competent default, not a tuned one: keyword field plus a
+  text field, `NewMatchQuery`, top-100 with scoring that borge would not need. A specialist
+  could narrow the gap, and the 10,001- and 200,020-path results would have to reverse
+  entirely to change the conclusion.
+- Query latency is measured on a warm index in the same process. A cold open would be worse
+  for bluge and unchanged for a flat file.
+- The million-path corpus is synthetic. Real path sets share prefixes far more heavily,
+  which favours both an inverted index and a prefix-compressed flat file.
