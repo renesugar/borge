@@ -36,6 +36,17 @@ State: **complete (2026-08-29).** All nine stages done.
 [`plans/PORTING_PLAN.md`](plans/PORTING_PLAN.md) is the plan it was executed from, now
 archived; its §14 tracker is the authority on stage state and is not duplicated here.
 
+**Evidence: `borge-stage-9-20260830T041853Z.zip`.** It is named here rather than in the
+plan's §14 because it is built from the commit that archives that file, so the name cannot
+exist before the archive is frozen — and rule 4 puts an item's outcome in its roadmap entry
+anyway. Built from a clean tree at `3479a1d`: every package green including the
+interoperability gate (1496 s) and `internal/cli` (3071 s), zero failures across 18,950 test
+events, the `-race` pass green, both coverage gates reporting no unexplained absence, and
+`go vet` silent. It carries the nine benchmark baselines the §12 gate demands — including
+the closing run, `baseline-20260830T000800Z.json` — and the drafted
+[golang/go#81029][go81029] comment. **Not yet catalogued or attested**: adding it to
+`evidence/manifest.json` and signing it is R1 work and needs the offline subkey.
+
 **The outcome.** borge implements 33 of borg's 36 commands — the other three, `mount`,
 `umount` and `webdav`, are declared non-goals — reads and writes borg 2's repository format
 in both directions under a gate that runs on every commit, and on the pathological corpus
