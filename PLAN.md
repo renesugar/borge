@@ -118,11 +118,12 @@ Sized so each is committable on its own, and ordered so the measurements that co
   A quarter smaller on compressible data for 28% more create time; `DIVERGENCES.md` #62 and
   the findings at the end of this file. Not a format change — the codec is recorded per
   chunk and borg reads zstd, so the interoperability gate passes in both directions.
-- [ ] **T7 — `bluge` for archive and file search.** A new capability, evaluated on its
-  merits: `borge find` is a linear scan today. Be honest about the fit — bluge is an
-  inverted-index search engine and the chunk index is a 256-bit-key hash table with a
-  48-byte value. The likely outcome is bluge for search and borghash retained for the
-  chunk index, and the way to be wrong about that is to decide it before measuring.
+- [x] **T7 — `bluge` evaluated and declined. Done 2026-08-30.** Measured rather than
+  argued: below ~200,000 paths a plain linear scan is *faster* than bluge, and at a million
+  it wins by about 2x for 3.9x the storage and 67 transitive modules. The real finding is
+  that `borge find`'s cost is not matching but re-decoding item streams, and a path cache
+  would take it from 7,069 ms to about 85 ms with no dependency at all. Findings at the end
+  of this file. borghash is retained for the chunk index, which was never in doubt.
 - [ ] **T9 — The R0.1 quirk list.** `shellpattern.translate`'s vacuous guard (a literal
   `(` cannot currently be matched by an `sh:` pattern) and `stat.filemode`'s `?` for an
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
@@ -575,3 +576,96 @@ fails on the level with the trade quoted in the message.
 - The counter-argument from §12.3 — CPU is battery on mobile — is answered in #62 with the
   observation that 25% fewer bytes is also 25% less radio. **That is an argument, not a
   measurement**, and is labelled as one where it is made.
+
+---
+
+## What T7 found, 2026-08-30
+
+**bluge is declined, and the reason is not the one the task expected.** The task predicted
+"bluge for search and borghash retained for the chunk index". borghash is indeed retained -
+that was never a contest - but bluge loses the search half too, and it loses it on
+measurement rather than on taste.
+
+### What `borge find` costs today
+
+A repository of 20 archives over the same 10,000-file tree, so 200,020 items and 10,001
+distinct paths. `find` reads the item stream of every selected archive:
+
+| archives | items scanned | `sh:` pattern | `re:` pattern |
+|---:|---:|---:|---:|
+| 1 | 10,001 | 0.435 s | 0.346 s |
+| 5 | 50,005 | 1.717 s | 1.325 s |
+| 10 | 100,010 | 3.298 s | 2.461 s |
+| 20 | 200,020 | 7.069 s | 4.784 s |
+
+Linear in archives, about 35 µs per item. The command's own doc comment already said
+"minutes, not milliseconds" for hundreds of archives, and that is confirmed: 100 archives of
+118,866 items extrapolates to roughly seven minutes.
+
+### The structural fact: paths repeat once per archive
+
+200,020 items, **10,001 distinct paths** - a repetition factor of exactly 20, the number of
+archives. That is the whole opportunity: anything that indexes *distinct paths* is N times
+smaller than the scan it replaces, where N is how many archives you keep. A year of daily
+backups has N = 365.
+
+### bluge, measured on that path set and on a synthetic million
+
+| paths | plain regex scan | bluge term query | bluge index size | bluge build |
+|---:|---:|---:|---:|---:|
+| 10,001 | **3.1 ms** | 11.3 ms | 1.8 MB | 0.8 s |
+| 200,020 | **85 ms** | 193 ms | 26 MB | 16.0 s |
+| 1,000,000 | 258–326 ms | **133 ms** | 135 MB | 87.1 s |
+
+**Below a million paths, scanning them beats indexing them.** bluge only pulls ahead at a
+million, and then by about 2x on a term query, for an index 3.9x the size of the raw path
+text and 87 seconds to build.
+
+### The finding underneath: the cost is not the matching
+
+`borge find` takes 7,069 ms over 200,020 items. A plain regex scan of those same 200,020
+paths, already in memory, takes **85 ms** - 83x less. The time is going into reading and
+decoding item streams: decompress, verify the chunk id with SHA-256, msgpack-decode each
+item. A profile agrees, putting item decode, allocation and SHA-256 together above half.
+
+So the useful thing is not an inverted index. It is **not re-decoding the item streams**, and
+a flat cache of distinct paths per archive delivers that: 10,001 paths is 480 kB of text, and
+scanning it answers the same query in 3 ms.
+
+### What bluge would be for, and it is not this
+
+bluge is a full-text engine. Its strengths - relevance ranking, boolean and fuzzy queries,
+tokenised search over prose - answer questions borge does not ask. `borge find` matches
+*paths* with shell globs and regexes, and an inverted term index cannot accelerate an
+arbitrary regex at all; it would enumerate the term dictionary.
+
+The capability bluge would genuinely add is full-text search over file *contents* - "which
+archives contain a file mentioning X". That is a real feature, and it is also a different
+and much larger cost: it means decompressing every chunk of every file to index it, which
+is the price of a full restore, per backup.
+
+### The dependency, since it is part of the decision
+
+borge has **8 direct dependencies and 17 modules in total**, and §0.4 says to prefer the
+standard library. bluge brings **67 modules**, including gonum, `gonum.org/v1/plot`,
+`rsc.io/pdf` and `golang.org/x/image`. Most are indirect and would not all be compiled in,
+but the module graph is what a reader audits and what a supply-chain review has to cover.
+
+### Recommendation, and what is not being decided here
+
+**Decline bluge.** Keep `find` as it is for now, and note that a **path cache** - distinct
+paths per archive, stored beside the repository, no format change - is worth roughly 80x on
+this workload and costs one flat file. It is not built here because T7's question was
+whether bluge is the answer, and it is not; proposing the alternative is in scope, building
+it is a new task.
+
+### Limits
+
+- The bluge configuration is a competent default, not a tuned one: keyword field plus a
+  text field, `NewMatchQuery`, top-100 with scoring that borge would not need. A specialist
+  could narrow the gap, and the 10,001- and 200,020-path results would have to reverse
+  entirely to change the conclusion.
+- Query latency is measured on a warm index in the same process. A cold open would be worse
+  for bluge and unchanged for a flat file.
+- The million-path corpus is synthetic. Real path sets share prefixes far more heavily,
+  which favours both an inverted index and a prefix-compressed flat file.

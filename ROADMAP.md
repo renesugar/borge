@@ -265,13 +265,24 @@ none", 10 to 18 MB on a million files — and that case is arithmetic, not a ben
    same device reaches 4.3x across separate directories and about 1.75x inside one. **Note this is measurable and possibly deliverable without any format
    change at all** — try it in Stage 9 first, and only change the format if Stage 9
    proves it is not enough.
-2. **`blugelabs/bluge` for indexing.** Evaluate as a replacement for the chunk index
-   and/or as a new capability (content/metadata search across archives — `borg find`
-   is currently a linear scan). Bluge worked well in `movenotes-v3`. Be honest about
-   the fit: bluge is an inverted-index search engine, and the chunk index is a
-   256-bit-key hash table with a 48-byte value — a different data structure for a
-   different job. The likely outcome is **bluge for archive/file search, borghash
-   retained for the chunk index**, but measure before concluding.
+2. ~~**`blugelabs/bluge` for indexing.**~~ **Evaluated and declined 2026-08-30 (R0 T7).**
+   The predicted outcome was "bluge for archive/file search, borghash retained for the chunk
+   index". borghash is retained, but bluge lost the search half too, on measurement: below
+   about 200,000 paths a plain linear scan is *faster* than bluge, and at a million it wins
+   by roughly 2x for an index 3.9x the size of the raw path text, 87 s to build, and 67
+   transitive modules against borge's 17.
+
+   **The useful finding is what `find` actually spends its time on.** It costs 7,069 ms over
+   200,020 items; a regex scan of those same paths already in memory costs 85 ms. The time
+   is item-stream decoding — decompress, verify the chunk id, msgpack-decode — not matching.
+   And paths repeat once per archive, so a repository of 20 archives holds 200,020 items
+   over 10,001 distinct paths.
+
+   **So the open opportunity is a path cache**, not an inverted index: distinct paths per
+   archive, stored beside the repository, no format change, worth roughly 80x on this
+   workload for one flat file. It is not built yet, and `PLAN.md` records why bluge is not
+   the way to get there. Full-text search over file *contents* remains the one thing bluge
+   would genuinely add, and it costs a full decompression pass per backup to index.
 3. ~~**zstd as the default compression** (borg #10085) once the benchmark supports it —
    the reference numbers give zstd `SpeedFastest` a better ratio *and* comparable
    speed versus lz4-class options.~~ **Done 2026-08-30 (R0 T6): the default is `zstd,1`.**
