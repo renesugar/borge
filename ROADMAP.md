@@ -63,8 +63,16 @@ therefore smaller than the ratio suggests; the seventh win, the create pipeline,
 one that is engineering rather than repair, and it is the one that helped least. And one ceiling is not borge's to fix: `crypto/cipher`'s single-block API caps
 *any* Go OCB implementation near 154 MB/s, which makes AES-OCB 19x slower than borg's
 OpenSSL and *inverts* the mode ranking — the mode that should win on AES-NI hardware loses
-to ChaCha20-Poly1305 by 5.7x. It is filed as [golang/go#81029][go81029], the real-corpus
-number it asked for is measured, and posting it is the author's to do.
+to ChaCha20-Poly1305 by 5.7x. It is filed as [golang/go#81029][go81029], and the real-corpus
+number it asked for was measured and **posted on 2026-08-29** as
+[`#issuecomment-5465158031`](https://github.com/golang/go/issues/81029#issuecomment-5465158031).
+
+**Correcting the archive, which cannot correct itself.** `plans/PORTING_PLAN.md` §12.5 step
+1 and its §14 tracker row both say the comment "awaits the author posting it". That was
+already false when written: it was posted at 22:07 UTC, hours before those sentences were.
+The archived plan is not edited, so the correction lives here — and in
+`docs/upstream/go81029-comment.md`, which carries the posted text and the note on how the
+error survived four separate statements without anyone querying the issue.
 
 [go81029]: https://github.com/golang/go/issues/81029
 

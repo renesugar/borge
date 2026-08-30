@@ -1,10 +1,21 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Draft comment for golang/go#81029
+# Comment for golang/go#81029 — posted 2026-08-29
 
-Measured 2026-08-29 for `plans/PORTING_PLAN.md` §12.1i. **Not posted** — it belongs on the
-issue under the account that filed it, so the person answering follow-up questions about
-the machine is the person who ran it.
+Measured 2026-08-29 for `plans/PORTING_PLAN.md` §12.1i. **Posted 2026-08-29 22:07 UTC** as
+[`#issuecomment-5465158031`](https://github.com/golang/go/issues/81029#issuecomment-5465158031),
+by the account that filed the issue, so the person answering follow-up questions about the
+machine is the person who ran it. The body below is what was posted, byte for byte.
+
+**This file said "Not posted" for eleven hours after it was.** It was drafted here, posted
+at 15:07 local, and committed at 15:53 still carrying the old sentence; §12.5 and the §14
+tracker then repeated it, and `ROADMAP.md` repeated it again at 22:16. Four statements, all
+false when written, none of them checked against the one place that could answer — the
+issue itself, which `gh api repos/golang/go/issues/81029/comments` reads in a second. The
+plan's two copies are frozen in the archive and are corrected in `ROADMAP.md` RP instead.
+Recorded here rather than quietly fixed, because a claim about the outside world that
+nobody verified is exactly what §2.1 is about, and this one was made in the same session
+that wrote §12.6's table of claims withdrawn on measurement.
 
 Everything below is one idle machine: Intel i5-9300H (Coffee Lake, 4 cores / 8 threads,
 AES-NI, AVX2, **no** SHA-NI), Go's stdlib crypto, borg 2.0.0b23 for the reference numbers.
