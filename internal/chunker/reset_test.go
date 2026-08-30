@@ -14,7 +14,7 @@ import (
 // borge built a chunker per file where borg builds one per archive, and the keyed tables
 // are derived from a CSPRNG: 1.75 ms for fastcdc, 4.35 ms for buzhash64, which over the
 // 118,866-file corpus the brief names is about 3.5 minutes of table construction before a
-// byte is chunked (docs/PORTING_PLAN.md §12.1).
+// byte is chunked (plans/PORTING_PLAN.md §12.1).
 //
 // The obligation is that a reset chunker chunks exactly as a fresh one does. If it did
 // not, every archive written after this change would have different chunk boundaries from

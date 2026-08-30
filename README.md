@@ -33,7 +33,7 @@ commands and every repository backend borg has: local paths, `sftp:`, `s3:`/`b2:
 missing — `mount`, `umount`, `webdav` — are deliberate non-goals, not gaps.
 
 The port targets the **borg 2.x repository format** (repository version 4), pinned to
-the upstream commit recorded in `docs/PORTING_PLAN.md`. Correctness is defined as
+the upstream commit recorded in `plans/PORTING_PLAN.md`. Correctness is defined as
 bidirectional interoperability with that borg: an archive written by borg must restore
 identically with borge, and vice versa. That is a test suite rather than an intention —
 both tools write into one repository, over each backend, and each reads what the other
@@ -46,7 +46,7 @@ were found — are written down one by one in [`docs/DIVERGENCES.md`](docs/DIVER
 
 Every stage gate has an evidence bundle: the commit, the full test log, the coverage
 gates, the pinned borg version and a sha256 manifest, named in the stage's row in
-[`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md) and in the release tag.
+[`plans/PORTING_PLAN.md`](plans/PORTING_PLAN.md) and in the release tag.
 
 ## Why
 
@@ -62,7 +62,7 @@ Three things motivated the port, in priority order:
 
 ## Documentation
 
-- [`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md) — the staged porting plan and its gates
+- [`plans/PORTING_PLAN.md`](plans/PORTING_PLAN.md) — the staged porting plan and its gates
 - [`ROADMAP.md`](ROADMAP.md) — the work that is not a porting stage: format and indexing
   changes, evidence preservation, the documentation system, and the future GUI
 - [`AGENTS.md`](AGENTS.md) — how the repository is built, tested, planned and tracked

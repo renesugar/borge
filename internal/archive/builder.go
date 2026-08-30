@@ -327,7 +327,7 @@ func (b *Builder) AddCompressedChunk(id []byte, meta *repoobj.Meta, compressed [
 // One chunker is kept and reset per file, because building one is not free: the keyed
 // Gear and buzhash tables come from a CSPRNG, measured at 1.75 ms for fastcdc and 4.35 ms
 // for buzhash64, which over a 118,866-file directory is about 3.5 minutes of table
-// construction before a byte is chunked (docs/PORTING_PLAN.md §12.1). borg builds one per
+// construction before a byte is chunked (plans/PORTING_PLAN.md §12.1). borg builds one per
 // archive; borge was building one per file.
 //
 // The cache is keyed on the parameters and the seed rather than assumed: transfer

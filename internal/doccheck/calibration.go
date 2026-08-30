@@ -22,7 +22,7 @@ import (
 // They are extracted from git by scripts/build-doccheck-calibration.py and verified
 // against git by TestCalibrationMatchesGit, so a case cannot be edited into agreeing with
 // the checker and cannot describe a change that never happened. That second guard is not
-// hypothetical: the table in docs/PORTING_PLAN.md 2.1.1 listed a placeholders before/after
+// hypothetical: the table in plans/PORTING_PLAN.md 2.1.1 listed a placeholders before/after
 // pair, and git has no trace of it. Building the set from history is what found that.
 
 // Verdict is what the checker can say about a claim.

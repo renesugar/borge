@@ -5,7 +5,7 @@
 The cases are real documentation claims that were true, went false, and were corrected -
 paired with the code they are about. They are extracted from git rather than written here
 so that the set cannot contain a case that never happened. That is not a hypothetical
-worry: the table in docs/PORTING_PLAN.md 2.1.1 listed a placeholders before/after pair
+worry: the table in plans/PORTING_PLAN.md 2.1.1 listed a placeholders before/after pair
 that git has no trace of, and building this set is what found it.
 
 Each case records the commit, the path and the byte-exact text. TestCalibrationMatchesGit

@@ -86,7 +86,7 @@ func (e *Env) lookup(name string) (string, bool) {
 //borge:about Env.lookupBorg
 var _ = helpText
 
-// lookupBorg reads BORGE_<name>, falling back to BORG_<name> (docs/PORTING_PLAN.md §0.5).
+// lookupBorg reads BORGE_<name>, falling back to BORG_<name> (plans/PORTING_PLAN.md §0.5).
 func (e *Env) lookupBorg(name string) (string, bool) {
 	if v, ok := e.lookup("BORGE_" + name); ok {
 		return v, true

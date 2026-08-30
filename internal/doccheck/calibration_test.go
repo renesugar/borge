@@ -19,7 +19,7 @@ import (
 // So each case names a commit, a path and a line range, and the text it carries must be
 // what git holds there.
 //
-// It also catches the failure that motivated the guard. docs/PORTING_PLAN.md 2.1.1 lists a
+// It also catches the failure that motivated the guard. plans/PORTING_PLAN.md 2.1.1 lists a
 // placeholders before/after pair among the five calibration cases; the placeholders topic
 // did not exist before the commit named, so there is no "before" text and no such pair.
 // The table was written from memory and nothing checked it, which is the exact defect the

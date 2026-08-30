@@ -2,11 +2,11 @@
 
 This file owns the work that is not a porting stage, and it outlives the porting plan.
 
-While the port is open, [`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md) owns the
-borg-to-Go port, its compatibility gates, and Stages 0-9. When stage 9 closes, that plan
-is archived in [`plans/`](plans/) and the current documents become this roadmap plus
-`PLAN.md`, the plan for whatever roadmap item is being implemented now. `AGENTS.md`
-describes that workflow.
+The port closed on 2026-08-29 and [`plans/PORTING_PLAN.md`](plans/PORTING_PLAN.md) is
+now an archive: it owns the record of the borg-to-Go port, its compatibility gates and
+Stages 0-9, and a great deal of the source still cites it by section for *why the code is
+this shape*. The current documents are this roadmap plus [`PLAN.md`](PLAN.md), the plan for
+whatever roadmap item is being implemented now. `AGENTS.md` describes that workflow.
 
 **On the numbering.** RP is the port; it has letters rather than a number because it
 predates this file and its stages are numbered already. R0 is not the first priority; it is
@@ -14,22 +14,48 @@ the oldest item. It was Stage 10
 of the porting plan and moved here on 2026-08-27, because it is work that begins after the
 port is complete. The identifier is a name, not a rank.
 
-**What is next, as of 2026-08-28.** R1 has one item open and R2 is complete, so the
-remaining work before the first GitHub push is **RP's Stage 9** — the performance baseline,
-whose investigation is done (`docs/PORTING_PLAN.md` §12.1–12.5) and whose measurement and
-fixes are not — and then **R0**, which begins only once Stage 9 has said what it justifies.
-R0.1 item 1 is explicitly a Stage 9 experiment first: large-directory restore may be
-deliverable with no format change at all, and the format must not move until Stage 9 shows
-that it has to.
+**What is next, as of 2026-08-29.** RP is complete, R2 is complete, and R1 has one item
+open — an independently backed-up digital copy of the ISO and its custody log, which blocks
+nothing. **R0 is current**, planned in [`PLAN.md`](PLAN.md).
+
+Stage 9 has now said what it justifies, and the answer changes R0's shape rather than
+confirming it. R0 item 1 was explicitly a Stage 9 experiment first — large-directory
+restore may be deliverable with no format change at all, and the format must not move until
+the measurement shows it has to. Stage 9 ran part of that experiment and **found against the
+theory the item is built on**: removing about 1.07 million syscalls from an extract returned
+about three seconds, and the one large restore win needed no format change at all. The two
+experiments that would settle it — read *order* and parallel writers — were not run, and
+they are the first two tasks in `PLAN.md` precisely because either could remove the
+argument for changing the format.
 
 ## Current priorities
 
 ### RP. The borg-to-Go port (Stages 0-9)
 
-State: **Stages 0-8 done; Stage 9 in progress.** Owned by
-[`docs/PORTING_PLAN.md`](docs/PORTING_PLAN.md), which is the current plan while this
-milestone is open; its §14 tracker is the authority on stage state and is not duplicated
-here.
+State: **complete (2026-08-29).** All nine stages done.
+[`plans/PORTING_PLAN.md`](plans/PORTING_PLAN.md) is the plan it was executed from, now
+archived; its §14 tracker is the authority on stage state and is not duplicated here.
+
+**The outcome.** borge implements 33 of borg's 36 commands — the other three, `mount`,
+`umount` and `webdav`, are declared non-goals — reads and writes borg 2's repository format
+in both directions under a gate that runs on every commit, and on the pathological corpus
+of 118,866 files is **5.5x faster than borg on create and 4.2x on extract**, with one
+regression: create peak RSS, 337 MiB against borg's 249, which tracks `BORGE_PACK_MAX_SIZE`
+and falls to 244 MiB at 2 MB packs. **No cgo dependency was taken**, so the
+`CGO_ENABLED=0` cross-compilation the desktop and mobile goal depends on is intact.
+
+**Two things worth carrying forward.** Six of the seven performance wins were borge's own
+bugs rather than anything about Go, and five of those six were the same bug in different
+clothes: work meant to happen once per *process* happening once per *item* — a chunker, an
+lz4 compressor, a zstd encoder, a user lookup, a pack file open. The remaining headroom is
+therefore smaller than the ratio suggests; the seventh win, the create pipeline, is the only
+one that is engineering rather than repair, and it is the one that helped least. And one ceiling is not borge's to fix: `crypto/cipher`'s single-block API caps
+*any* Go OCB implementation near 154 MB/s, which makes AES-OCB 19x slower than borg's
+OpenSSL and *inverts* the mode ranking — the mode that should win on AES-NI hardware loses
+to ChaCha20-Poly1305 by 5.7x. It is filed as [golang/go#81029][go81029], the real-corpus
+number it asked for is measured, and posting it is the author's to do.
+
+[go81029]: https://github.com/golang/go/issues/81029
 
 **Listed here because every milestone belongs on this roadmap, and this one was missing.**
 The roadmap was written after the port had started, so the port was never given an entry —
@@ -37,8 +63,8 @@ and the convention is that development moves to the next roadmap item and `PLAN.
 written for it. With the port absent and R1 and R2 completed *during* it, the sequence
 stopped being legible: after R2 closed there was no `PLAN.md`, which reads as a mistake
 rather than as "the port is current again". It is not a mistake, and now it is written
-down. When Stage 9 closes, the porting plan is archived to `plans/` and `PLAN.md` becomes
-the plan for R0.
+down. Stage 9 closed on 2026-08-29, the porting plan was archived to `plans/`, and
+`PLAN.md` became the plan for R0.
 
 ### R1. Preserve the pre-GitHub evidence record
 
@@ -82,7 +108,7 @@ preservation work and are tracked under *Later maintenance*, where they block no
 
 State: **complete (2026-08-28).**
 [`plans/r2-documentation-system-20260828.md`](plans/r2-documentation-system-20260828.md)
-is the plan it was executed from and carries the design forward; `docs/PORTING_PLAN.md` §2.1 remains the record of where it came from
+is the plan it was executed from and carries the design forward; `plans/PORTING_PLAN.md` §2.1 remains the record of where it came from
 and what stage 8 found. Execution is tracked here because it is documentation
 infrastructure, not part of the borg port.
 
@@ -151,21 +177,30 @@ After Stage 9 and R0, a GitHub project is created and the completed project is p
 `origin`. R2 completing does not trigger it: the port is not finished while Stage 9's
 baseline is unmeasured, and R0 changes the on-disk format, which is not a thing to do
 first in public. After that first push, `main` is protected: work lands on `develop` and is
-merged into `main` by pull request, which is the branch model `docs/PORTING_PLAN.md` §2
+merged into `main` by pull request, which is the branch model `plans/PORTING_PLAN.md` §2
 settled on.
 
 ## After the port closes
 
 ### R0. Format and indexing changes
 
-State: **not started.** Moved here from `docs/PORTING_PLAN.md` §13 (Stage 10) on
-2026-08-27. Only after Stages 7 and 9. Everything here **breaks format compatibility**, so
-it goes behind an explicit repository version bump and a documented migration.
+State: **current, planned in [`PLAN.md`](PLAN.md) (2026-08-29); no task started.** Moved
+here from `plans/PORTING_PLAN.md` §13 (Stage 10) on 2026-08-27, and reached on 2026-08-29
+when Stage 9 closed. Everything here **breaks format compatibility**, so it goes behind an
+explicit repository version bump and a documented migration.
+
+**Stage 9 weakened item 1's premise rather than confirming it**, and `PLAN.md` is ordered
+around that: the first two tasks are the read-order and parallel-writer experiments that
+were never run, both of which need no format change and either of which could close R0.2's
+gate without one. As it stands, **no measurement in this project yet requires the format to
+move.** The strongest case for a change is the last entry under R0.1's *"not bugs, but
+constraints worth revisiting"* — the 9 to 18 bytes every item spends saying "checked, found
+none", 10 to 18 MB on a million files — and that case is arithmetic, not a benchmark.
 
 1. **Large-directory packing.** *(Stage 9 note, 2026-08-29: part of the restore-side cost
    this item is about was simply that `PosixFS.Load` reopened the pack on every object read
    - 118,866 opens for a handful of packs. Keeping the handle open bought 1.16x on extract
-   with no format change, and `docs/PORTING_PLAN.md` §12.1e has the numbers. What remains
+   with no format change, and `plans/PORTING_PLAN.md` §12.1e has the numbers. What remains
    unmeasured is whether read *order* matters once the file stays open; nothing has looked
    for that yet, so the sort-by-`(pack_id, obj_offset)` proposal below is neither supported
    nor refuted. And a caution added 2026-08-29 from §12.1f: removing about 1.07 million
@@ -207,7 +242,7 @@ review of known items rather than a fresh audit.
 - **`shellpattern.translate`'s vacuous guard.** borg's `(`, `|` and `)` passthrough checks
   `pat[i-1] != "\\"` *after* `i` has already advanced, so the guard always passes and
   `\(` becomes a backslash plus a group opener rather than a literal parenthesis. borge
-  reproduces it (see `docs/PORTING_PLAN.md` §6 and `internal/patterns`). A user cannot
+  reproduces it (see `plans/PORTING_PLAN.md` §6 and `internal/patterns`). A user cannot
   currently match a filename containing a literal `(` with an `sh:` pattern. Fixing it
   changes which files a pattern selects, which is why it waits.
 - **`stat.filemode` renders an unknown file type as `?`.** borg's C `_stat` and its
@@ -272,7 +307,7 @@ Anything worse than linear in that path defeats the intent. What is known so far
   pops a directory when the next path leaves it, rather than searching. It does allocate a
   string per item for the prefix comparison, which is 118,866 allocations on the
   pathological corpus and trivially removable.
-- The **chunker-per-file construction** (`docs/PORTING_PLAN.md` §12.1) is a per-file
+- The **chunker-per-file construction** (`plans/PORTING_PLAN.md` §12.1) is a per-file
   millisecond cost on the *create* side, worth ~3.5 minutes on that corpus alone.
 - **Restore-side ordering** is item 1 above and is the one with real headroom.
 
@@ -341,5 +376,12 @@ no repository-format code is duplicated in the frontend.
   than useful. A larger model may cross it, and the score is the only thing that decides.
   If cases are added, add them *before* touching the prompts — seven designs were already
   tried against these thirteen, and that is as much selection pressure as they will bear.
+- **Get the OCB implementation independently reviewed.** Carried out of the porting plan's
+  risk register on 2026-08-29, where it had sat as "worthwhile before Stage 7" and did not
+  happen. The risk was downgraded on evidence, not on argument — all 16 primary and all 9
+  appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across
+  every suite and size tested — so this is a double-check of a component that already
+  agrees with a reference implementation, not an open defect. It is here rather than in the
+  archive because an archive is not a place to look up what to do next.
 - Revisit this roadmap at every release. Work moved into the porting plan must be removed
   here so two trackers cannot disagree silently.

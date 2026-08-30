@@ -116,7 +116,7 @@ docactionable:
 spdx:
 	./scripts/check-spdx.sh
 
-## layering: check that imports point downward (docs/PORTING_PLAN.md section 1)
+## layering: check that imports point downward (plans/PORTING_PLAN.md section 1)
 layering:
 	./scripts/check-layering.sh
 

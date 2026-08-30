@@ -18,7 +18,7 @@ import (
 
 // docactionable: can a reader turn this topic into a working command?
 //
-// docs/PORTING_PLAN.md 2.1.2 makes the argument. A true sentence can be useless - "borge
+// plans/PORTING_PLAN.md 2.1.2 makes the argument. A true sentence can be useless - "borge
 // supports patterns" is unfalsifiable and unactionable - so the useful test of help text is
 // constructive: produce a command from the prose alone and run it. A topic that yields a
 // working command is actionable. A topic that yields one which fails to parse, or does
@@ -474,7 +474,7 @@ func TestGeneratedLineIsCleanedUp(t *testing.T) {
 // borge and requires it to behave the way the case says.
 //
 // This is the guard the set was missing, and it was missing it for exactly one day. The
-// first version had three pairs, taken from docs/PORTING_PLAN.md 2.1.2 - and two of them
+// first version had three pairs, taken from plans/PORTING_PLAN.md 2.1.2 - and two of them
 // were no longer pairs. "borge tag ARCHIVE --add @PROT" and "borge create ... ~ --exclude
 // ..." were broken by the flag-order defect of DIVERGENCES #20, and args.go's permute has
 // since fixed it, so both now work. The prose was corrected in 2026-08 and then the program

@@ -14,7 +14,7 @@ Portions of this software are derived from BorgBackup (https://github.com/borgba
 
   The Go code in this project is a translation of borg's Python and Cython source.
   It has been modified: it is written in Go, the module and file layout differ, and
-  behaviour differs where noted in the source headers and in docs/PORTING_PLAN.md.
+  behaviour differs where noted in the source headers and in plans/PORTING_PLAN.md.
 
   The name "borg", the name "BorgBackup" and the names of the borg authors are not
   used to endorse or promote this project. This project is not produced, sponsored

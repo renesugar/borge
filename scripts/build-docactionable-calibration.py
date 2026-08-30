@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build docactionable's calibration set out of this repository's history.
 
-docs/PORTING_PLAN.md 2.1.2 names the first known-answer cases itself: three commands that
+plans/PORTING_PLAN.md 2.1.2 names the first known-answer cases itself: three commands that
 the help topics documented and that did not work. Each is a before/after pair - the topic
 text as it stood when the command was wrong, and as it stands corrected - so the only thing
 that varies between the two halves is the prose the model is asked to act on.

@@ -52,7 +52,7 @@ func cmdRepoCreate(e *Env, args []string) int {
 		// non-goal for 1.0 (PORTING_PLAN §0.6): it needs the borg 1 reader, which is a
 		// larger piece of work with its own format reference.
 		e.errorf("--from-borg1 is not supported: borge does not read borg 1.x repositories " +
-			"(docs/PORTING_PLAN.md §0.6). Use borg itself to transfer from a 1.x repository first.")
+			"(plans/PORTING_PLAN.md §0.6). Use borg itself to transfer from a 1.x repository first.")
 		return ExitError
 	}
 	// Resolved before anything is created, so that a bad source location fails before a

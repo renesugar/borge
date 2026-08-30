@@ -2,7 +2,7 @@
 
 //go:build linux
 
-// Package bench is the Stage 9 performance baseline (docs/PORTING_PLAN.md §12).
+// Package bench is the Stage 9 performance baseline (plans/PORTING_PLAN.md §12).
 //
 // It runs borge, and borg where it is available, over the same corpus on the same machine
 // and emits JSON: wall time, CPU time, peak RSS, repository size and chunk count.

@@ -202,7 +202,7 @@ func TestAssertIDPlaceFromEnv(t *testing.T) {
 		t.Error("an unconfigured place was enabled")
 	}
 
-	// borge's own variable wins over borg's (docs/PORTING_PLAN.md §0.5).
+	// borge's own variable wins over borg's (plans/PORTING_PLAN.md §0.5).
 	t.Setenv("BORGE_ASSERT_ID", "transfer")
 	places, err = assertIDPlacesFromEnv()
 	if err != nil {

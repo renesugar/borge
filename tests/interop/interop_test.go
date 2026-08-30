@@ -2,7 +2,7 @@
 
 //go:build linux
 
-// Package interop is the stage 7 gate: the matrix in docs/PORTING_PLAN.md §10.
+// Package interop is the stage 7 gate: the matrix in plans/PORTING_PLAN.md §10.
 //
 // # What this is for
 //

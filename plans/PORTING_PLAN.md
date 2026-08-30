@@ -2,7 +2,7 @@
 
 Status: **Complete. All nine stages are done, and this plan is an archive.** Stage 8 closed 2026-08-22 with `borge-stage-8-20260822T003631Z.zip` and tagged `v0.8.0`: **33 of borg's 36 commands** (the other three - `mount`, `umount`, `webdav` - are §0.6 non-goals), every remote backend (`sftp`, `s3`/`b2`, `rclone`, `rest://` with `borge serve --rest`), both evidence gates with no unexplained gap, and the interoperability gate green in both directions. **Stage 9 closed 2026-08-29** (§12.6): create 5.5x and extract 4.2x faster than borg on the pathological corpus, one regression in create peak RSS that a pack-size knob bounds below borg, no cgo dependency taken, and the prediction of §12.2 confirmed - the largest wins were pure Go and were borge's own bugs. Stage 10 became ROADMAP R0 on 2026-08-27; §2.4 records what a `v1.0.0` tag would have to be accompanied by.
 
-**Stage 9 is closed; this plan is complete and is archived to `plans/` next.** What to do next lives in [`ROADMAP.md`](../ROADMAP.md); what is here is why the code is the shape it is, which is why so much of the source still cites it by section.
+**This file was archived to `plans/PORTING_PLAN.md` on 2026-08-29 and is no longer edited.** What to do next lives in [`ROADMAP.md`](../ROADMAP.md) and in `PLAN.md`; what is here is why the code is the shape it is, which is why so much of the source still cites it by section.
 Last updated: 2026-08-29.
 
 `AGENTS.md` at the repository root orients a new agent on how to build, test and check
@@ -108,7 +108,7 @@ domains). Environment variables are a judgment call and are treated in §0.5.
 ### 0.3 License
 
 Apache-2.0 for borge as a whole, with the upstream BSD notices preserved. Full
-analysis in [`LICENSING.md`](LICENSING.md). Settled; not revisited per stage.
+analysis in [`LICENSING.md`](../docs/LICENSING.md). Settled; not revisited per stage.
 
 ### 0.4 Language and dependency policy
 
@@ -800,7 +800,7 @@ strict clean-room firewall**. This port read and translated borg source under it
 license; `LICENSING.md` says so. Hashes demonstrate byte identity, signatures identify a
 key subject to key custody, and an RFC 3161 token binds a TSA assertion to a message
 imprint. None proves by itself that a test result is true or makes an artifact legally
-admissible. [`docs/EVIDENCE.md`](EVIDENCE.md) records the scope and authoritative sources.
+admissible. [`docs/EVIDENCE.md`](../docs/EVIDENCE.md) records the scope and authoritative sources.
 
 The preservation set created before the first GitHub push has three layers:
 
@@ -3958,13 +3958,23 @@ it later than it says:
    find more - the pack-buffer release, four workers instead of two - came back null.
 
 **What the stage cost in withdrawn claims** is worth recording next to the wins, because it
-is the part a summary would drop. Seven previously-stated claims were withdrawn on
-measurement, four of them written during this stage: a phantom create regression that was
-transient machine load (§12.1e), a 70 MB RSS saving that was run-to-run spread (§12.1g), a
-1.69x pipeline figure and the contention story that explained it (§12.1h), and the comment
-asserting that file times had to be set after `close` (§12.1f). The method that caught all
-four is the same one: pair the runs, interleave them, and treat any effect smaller than
-about 50 MB of RSS or 0.5 s of wall time on this machine as unmeasured.
+is the part a summary would drop. Seven statements were withdrawn or corrected on
+measurement, and six of them were written *during* this stage:
+
+| withdrawn | what it actually was |
+|---|---|
+| a create regression to 55.3 s (§12.1e) | transient machine load; three back-to-back runs gave 35.3, 34.8, 34.1 |
+| a 70 MB peak-RSS saving from releasing pack buffers (§12.1g) | run-to-run spread; eight interleaved pairs put it at -5 MB, sd 24 |
+| the pipeline's 1.69x (§12.1h) | sampling 1, 4 and 8 workers, which cannot tell "4 is best" from "the peak is below 4" |
+| the contention story explaining that curve (§12.1h) | an explanation satisfying enough to stop questioning; a second sweep contradicted it |
+| chunk order preserving a byte-reproducible repository (§12.1h) | two *serial* creates already produce different pack names; the real reason order matters is sharper |
+| "OCB costs 10%, implied 490 MB/s" (§12.1i) | a baseline that mixed a cipher difference with a hash difference |
+| that file times had to be set after `close` (§12.1f) | not written this stage, and false since it was: Linux stamps mtime in `write()` |
+
+Five of the seven were caught by the same method - pair the runs, interleave them, and treat
+any effect smaller than about 50 MB of RSS or 0.5 s of wall time on this machine as
+unmeasured. The other two were caught by being asked a question: whether two workers might
+beat four, and whether the OCB baseline was comparing like with like.
 
 ---
 
@@ -4002,7 +4012,7 @@ than no tracker: it is the document a new reader trusts first.
 | 6 | Write path: create | **done** 2026-08-17 | `borge-stage-6-20260817T071719Z.zip` |
 | 7 | **Interoperability gate** ⭐ | **done** 2026-08-17 | `borge-stage-7-clean-20260817T192652Z.zip` (see note) |
 | 8 | Remaining commands + remote backends | **done** 2026-08-22 — 33 of borg's 36 commands, the other three being the §0.6 non-goals `mount`, `umount` and `webdav`; both coverage gates report no unexplained gap. All fifteen items in §11's table are closed. Tagged `v0.8.0` | `borge-stage-8-20260822T003631Z.zip` |
-| 9 | Performance baseline vs borg | **done 2026-08-29** (§12.6). Investigated 2026-08-17 (§12.1–12.5), then measured and fixed: the chunker built once and reset (§12.1a), the first profiles (§12.1b), the lz4 compressor pooled (§12.1c) and the zstd encoders with it, three serial extract fixes (§12.1d–f), peak RSS measured and bounded by `BORGE_PACK_MAX_SIZE` (§12.1g), and an adaptive create pipeline that declines to run below 8 MiB (§12.1h). Closing run: **create 5.5x and extract 4.2x faster than borg**, with **one regression — create peak RSS, 337 MiB against 249** — which tracks pack size and falls to 244 MiB at 2 MB packs; the default stays at borg's 50 MB. Six of the seven wins were borge's own bugs. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s, measured on a real corpus at §12.1i and drafted as a comment the author has yet to post | bundling |
+| 9 | Performance baseline vs borg | **done 2026-08-29** (§12.6). Investigated 2026-08-17 (§12.1–12.5), then measured and fixed: the chunker built once and reset (§12.1a), the first profiles (§12.1b), the lz4 compressor pooled (§12.1c) and the zstd encoders with it, three serial extract fixes (§12.1d–f), peak RSS measured and bounded by `BORGE_PACK_MAX_SIZE` (§12.1g), and an adaptive create pipeline that declines to run below 8 MiB (§12.1h). Closing run: **create 5.5x and extract 4.2x faster than borg**, with **one regression — create peak RSS, 337 MiB against 249** — which tracks pack size and falls to 244 MiB at 2 MB packs; the default stays at borg's 50 MB. Six of the seven wins were borge's own bugs. One finding is not borge's to fix and is raised upstream as [golang/go#81029][go81029]: `crypto/cipher`'s single-block API caps *any* Go OCB near 154 MB/s, measured on a real corpus at §12.1i and drafted as a comment the author has yet to post | the stage-9 bundle is named in [`ROADMAP.md`](../ROADMAP.md) RP, because it is built from the commit that archives this file and an archive is not edited afterwards |
 | 10 | Format / indexing changes | **moved out of the port** 2026-08-27 → [`ROADMAP.md`](../ROADMAP.md) R0; not started | — |
 | — | **Doc anchors** (§2.1): tie help text to the code that implements it | **done 2026-08-28** — item 6 `TestHelpExamplesRun` 2026-08-18; items 1–4 (`docaudit`, `//borge:enumerates`, `docgen --help`, and `docgen --api` decided against) 2026-08-27; items 5 and 7 (`doccheck`, `docactionable`) 2026-08-28, both advisory and both calibrated against cases taken from git — `docactionable` passes its calibration, `doccheck` fails its own on the 1.5B model this hardware holds and says so. Tracked in [`ROADMAP.md`](../ROADMAP.md) R2, planned in `PLAN.md` | — |
 | — | **Evidence preservation** (§2.5, ROADMAP R1) | **catalogued, attested and verified** — master built 2026-08-25 UTC, all 18 ZIPs and the ISO signed and timestamped 2026-08-27, both before the first GitHub push; an independently backed-up copy and the physical discs remain | `evidence/manifest.json`; `borge-evidence-stages-0-8-20260825.iso`, SHA-256 `913f4c8b21079c7d4a8341f3beca976507207c78eadda6af5ce9ac0fba239d01` (outside git) |
@@ -4055,7 +4065,7 @@ harness §12 describes has not been built.
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
-| ~~**AES-OCB in pure Go**~~ | ~~Interop failure or, worse, a silent crypto bug~~ | **Downgraded 2026-08-16**: all 16 primary + all 9 appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across every suite and size tested. The ChaCha20-Poly1305 fallback is not needed. Independent review before Stage 7 remains worthwhile as a double-check. |
+| ~~**AES-OCB in pure Go**~~ | ~~Interop failure or, worse, a silent crypto bug~~ | **Downgraded 2026-08-16**: all 16 primary + all 9 appendix A RFC 7253 vectors pass, and envelopes are byte-identical to OpenSSL's across every suite and size tested. The ChaCha20-Poly1305 fallback is not needed. Independent review remains worthwhile as a double-check; it did not happen before Stage 7 and is carried to [`ROADMAP.md`](../ROADMAP.md) *Later maintenance* rather than left here, because this file is now an archive. |
 | **Upstream borg 2 checkout moving** — *materialised 2026-08-17* | Interop gate silently invalidated: every differential test failed at once with a traceback inside borg, which reads as a borge regression | Pin the commit; rebase deliberately with a reviewed diff. **Neither `borg --version` nor `borg-commit.txt` notices the checkout moving** — both are baked in at install time — so `mkbundle.sh` now reads the borg tree's real `HEAD` and warns on mismatch. See §0.1. |
 | ~~`borghash`/`borgstore` license unknown~~ | ~~Cannot port those components~~ | **Closed 2026-08-16**: both BSD-3-Clause, porting permitted (LICENSING.md §6) |
 | Surrogate-escaped path encoding | Silent path corruption on non-UTF-8 filenames | Fuzz round-trip in Stage 1.5; synthetic corpus in Stage 7 |
@@ -4063,5 +4073,5 @@ harness §12 describes has not been built.
 | Chunker boundary drift | Total dedup loss, invisible until the repo is huge | Byte-exact boundary differential test (Stage 1.4) |
 | Scope creep across the stages | Never finishing | Explicit non-goals (§0.6); one stage at a time; ask before advancing |
 | Usage limits interrupting work | Lost context, broken tree | Stage/task granularity, always-committable state, evidence bundles (§2) |
-| **Pure-Go performance shortfall** | Pressure to take a cgo dependency, which would forfeit the `CGO_ENABLED=0` cross-compilation that §12.3's mobile case depends on | Measured 2026-08-17 (§12.2): three of the four largest gaps are borge's own bugs and cost nothing to fix. Take those and the pipeline first, re-measure, and only then consider `avo`-generated assembly — which is still pure Go. A C library is the last resort, not the first. |
+| ~~**Pure-Go performance shortfall**~~ | ~~Pressure to take a cgo dependency, which would forfeit the `CGO_ENABLED=0` cross-compilation that §12.3's mobile case depends on~~ | **Closed 2026-08-29 (§12.6): the pressure never arrived.** §12.2 predicted on 2026-08-17 that three of the four largest gaps were borge's own bugs; Stage 9 found six such bugs, took them and the pipeline, and finished 5.5x ahead of borg on create and 4.2x on extract **with no cgo dependency**, so `CGO_ENABLED=0` is intact. One gap survives and is not borge's: `crypto/cipher`'s single-block API caps any Go OCB near 154 MB/s ([golang/go#81029][go81029], §12.1i). Its fix is `avo`-generated assembly or upstream — both still pure Go. A C library was never reached, which is what the mitigation ordering was for. |
 | **A stale plan** | The tracker said stages 4–10 were "not started" while 4–7 had shipped evidence bundles; a new reader trusts that table first | The tracker (§14) is part of finishing a stage, not a postscript. AGENTS.md says so. |

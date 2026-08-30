@@ -14,7 +14,7 @@ import (
 	"github.com/renesugar/borge/internal/repoobj"
 )
 
-// Chunking a file across a worker pool (docs/PORTING_PLAN.md §12.5 step 2).
+// Chunking a file across a worker pool (plans/PORTING_PLAN.md §12.5 step 2).
 //
 // # What is parallel and what is not
 //

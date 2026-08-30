@@ -562,7 +562,7 @@ func TestMemoryFootprint(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the memory footprint measurement in short mode")
 	}
-	const n = 1_623_610 // unique chunks in the recipedb corpus, per docs/PORTING_PLAN.md
+	const n = 1_623_610 // unique chunks in the recipedb corpus, per plans/PORTING_PLAN.md
 	var m0, m1, m2 runtime.MemStats
 
 	runtime.GC()

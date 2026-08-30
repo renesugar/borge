@@ -41,7 +41,7 @@
 // nothing: every user fragment was on a carrier, so a checker that looked only at
 // functions had an empty list and reported a clean tree.
 //
-// docs/PORTING_PLAN.md 2.1 has the design and the findings that produced it.
+// plans/PORTING_PLAN.md 2.1 has the design and the findings that produced it.
 package docs
 
 import (

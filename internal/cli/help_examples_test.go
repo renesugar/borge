@@ -21,7 +21,7 @@ import (
 // executed. Nothing executed these until 2026-08-17, when running the fifteen of them by
 // hand found three wrong - and one of the three was not a documentation bug at all but a
 // defect that silently stored data the user had asked to exclude (docs/DIVERGENCES.md
-// #20). See docs/PORTING_PLAN.md §2.1.2.
+// #20). See plans/PORTING_PLAN.md §2.1.2.
 //
 // So: every "borge ..." in every help topic is extracted, substituted against a scratch
 // repository built for the purpose, run, and checked - not only for its exit status but
@@ -756,7 +756,7 @@ func TestHelpExamplesRun(t *testing.T) {
 		if perTopic[topic.name] == 0 {
 			t.Errorf("\"borge help %s\" contains no command a reader can copy; "+
 				"prose that carries no example is the grade users do not rely on "+
-				"(docs/PORTING_PLAN.md §2.1.2)", topic.name)
+				"(plans/PORTING_PLAN.md §2.1.2)", topic.name)
 		}
 	}
 

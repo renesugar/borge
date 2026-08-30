@@ -49,12 +49,12 @@ func cmdTransfer(e *Env, args []string) int {
 	// full of borg 1 metadata.
 	if *fromBorg1 {
 		e.errorf("--from-borg1 is not supported: borge does not read borg 1.x repositories " +
-			"(docs/PORTING_PLAN.md §0.6). Transfer with borg itself, then use borge on the result.")
+			"(plans/PORTING_PLAN.md §0.6). Transfer with borg itself, then use borge on the result.")
 		return ExitError
 	}
 	if *upgrader != "NoOp" {
 		e.errorf("--upgrader=%s is not supported: borge implements borg's NoOp upgrader only, "+
-			"because the others convert borg 1.x data (docs/PORTING_PLAN.md §0.6)", *upgrader)
+			"because the others convert borg 1.x data (plans/PORTING_PLAN.md §0.6)", *upgrader)
 		return ExitError
 	}
 

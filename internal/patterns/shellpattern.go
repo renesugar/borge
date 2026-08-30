@@ -30,7 +30,7 @@ import (
 // PathSeparator is the separator the patterns are written against.
 //
 // borg uses os.path.sep, so a pattern written on Windows would translate differently
-// there. borge targets POSIX for 1.0 (docs/PORTING_PLAN.md §0.6) and hardcodes "/", which
+// there. borge targets POSIX for 1.0 (plans/PORTING_PLAN.md §0.6) and hardcodes "/", which
 // also means a repository's patterns mean the same thing wherever they are read.
 const PathSeparator = "/"
 

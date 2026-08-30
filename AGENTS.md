@@ -18,26 +18,29 @@ There is exactly **one current plan** at a time, and one long-lived roadmap.
 | file | what it is |
 |---|---|
 | `ROADMAP.md` | the numbered items of work that are not porting stages, and their state |
-| `docs/PORTING_PLAN.md` | the current plan **while the port is open**: stages 0-9, and the running record of what each stage actually did |
-| `PLAN.md` | the current plan for one roadmap item, once the port is closed |
+| `PLAN.md` | **the current plan**, for one roadmap item |
+| `plans/PORTING_PLAN.md` | the porting plan, archived 2026-08-29 when stage 9 closed: stages 0-9 and the running record of what each stage actually did. Still the reference for *why the code is this shape* — a great deal of the source cites it by section — but no longer a place to look up what to do next |
 | `plans/` | plans that are finished or superseded, archived unmodified |
 | `docs/DIVERGENCES.md` | every place borge deliberately differs from borg, numbered, with the reason |
 | `docs/FORMAT.md` | the on-disk format, with citations into borg's source |
 
 The workflow:
 
-1. **While the port is open** (through stage 9), `docs/PORTING_PLAN.md` is the plan and
-   `ROADMAP.md` holds everything the port does not own. The port is itself a roadmap
-   milestone — `ROADMAP.md` RP — because every milestone belongs there; it was added late,
-   and its absence is what made "no `PLAN.md`" look like an omission rather than like the
-   porting plan being current.
-2. **When stage 9 closes**, move `docs/PORTING_PLAN.md` to `plans/` unmodified and stop
-   editing it. Anything in it that describes unfinished non-porting work must already have
-   been moved into `ROADMAP.md` or a document under `docs/` before it is archived — an
-   archive is a record, not a place to look up what to do next.
+1. ~~**While the port is open** (through stage 9), `docs/PORTING_PLAN.md` is the plan and
+   `ROADMAP.md` holds everything the port does not own.~~ **The port closed 2026-08-29.**
+   It was itself a roadmap milestone — `ROADMAP.md` RP — because every milestone belongs
+   there; it was added late, and its absence is what made "no `PLAN.md`" look like an
+   omission rather than like the porting plan being current.
+2. ~~**When stage 9 closes**, move `docs/PORTING_PLAN.md` to `plans/` unmodified and stop
+   editing it.~~ **Done 2026-08-29**, to `plans/PORTING_PLAN.md`. Two link targets inside
+   it were repointed from `docs/`-relative to `../docs/` and nothing else changed, because
+   a record nobody can follow is not serving the purpose the rule protects; the rest of the
+   rule stands for the next archive. Anything in a plan that describes unfinished work must
+   already have been moved into `ROADMAP.md` or a document under `docs/` before it is
+   archived — an archive is a record, not a place to look up what to do next.
 3. **After that**, pick an item from `ROADMAP.md`, write `PLAN.md` for it — what the item
    is, how it is broken into committable tasks, and the gate that decides it is done — and
-   implement it one task at a time.
+   implement it one task at a time. **Current: R0**, planned in `PLAN.md`.
 4. **When the item is finished**, record the outcome in its `ROADMAP.md` entry, move
    `PLAN.md` to `plans/<item>-<YYYYMMDD>.md`, and write the next one. Two plans are never
    current at once, and `plans/` is never edited after the fact.
@@ -65,7 +68,7 @@ make test           # the Go test suite
 make check          # fmt, vet, lint, spdx, layering, test
 make borg2          # build the pinned borg 2 reference interpreter (needed by most tests)
 make coverage       # the stage 8 gates: borge's commands and per-command options against borg's
-make option-coverage # just the per-command option comparison (docs/PORTING_PLAN.md 11.2)
+make option-coverage # just the per-command option comparison (plans/PORTING_PLAN.md 11.2)
 make interop        # the stage 7 gate: the real-corpus interoperability matrix
 make evidence STAGE=stage-N   # build an evidence bundle
 make evidence-verify          # check the evidence catalog against the ZIPs on disk
@@ -115,7 +118,7 @@ The cases are verified against git by `TestCalibrationMatchesGit`, so one cannot
 into agreeing with the checker. Rebuild them with
 `python3 scripts/build-doccheck-calibration.py`.
 
-`make docactionable` asks the other question, from `docs/PORTING_PLAN.md` §2.1.2: not *is
+`make docactionable` asks the other question, from `plans/PORTING_PLAN.md` §2.1.2: not *is
 this sentence true* but **does it tell a reader what to type**. It gives the model one
 topic and a task, runs whatever command comes back against the same scratch repository
 `TestHelpExamplesRun` uses, and checks what the command did. Its calibration

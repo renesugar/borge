@@ -112,7 +112,7 @@ func ToSanitizedPath(path string) (string, error) {
 // slashes always; on POSIX this is the identity, because a backslash is an ordinary
 // character in a filename and converting it would corrupt the name.
 func Slashify(path string) string {
-	// POSIX only for now: borge does not support Windows (docs/PORTING_PLAN.md §15).
+	// POSIX only for now: borge does not support Windows (plans/PORTING_PLAN.md §15).
 	// When it does, this becomes strings.ReplaceAll(path, `\`, "/") under a build tag,
 	// together with MapChars and the drive-letter handling in MakePathSafe.
 	return path

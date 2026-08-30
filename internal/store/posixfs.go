@@ -21,7 +21,7 @@ import (
 // PosixFS stores objects as files under a base directory.
 //
 // This is the backend every local repository uses, and the only one borge implements
-// so far - sftp, rest, s3 and rclone are stage 8 (docs/PORTING_PLAN.md §5).
+// so far - sftp, rest, s3 and rclone are stage 8 (plans/PORTING_PLAN.md §5).
 type PosixFS struct {
 	basePath string
 	opened   bool

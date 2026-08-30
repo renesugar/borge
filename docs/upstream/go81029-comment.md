@@ -2,7 +2,7 @@
 
 # Draft comment for golang/go#81029
 
-Measured 2026-08-29 for `docs/PORTING_PLAN.md` §12.1i. **Not posted** — it belongs on the
+Measured 2026-08-29 for `plans/PORTING_PLAN.md` §12.1i. **Not posted** — it belongs on the
 issue under the account that filed it, so the person answering follow-up questions about
 the machine is the person who ran it.
 

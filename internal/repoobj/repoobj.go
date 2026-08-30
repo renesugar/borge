@@ -194,7 +194,7 @@ func (r *RepoObj) Key() key.Key { return r.key }
 func (r *RepoObj) IDHash(data []byte) []byte { return r.key.IDHash(data) }
 
 // assertIDPlacesFromEnv reads BORG_ASSERT_ID, honouring BORGE_ASSERT_ID first
-// (docs/PORTING_PLAN.md §0.5).
+// (plans/PORTING_PLAN.md §0.5).
 func assertIDPlacesFromEnv() (map[string]bool, error) {
 	value, ok := os.LookupEnv("BORGE_ASSERT_ID")
 	if !ok {

@@ -16,7 +16,7 @@ import (
 // borg cannot read, or a borge import that quietly stores the wrong bytes, is data loss
 // with no recovery - the repository is intact and unreadable.
 //
-// The library underneath was already gated at docs/PORTING_PLAN.md §1.3. What was never
+// The library underneath was already gated at plans/PORTING_PLAN.md §1.3. What was never
 // tested until now is the command: §1.3's gate text says "borge key export / borg key
 // import cross-check in both directions", and that was true of a library test while
 // `borge key` did not exist at all.

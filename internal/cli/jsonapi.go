@@ -118,7 +118,7 @@ func envelopeFor(
 // what it asked for is fine either way; one that iterates the object is not.
 //
 // command_line is absent here because borge does not read it from the archive metadata
-// yet; see docs/PORTING_PLAN.md section 11.4. It is the one key of borg's thirteen that
+// yet; see plans/PORTING_PLAN.md section 11.4. It is the one key of borg's thirteen that
 // borge cannot supply, and leaving it out is the honest form: a frontend asking for it via
 // --format gets an unknown-key error rather than an empty string that looks like an
 // archive created by an empty command line.
@@ -160,7 +160,7 @@ func archiveJSONData(info manifest.Info, template string) (map[string]any, error
 //
 // Sending them as zeros would be the worse choice by some distance: a frontend charting
 // hashing_time would draw a flat line and believe it, where a missing key is a question
-// it can answer by asking the version. See docs/PORTING_PLAN.md section 11.4.
+// it can answer by asking the version. See plans/PORTING_PLAN.md section 11.4.
 func createStatsJSON(nfiles, originalSize int64, fileStatus map[string]int64,
 	timings archive.Stats, storeStats map[string]any) map[string]any {
 

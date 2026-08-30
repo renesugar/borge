@@ -17,7 +17,7 @@
 // There is no error, no warning, and nothing to notice until a repository written by
 // one tool and appended to by the other has stored everything twice.
 //
-// That is why docs/PORTING_PLAN.md makes the gate for this package byte-exact boundary
+// That is why plans/PORTING_PLAN.md makes the gate for this package byte-exact boundary
 // agreement rather than "round-trips correctly", and why the differential test dumps
 // and compares every offset rather than sampling.
 //
@@ -104,7 +104,7 @@ type Chunker interface {
 	// while borg does it per archive: the keyed Gear and buzhash tables are derived from
 	// a CSPRNG, which measured 1.75 ms for fastcdc and 4.35 ms for buzhash64 - about
 	// 3.5 minutes of pure table construction over the 118,866-file corpus the project
-	// brief singles out, before a byte is chunked. See docs/PORTING_PLAN.md 12.1.
+	// brief singles out, before a byte is chunked. See plans/PORTING_PLAN.md 12.1.
 	//
 	// A reset chunker must produce exactly the chunks a fresh one would; that is the
 	// property the fix lives or dies on, and TestResetChunksIdentically checks it for
@@ -169,7 +169,7 @@ func New(p Params, key []byte, seed uint32, r io.Reader) (Chunker, error) {
 		return newFixed(p, r)
 	case AlgoRabinAES, AlgoGoldilocksAES, AlgoToeplitzAES:
 		return nil, fmt.Errorf("chunker: %s is not implemented yet; it is an upstream "+
-			"experiment and is not borg's default (see docs/PORTING_PLAN.md stage 1.4)", p.Algorithm)
+			"experiment and is not borg's default (see plans/PORTING_PLAN.md stage 1.4)", p.Algorithm)
 	default:
 		return nil, fmt.Errorf("chunker: unknown algorithm %q", p.Algorithm)
 	}

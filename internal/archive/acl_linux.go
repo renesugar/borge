@@ -30,7 +30,7 @@ import (
 // representation to the `system.posix_acl_access` and `system.posix_acl_default` extended
 // attributes directly, which is exactly what libacl does underneath - the library is a
 // text parser and a struct packer, not a privileged interface. Avoiding it keeps borge
-// free of cgo, which docs/PORTING_PLAN.md §0.4 asks for.
+// free of cgo, which plans/PORTING_PLAN.md §0.4 asks for.
 //
 // # The stored text
 //

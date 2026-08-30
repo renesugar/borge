@@ -314,7 +314,7 @@ func newAEADKey(typeByte byte, name string, suite crypto.Suite, domain []byte, m
 	cryptKey, idKey []byte, idHash func(idKey, data []byte) []byte,
 ) (Key, error) {
 	// borg accepts 32+32 and 32+128; the second is a borg 1.x blake2b key, which borge
-	// does not read (docs/PORTING_PLAN.md §0.6), so 64 is the only valid length here.
+	// does not read (plans/PORTING_PLAN.md §0.6), so 64 is the only valid length here.
 	if len(cryptKey) != 64 {
 		return nil, fmt.Errorf("key: %s needs a 64 byte crypt key, got %d", name, len(cryptKey))
 	}

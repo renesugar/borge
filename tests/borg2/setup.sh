@@ -43,7 +43,7 @@ setup.sh: borg checkout is not at the pinned commit.
   pinned (internal/version/version.go): $PINNED
   checkout ($BORG_SRC):                 $actual
 
-The interoperability gate in docs/PORTING_PLAN.md section 10 only means something
+The interoperability gate in plans/PORTING_PLAN.md section 10 only means something
 against a fixed upstream. Either check the pinned commit out:
 
   git -C $BORG_SRC checkout $PINNED

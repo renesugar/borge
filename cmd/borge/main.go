@@ -5,7 +5,7 @@
 // docs/LICENSING.md for provenance and license obligations.
 //
 // Repositories are read and written in borg 2's own format, and the interoperability
-// gate (docs/PORTING_PLAN.md stage 7) checks both tools against each other on real
+// gate (plans/PORTING_PLAN.md stage 7) checks both tools against each other on real
 // corpora. The remote backends - sftp, rest, s3, rclone - are not implemented yet, so a
 // repository has to be reachable as a local path.
 package main
@@ -60,7 +60,7 @@ func main() {
 // startProfiling turns on Go's profilers when the TESTONLY variables ask for it, and
 // returns the function that writes them out.
 //
-// Stage 9 (docs/PORTING_PLAN.md §12.5 step 1) says to profile before changing anything,
+// Stage 9 (plans/PORTING_PLAN.md §12.5 step 1) says to profile before changing anything,
 // and profiling the real binary over the real corpus is worth more than profiling a
 // benchmark that approximates it. The alternative - a --cpuprofile flag - would be CLI
 // surface borg does not have, so this uses the environment instead, under the TESTONLY
