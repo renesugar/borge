@@ -382,7 +382,8 @@ drift, just in a new location. Testing the rendered text against golden files pi
 text *is*, not whether it is *true*. Colocation is the mechanism: it puts the user-visible
 sentence into the diff of the change that falsifies it.
 
-**Work items** (not started; sized deliberately so the first is useful alone):
+**Work items** (all seven done by 2026-08-28; sized deliberately so the first is useful
+alone, and each is annotated below with what it turned out to cost and find):
 
 1. **`docaudit`** — a read-only tool and a test. Parse anchors, report the three grades per
    topic, fail on a `//borge:help` naming a topic that does not exist and on a
@@ -2311,20 +2312,25 @@ form of `--format` is ignored, but keys used in it are added" — with four alwa
 (`name`, `archive`, `id`, `time`) and nine optional. borge sent all thirteen every time,
 which happens to match borg for `repo-list`'s default format and matches nothing else.
 
-**The work that remains, in order:**
+**The work that remained, in order — all four closed during stage 8, and this list was
+left stale until stage 9 closed. Recorded rather than quietly struck through: a list
+headed "the work that remains" that no longer does is the same defect §2.1 is about,
+sitting in the section that argues for fixing it.**
 
-1. **`repo-info` and `info` onto borg's schema.** Both are structural rewrites rather than
-   added keys, and `info` needs `command_line`, `cwd` and `chunker_params` read back from
-   the archive metadata — which borge stores and does not currently read.
-2. **`version` and `analyze`.** `version` is the smallest: drop four keys or move them
-   somewhere that is not the API surface.
-3. **`--log-json`**, which is a whole feature rather than an option: structured log lines
-   with the message IDs `frontends.rst` documents. It is one of the 15 absent common
-   options and the only one that is part of the API.
-4. **The non-unicode rule is already half-ported.** `frontends.rst` describes how borg 2
-   represents a path that is not valid unicode; `internal/cli/pydump.go` reproduces exactly
-   that for `debug dump-*`. Whatever it does there is what the JSON commands must do, and
-   the two should share one implementation rather than agreeing by luck.
+1. ~~**`repo-info` and `info` onto borg's schema.**~~ **Done 2026-08-19.** `info` reads
+   `command_line`, `cwd`, `chunker_params` and `duration` back from the archive metadata it
+   was storing all along; see `infoArchiveJSON` and DIVERGENCES #42.
+2. ~~**`version` and `analyze`.**~~ **Done 2026-08-18.** `version --json` sends borg's two
+   keys, `client` and `server`.
+3. ~~**`--log-json`**~~ **Done 2026-08-19**, and extended to the three command *groups* on
+   2026-08-19 after the first version claimed a reach it did not have — see §12.1e's note
+   on the comment inside `newFlagSet`, which stayed wrong for nine days afterwards.
+4. ~~**The non-unicode rule is already half-ported.**~~ **Answered 2026-08-18, and the
+   answer was no.** The proposal here was to share one implementation between `debug
+   dump-*` and the JSON objects. Measuring borg shows the two genuinely differ - surrogate
+   escapes in one, `?` plus `_b64` in the other - so unifying them would have made borge
+   wrong in a way that matched neither. `jsonapi.go`'s `putText` records it: "What they
+   share is the question, not the answer."
 5. ~~**`original_size` and the stored `{size}`**~~ — **done 2026-08-18.** The stored figure
    counted the item metadata stream where borg's does not, and the reported one was sampled
    before the archive was saved. Both fixed and held by tests; the residual difference in
@@ -3500,6 +3506,91 @@ elsewhere in this section survives that standard - 383/307/244 MB across a 25x c
 measurement; it got one, and the answer is that the change cost nothing because the change
 did nothing.
 
+### 12.1h Step 2 done 2026-08-29: a create pipeline that mostly declines to run
+
+`internal/archive/pipeline.go` spreads the per-chunk work - the id hash and
+`repoobj.Format`, which is compression and encryption - over a worker pool. Cutting stays
+serial because the chunker is stateful, and the tail stays serial and in chunk order
+because the dedup check, the pack append and the index all touch state shared across the
+archive.
+
+**The result is two-sided, and quoting one side would be a lie by omission.** Measured on
+one binary with `BORGE_CREATE_WORKERS`, back to back:
+
+| corpus | wall | CPU | |
+|---|---:|---:|---|
+| 118,866 files averaging 1.6 kB | 1.07x | 1.52x | a bad trade |
+| one 1.2 GB file, 2 MB chunks | ~1.6x | 1.20x | a good one |
+
+**Chunk size decides it.** Hashing 1.6 kB takes microseconds, about what the channel
+handover, the scheduling and the mandatory copy cost, so per-chunk overhead swamps
+per-chunk work; at 2 MB the overhead disappears into real work. So the pool runs only for
+files of at least 8 MiB (`pipelineMinFileSize`), and the small-file corpus is back on the
+serial path - 39.4 s against 38.1 s serial, CPU 33.9 against 32.7, RSS unchanged - where
+always-on had cost 58.9 s, 60.3 s of CPU and 50 MB more resident.
+
+The threshold is conservative and **its crossover is not measured**. Two extremes were; the
+point between them was not. Eight MiB is four default chunks, enough to fill the workers
+once, and it errs towards the serial path because that is the side that costs nothing when
+the guess is wrong.
+
+**Two workers, and two withdrawn claims.** The first sweep sampled 1, 4 and 8 workers,
+reported 1.69x, and explained the shape by contention - four physical cores saturated by
+the workers plus the cutting goroutine and the collector. Asked whether two might beat four
+on this CPU, both the figure and the explanation turned out to be unsupported. Sweeping 1,
+2, 3, 4 and 6 on a 1.2 GB create, twice:
+
+| workers | run 1 | run 2 | peak RSS (run 2) |
+|---:|---:|---:|---:|
+| 1 | 1.00x | 1.00x | 243 MB |
+| 2 | 1.57x | 1.64x | 356 MB |
+| 3 | 1.59x | 1.51x | 386 MB |
+| 4 | 1.35x | 1.60x | 429 MB |
+| 6 | 1.17x | 1.59x | 491 MB |
+
+The honest figure is about **1.6x**, and it arrives at two workers. Run 1 alone fits the
+contention story; run 2 puts four and six back at 1.6x, so the differences among 2, 3, 4
+and 6 are inside this machine's noise. It was an explanation satisfying enough to stop
+questioning, which is why it needed a second sweep rather than a better paragraph.
+
+What survives both sweeps is narrower and enough: one worker to two is a large, repeatable
+step; nothing past two adds measurable time; and **RSS climbs monotonically with every
+worker**, because memory hardly moves with machine load while wall time does. So two is the
+default because more buys no measurable time and costs measurable memory - a reason that
+holds where §12.3 needs it to, on a phone, where memory and battery are the binding
+constraints, whereas "four cores are saturated" would have been a claim about this laptop
+generalised without evidence. `BORGE_CREATE_WORKERS` is the knob, and the default is
+documented as measured on this i5-9300H rather than as a scaling rule extrapolated from one
+machine - which is how a plausible constant becomes a permanent wrong default on hardware
+nobody tested.
+
+**The deeper mistake was sampling rather than measuring.** Choosing points that bracket the
+answer is a different discipline from measuring them carefully, and the first attempt did
+the second while skipping the first.
+
+**Why chunk order is kept.** A first draft justified it as preserving a byte-reproducible
+repository. That was wrong, and is corrected here rather than quietly: two *serial* creates
+of the same tree already produce different pack names, because the archive's metadata
+carries timestamps and its chunks share packs with file chunks. Order matters for a sharper
+reason - a file's chunk list *is* the file, and extraction concatenates in list order, so a
+list out of order restores a corrupted file from a set of chunk ids that every integrity
+check accepts.
+
+`Chunker.Next` returns a slice aliasing its own buffer, valid only until the next call, so
+every chunk is copied before handover. That is noise in time and `workers x depth` chunks in
+memory, which is why the queue depth is two.
+
+What makes the concurrency safe was already there, and predates the pipeline: `IDHash` is
+pure, the AEAD nonce counter is mutex-guarded with the cipher outside the lock and its
+comment names a worker pool as the reason, and both compressors are pooled - with race
+tests, because a compressor per call was the bug that made them pools (§12.1c, and the zstd
+encoders §12.2 had flagged a week earlier).
+
+Tests: identical chunk lists between serial and pooled across sizes chosen for fewer chunks
+than workers, more, and evenly divisible, at 2, 3 and 8 workers under `-race`; extracted
+trees identical to each other and to the source; a chunker error mid-file propagating rather
+than truncating the archive silently; and the adaptive rule itself.
+
 ### 12.1i AES-OCB measured for [golang/go#81029][go81029], 2026-08-29
 
 §12.5 step 1 owed the issue a number from a real workload, on the grounds that its own
@@ -3758,7 +3849,16 @@ Then, in order:
    **Done 2026-08-29**; see §12.1h. About 1.6x on large files, nothing on small ones, and it
    declines to run below 8 MiB because measurement said the pool costs more than it saves
    there.
-3. Parallelise `extract` similarly.
+3. **Partly done 2026-08-29, and the parallel part deliberately not taken**; see
+   §12.1d-f. Extract went 45.8 s to 42.6 s against a borg control that moved 136.4 to
+   135.1, by removing an `os/user` lookup per file, keeping the pack open across objects,
+   and doing every metadata operation on the descriptor `writeFile` already held. None of
+   that is parallelism. It was not attempted, because §12.1f measured that removing about
+   1.07 million syscalls returned only about three seconds: the remaining 22 s of system
+   time is the kernel genuinely creating and writing 118,866 files, and spreading that
+   over threads is a different experiment from the one that was run. **It stays open under
+   ROADMAP R0 item 1**, which already names parallel writers per directory, together with
+   the read-*order* question nothing has looked at yet.
 
 > **Taken out of order, 2026-08-29: extract before create.** After steps 0, 1 and 1a,
 > extract is the slower half - 67.6 s against create's 34.6 s - and half of it is system
@@ -3767,15 +3867,29 @@ Then, in order:
 > might need a format change, and the decision on that is supposed to be informed by
 > measuring here first. Profiling the slower half before optimising the faster one is the
 > order the evidence asks for, whatever the list says.
-4. Tune `PackWriter` `max_count`/`max_size` and the pack cache size against the
-   pathological directory.
-5. Only if a Go hot path is measurably the bottleneck **and** a C implementation is
+4. **`max_size` swept 2026-08-29 against the pathological directory** (§12.1g): 383 MB
+   resident at the 50 MB default, 244 MB at 2 MB packs, wall time flat across the range.
+   **The default is deliberately not changed** - it is borg's, and diverging on repository
+   layout to win a benchmark would trade interoperability for a number - so the outcome is
+   a documented knob rather than a new default. `max_count` was not swept, and the read
+   side moved for a different reason: §12.1e replaced the reopen-per-load with a bounded
+   handle cache, which is the pack-cache question in the form it actually mattered.
+5. ~~Only if a Go hot path is measurably the bottleneck **and** a C implementation is
    measurably better on the same corpus, introduce a cgo-gated implementation with a
-   pure-Go fallback — per §0.4, and with the benchmark JSON in the evidence bundle as
+   pure-Go fallback~~ **Not reached, and that is the finding** (§12.4): every win Stage 9
+   took was pure Go, and the one ceiling that a C library would clear is `crypto/cipher`'s
+   single-block API, where the right fix is `avo`-generated Go assembly or the upstream
+   proposal - neither of which is cgo. No cgo-gated implementation was introduced, so the
+   `CGO_ENABLED=0` cross-compilation §12.3 depends on is intact. The original condition
+   stands for whoever reaches it later — per §0.4, and with the benchmark JSON in the evidence bundle as
    justification. The Cython modules were `compress`, `hashindex`, `item`,
    `crypto/low_level` and the chunkers; those are the candidates.
-6. Re-run Stage 7 after every change. Performance work that breaks interop is
-   reverted, not patched.
+6. **Done, every time.** The interop gate is part of `go test ./...`, so every commit in
+   this stage ran it; the zstd pool additionally got a run with `zstd,3` and `auto,zstd,3`
+   in the matrix, because pooling an encoder is exactly the change that could produce
+   different bytes and still round-trip. Nothing was reverted for interop. One change was
+   reverted for a different reason - the pack-buffer release in §12.1g, because paired
+   measurement said it did nothing.
 
 **Gate:** borge ≥ borg on every scenario, with the JSON to show it. Regressions are
 listed with an explanation, not hidden.
