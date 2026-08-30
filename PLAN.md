@@ -153,7 +153,12 @@ Sized so each is committable on its own, and ordered so the measurements that co
   deliberately corrupted; a test damages the cache and requires the output to be unchanged;
   and the speedup is measured on a real repository rather than assumed from T7's numbers.
 
-- [ ] **T9 — The R0.1 quirk list.** `shellpattern.translate`'s vacuous guard (a literal
+- [x] **T9 — The R0.1 quirk list. Done 2026-08-30: one fixed, one kept.** The
+  `shellpattern` guard is fixed and is `DIVERGENCES.md` #63 — the first entry in that file
+  recording a difference borge chose to *introduce*. `stat.filemode`'s `?` was examined and
+  kept, because there was nothing wrong with it. Findings at the end of this file. Original
+  text:
+- ~~**T9 — The R0.1 quirk list.**~~ `shellpattern.translate`'s vacuous guard (a literal
   `(` cannot currently be matched by an `sh:` pattern) and `stat.filemode`'s `?` for an
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
   behaviour, so each lands with the entry rewritten rather than deleted — the record of why
@@ -783,3 +788,66 @@ here.
   much of `find`'s time is item-stream decoding, which grows with archive count.
 - Serving from the cache covers path-only formats. `--json-lines` and any template naming an
   item field still read the streams, and correctly report 0 served.
+
+---
+
+## What T9 found, 2026-08-30
+
+**One of the two quirks was worse than recorded, and the other was not a quirk.**
+
+### `shellpattern.translate` — fixed, and it needed a decision rather than a repair
+
+R0.1 said the vacuous guard means `\(` "becomes a backslash plus a group opener rather than
+a literal parenthesis". True, and it understates the damage: `a\(b` **does not compile at
+all**, in borg or in borge — `re.error: missing ), unterminated subpattern`. `a\(b\)c` does
+compile and matches `a\b\c`, which is nobody's intent.
+
+**Restoring borg's stated intent would not have fixed it**, and this is the part worth
+keeping. The guard reads
+
+```python
+elif c in "(|)":
+    if i > 0 and pat[i - 1] != "\\":
+        res += c
+```
+
+with **no `else`** — so an escaped `(` contributes nothing, and a working guard would make
+`a\(b` match `a\b`. There is no reading of borg's code under which a literal parenthesis is
+expressible. "Fix the vacuous guard" was therefore the wrong description of the task; the
+task was to decide what an escape should mean.
+
+**The narrowest decision that answers the complaint**: a backslash escapes the three
+characters borg passes through as regex syntax, and only those. A backslash is a legal
+filename character on Linux, so a general escape would change what every existing pattern
+containing one matches. `a\b` still matches `a\b`, `a\*b` still matches `a\*b`, `\\(` still
+matches `\(`. Only the sequences that were broken have new meanings.
+
+An unescaped `(` is deliberately untouched and still fails to compile, because the
+passthrough is what makes `{a,b}` alternatives work.
+
+### `stat.filemode` — examined and kept
+
+R0.1 listed the `?` for an unknown file type as a reproduced bug, on the grounds that it is
+"a difference between borge's output and its own documentation". With the compatibility
+constraint gone, there was nothing to correct:
+
+- `?` says the file type is unknown; `-` would assert it is a regular file. The second is
+  wrong in a way the first is not.
+- borge's documentation never claimed otherwise. The mismatch was between borg's *output*
+  and CPython's *documented* pure-Python fallback, inherited by copying borg.
+- It only arises for a mode with no file-type bits, which no real item has.
+
+Verified against the interpreter rather than argued: CPython's C `stat.filemode(0o644)`
+returns `?rw-r--r--`, and borge returns the same. The code comment now records this as a
+considered decision, so it does not read as an unreviewed reproduction to the next person.
+
+### How the gate states the divergence instead of missing it
+
+`TestShellPatternMatchesBorg` runs a real borg and compares every pattern in its corpus.
+The five divergent patterns are **in that corpus** and in an explicit exception list, and
+the test fails if the two drift apart — so the difference is asserted rather than avoided.
+It passed before this change only because no pattern in the corpus exercised the bug, which
+is its own small lesson about what a green differential gate does and does not prove.
+
+`TestEscapedGroupCharactersAreLiterals` then says what borge does instead, because a skipped
+comparison proves nothing on its own.

@@ -2925,3 +2925,71 @@ wire, which is usually the slower half of a backup. The counter-argument is `POR
 §12.3's mobile case, where CPU is battery — but the same 25% is 25% less radio, and radio is
 normally the more expensive of the two. That last point is an argument, not a measurement,
 and is flagged as such.
+
+---
+
+## 63. An escaped `(`, `|` or `)` is a literal, where borg cannot express one — **2026-08-30**
+
+**ROADMAP R0 T9 · `internal/patterns/shellpattern.go` · a decision, and the first quirk
+deliberately un-reproduced**
+
+Until now this file recorded differences borge *chose to avoid*. This is the first entry
+recording one it chose to introduce, because R0 lifted the compatibility constraint that
+made reproducing borg's bugs the right thing to do.
+
+**The bug.** borg's `shellpattern.translate` passes `(`, `|` and `)` through as regex
+syntax, so that the alternatives `{a,b}` expands into survive. It guards that with
+
+```python
+elif c in "(|)":
+    if i > 0 and pat[i - 1] != "\\":
+        res += c
+```
+
+but `i` has already been incremented past the character, so `pat[i-1]` *is* the character
+itself and the guard is always true.
+
+**What it costs is worse than a wrong match.** `a\(b` translates to a literal backslash
+followed by an unterminated group, which does not compile at all:
+
+```
+>>> translate(r'a\(b')
+'(?ms)a\\\\(b\\Z'
+>>> re.compile(_)
+re.error: missing ), unterminated subpattern at position 8
+```
+
+`a\(b\)c` does compile, and matches `a\b\c` — a group containing `b\`, which is nobody's
+intent. So a file whose name contains a parenthesis could not be selected by an `sh:`
+pattern at all.
+
+**Restoring borg's stated intent would not have fixed it.** The guard has no `else`: an
+escaped `(` contributes *nothing* to the regex, so a working guard would make `a\(b` match
+`a\b`. There is no reading of borg's code under which a literal parenthesis is expressible.
+That is why this is a decision rather than a repair.
+
+**What borge does now.** A backslash escapes the three characters borg treats as regex
+syntax, and only those:
+
+| pattern | borge matches | borg |
+|---|---|---|
+| `a\(b` | `a(b` | does not compile |
+| `a\(b\)c` | `a(b)c` | matches `a\b\c` |
+| `a\|b` | `a\|b` | matches `a` or `b` |
+| `song \(live\).mp3` | `song (live).mp3` | does not compile |
+
+**Why only those three.** A backslash is a legal filename character on Linux, so making it
+a general escape would change what every existing pattern containing one matches. `a\b`
+still matches a file called `a\b`, `a\*b` still matches `a\*b`, and `\\(` matches `\(` —
+all exactly as before. Only the three sequences that were broken or uncompilable have new
+meanings.
+
+**What was deliberately not changed.** An unescaped `(` is still passed through, so `a(b`
+still fails to compile in borge as in borg. Changing that would mean deciding what a bare
+parenthesis means in a shell pattern, and the passthrough is what makes `{a,b}` work.
+
+**How the gate knows.** `TestShellPatternMatchesBorg` compares borge against a running borg
+over every pattern in its corpus. The five divergent patterns are in that corpus and in an
+explicit exception list, so the gate *states* the difference rather than never exercising
+it, and it fails if the two lists drift apart. `TestEscapedGroupCharactersAreLiterals` then
+says what borge does instead — a skipped comparison proves nothing by itself.
