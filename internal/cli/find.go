@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/renesugar/borge/internal/archive"
+	"github.com/renesugar/borge/internal/cache"
 	"github.com/renesugar/borge/internal/formatter"
 	"github.com/renesugar/borge/internal/item"
 	"github.com/renesugar/borge/internal/manifest"
@@ -92,8 +93,43 @@ func cmdFind(e *Env, args []string) int {
 		return e.fail(err)
 	}
 
+	// Can the cache answer outright, or only prove a negative?
+	//
+	// `find` normally prints whole items, so a path cache cannot serve it. But the two
+	// commonest interactive forms - --short, and a --format naming nothing but the path and
+	// its archive - need only what the cache already holds, and for those the item stream
+	// need not be read at all. Anything else (--json-lines, or a template asking for size,
+	// mode, target...) falls back to reading it.
+	//
+	// This matters for more than speed. Without it the cache makes a search whose pattern
+	// matches everywhere *slower*: every path gets matched twice, once from the cache and
+	// once from the stream, and matching is a third of the work. Measured at +25% before
+	// this existed.
+	servedFromPaths := !*jsonLines
+	if servedFromPaths && !*short {
+		keys, kerr := formatter.Keys(template)
+		if kerr != nil {
+			servedFromPaths = false
+		}
+		for _, k := range keys {
+			if _, static := formatter.Static[k]; static {
+				continue // NL, TAB and friends need no item
+			}
+			switch k {
+			case "path", "archivename", "archiveid":
+			default:
+				servedFromPaths = false
+			}
+		}
+	}
+
 	enc := json.NewEncoder(e.Stdout)
 	matches := 0
+	skipped := 0
+	served := 0
+	// collect points at the slice gathering this archive's paths, when the cache missed and
+	// the stream is being read anyway. nil means the cache answered.
+	var collect *[]string
 	status := ExitOK
 
 	for i, info := range infos {
@@ -117,7 +153,70 @@ func cmdFind(e *Env, args []string) int {
 		}
 
 		id := hex.EncodeToString(info.ID)
+
+		// The path cache decides one thing only: that this archive holds nothing matching,
+		// so its item stream need not be read. That is safe whatever --format or
+		// --json-lines asks for, because an archive with no match prints nothing in any of
+		// them. Everything above this point - the warnings, the verbose "searching" line -
+		// has already run, so skipping changes no output at all, only how long it took.
+		//
+		// A cache that is missing, truncated, foreign or corrupt returns ErrNoPaths and the
+		// item stream is read as before.
+		if cached, cerr := cache.ReadPaths(o.repo.ID(), info.ID); cerr == nil {
+			var hits []string
+			for _, p := range cached {
+				if matcher.Match(p) {
+					hits = append(hits, p)
+					if !servedFromPaths {
+						break // only the existence of a match is needed
+					}
+				}
+			}
+			if len(hits) == 0 {
+				skipped++
+				continue
+			}
+			if servedFromPaths {
+				served++
+				emitErr := error(nil)
+				for _, p := range hits {
+					matches++
+					if *short {
+						if _, werr := fmt.Fprintf(e.Stdout, "%s %s\n", id[:8], p); werr != nil {
+							emitErr = werr
+							break
+						}
+						continue
+					}
+					line, ferr := formatter.Format(template, map[string]any{
+						"path": p, "archivename": info.Name, "archiveid": id,
+					})
+					if ferr != nil {
+						emitErr = ferr
+						break
+					}
+					if _, werr := fmt.Fprint(e.Stdout, line); werr != nil {
+						emitErr = werr
+						break
+					}
+				}
+				if emitErr != nil {
+					e.warnf("archive %s (%s): %v", id[:8], info.Name, emitErr)
+					status = ExitWarning
+				}
+				continue
+			}
+		} else {
+			// Reading the stream anyway, so record the paths on the way past. An archive is
+			// immutable, so this entry can never go stale - only be evicted or corrupted.
+			var seen []string
+			collect = &seen
+		}
+
 		err = a.Items(func(it *item.Item) error {
+			if collect != nil {
+				*collect = append(*collect, it.Path)
+			}
 			if !matcher.Match(it.Path) {
 				return nil
 			}
@@ -149,11 +248,19 @@ func cmdFind(e *Env, args []string) int {
 		if err != nil {
 			e.warnf("archive %s (%s): %v", id[:8], info.Name, err)
 			status = ExitWarning
+		} else if collect != nil {
+			// Only after a clean pass: a stream that failed part way through has a partial
+			// path list, and a partial list is one that can wrongly prove a negative.
+			if werr := cache.WritePaths(o.repo.ID(), info.ID, *collect); werr != nil && common.verbose {
+				e.warnf("path cache for %s: %v", id[:8], werr)
+			}
 		}
+		collect = nil
 	}
 
 	if common.verbose {
-		fmt.Fprintf(e.Stdout, "%d match(es) in %d archive(s)\n", matches, len(infos))
+		fmt.Fprintf(e.Stdout, "%d match(es) in %d archive(s), %d skipped and %d served by the path cache\n",
+			matches, len(infos), skipped, served)
 	}
 	return status
 }

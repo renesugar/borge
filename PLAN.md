@@ -124,7 +124,9 @@ Sized so each is committable on its own, and ordered so the measurements that co
   that `borge find`'s cost is not matching but re-decoding item streams, and a path cache
   would take it from 7,069 ms to about 85 ms with no dependency at all. Findings at the end
   of this file. borghash is retained for the chunk index, which was never in doubt.
-- [ ] **T10 — A path cache for `find`.** Added 2026-08-30 out of T7, which measured the
+- [x] **T10 — A path cache for `find`. Done 2026-08-30: about 3.3x.** `internal/cache/paths.go`,
+  used by `find`; no format change. Findings at the end of this file. Original text:
+- ~~**T10 — A path cache for `find`.** Added 2026-08-30 out of T7, which measured the
   opportunity while rejecting the tool proposed for it. `borge find` spends its time
   decoding item streams, not matching: 7,069 ms over 200,020 items across 20 archives, where
   a regex scan of the same paths already in memory takes 85 ms. Cache the paths beside the
@@ -696,3 +698,88 @@ it is a new task.
   for bluge and unchanged for a flat file.
 - The million-path corpus is synthetic. Real path sets share prefixes far more heavily,
   which favours both an inverted index and a prefix-compressed flat file.
+
+---
+
+## What T10 found, 2026-08-30
+
+**`borge find` is about 3.3x faster, and the cache changes nothing about what it prints.**
+`internal/cache/paths.go` stores an archive's paths beside the repository; nothing is stored
+*in* it, so there is no format change.
+
+| pattern | cold | warm |
+|---|---:|---:|
+| present in 1 of 20 archives | 6.02 s | **1.73 s** |
+| present in all 20 archives | 5.88 s | **1.78 s** |
+
+### Why this cache is safe where the files cache is not
+
+The files cache next door is dangerous because it answers a question about a file that may
+since have changed, and a wrong answer silently stores stale contents. This one answers a
+question about an *archive*, and **an archive is immutable once written**. It is keyed by
+archive id - the hash of the content, not the name - so an entry either belongs to the
+archive being read or does not exist. There is no staleness to reason about; the only
+failure modes are absence and corruption, and both fall back to reading the item stream.
+
+### The first version made a common case 25% slower
+
+Skip-only caching - "if no cached path matches, do not read this archive" - is safe under
+any output format, because an archive with no match prints nothing whatever `--format` says.
+But when the path *is* present it matched every cached path and then decoded the item stream
+anyway. A profile put regex matching at a third of the work, so doing it twice cost:
+
+| pattern | cold | warm, skip-only |
+|---|---:|---:|
+| present in 1 of 20 | 5.98 s | 2.04 s |
+| present in all 20 | 5.98 s | **7.49 s** |
+
+**A cache that makes the common query slower is not shippable**, and the create pipeline's
+lesson (§12.1h) is the same shape: default to the path that costs nothing when the guess is
+wrong. The fix was to serve the output directly from the cache when the format needs nothing
+but the path - `--short`, `{path}`, `{archivename}`, `{archiveid}`, and the static fields
+like `{NL}` - and to fall back whenever a template asks for `size`, `mode`, `target` or
+anything else that only the item holds. `formatter.Keys` already existed for exactly this;
+its doc comment says it is there "so that a command can tell whether an expensive value is
+wanted at all".
+
+### Two test defects found on the way, both of which would have hidden a bug
+
+**The test was exercising borg, not borge.** `r.mustRun` runs `.venv-borg2/bin/borg` - it is
+the harness for writing archives with real borg - and the first version of the test called
+it for the `find` runs too. Every arm agreed and no cache directory ever appeared, because
+borge was never running. A test that passes without running the code under test is worse
+than no test.
+
+**The checksum guard was unproven.** Corrupting an entry with rubbish, and truncating one,
+are both rejected by the magic bytes or the zstd frame before the checksum is ever
+consulted - so deleting the checksum check entirely left the suite green. The test now has
+an arm that substitutes a *structurally valid* payload: same magic, same path count, healthy
+zstd frame, stale checksum. Without the check, `find` returns **empty where matches exist**,
+which is the silently-wrong answer this whole design is meant to prevent. That arm is what
+makes the guard tested rather than merely present.
+
+### The shape chosen, and the one deferred
+
+Per-archive lists, compressed with zstd. Real paths measured at 117 bytes each, compressing
+about elevenfold to ~11 bytes; the twenty-archive fixture's cache is 172 kB.
+
+The alternative from the task - a global path table with per-archive membership - would be
+smaller again, because paths repeat once per archive: 20 archives of the same tree hold
+200,020 items over 10,001 distinct paths. On a year of daily backups that is the difference
+between roughly 469 MB and roughly 7 MB. **It is not built**, because its incremental update
+is where bugs would live and this cache's whole value is that it cannot be wrong. Per-archive
+entries are immutable, independently valid and trivially discarded; the global form is worth
+revisiting only if cache size becomes a real complaint, and the numbers to justify it are
+here.
+
+### Limits
+
+- The cache is populated as a side effect of a `find` that reads the streams, so the first
+  search after a backup pays full price. Populating it during `create` would remove that,
+  and is not done.
+- Nothing evicts it. Entries are small and an archive's entry becomes unreachable once the
+  archive is deleted, but no size cap exists and `ForgetPaths` is not yet wired to deletion.
+- The 3.3x is one repository shape - 20 archives over 10,000 files. The win scales with how
+  much of `find`'s time is item-stream decoding, which grows with archive count.
+- Serving from the cache covers path-only formats. `--json-lines` and any template naming an
+  item field still read the streams, and correctly report 0 served.
