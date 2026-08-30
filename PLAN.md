@@ -117,14 +117,6 @@ Sized so each is committable on its own, and ordered so the measurements that co
   118,866 - and the per-file cost compared, not the totals. Do that first. If the curve is
   flat, this task closes and R0.2 is met with no format change; if it bends, the batching
   and deferred-metadata ideas are back, and *then* their cost is worth paying.
-- [ ] **T5 — Stop paying per item for "checked, found none".** Every item carries an empty
-  `xattrs` dict and a zero `bsdflags`, because in borg the *presence* of the key is what
-  says the attribute was examined (DIVERGENCES #8). That distinction is real and must
-  survive, but it costs roughly 9 to 18 bytes on every item — 10 to 18 MB of item stream on
-  a million files. An archive-level "these attributes were examined" flag plus per-item
-  values only where non-empty says the same thing in a few bytes. Measure the saving on the
-  pathological corpus first: borge only started recording the fields faithfully in stage 8,
-  so any earlier measurement was measuring the bug.
 - [ ] **T6 — zstd as the default compression** (borg #10085). Not a format change — both
   codecs are already in the format and borge reads either — so it is a default change with
   a compatibility cost only for readers older than borg 2. The encoders were pooled in
@@ -136,21 +128,39 @@ Sized so each is committable on its own, and ordered so the measurements that co
   inverted-index search engine and the chunk index is a 256-bit-key hash table with a
   48-byte value. The likely outcome is bluge for search and borghash retained for the
   chunk index, and the way to be wrong about that is to decide it before measuring.
-- [ ] **T8 — Lossless item round-trip.** Unknown msgpack keys are dropped at the `Item`
-  struct boundary, which is why `debug dump-archive` reads raw msgpack instead. A format
-  borge owns can make the round trip total.
 - [ ] **T9 — The R0.1 quirk list.** `shellpattern.translate`'s vacuous guard (a literal
   `(` cannot currently be matched by an `sh:` pattern) and `stat.filemode`'s `?` for an
   unknown file type. Each fix retires a DIVERGENCES entry, and each changes observable
   behaviour, so each lands with the entry rewritten rather than deleted — the record of why
   borge reproduced a bug for a year is worth keeping.
+- [ ] **T5 — Stop paying per item for "checked, found none".** *(Design and measurement
+  here; the bytes change after T3.)* Every item carries an empty `xattrs` dict and a zero
+  `bsdflags`, because in borg the *presence* of the key is what says the attribute was
+  examined (DIVERGENCES #8). That distinction is real and must survive, but it costs roughly
+  9 to 18 bytes on every item — 10 to 18 MB of item stream on a million files. An
+  archive-level "these attributes were examined" flag plus per-item values only where
+  non-empty says the same thing in a few bytes. Measure the saving on the pathological
+  corpus first: borge only started recording the fields faithfully in stage 8, so any
+  earlier measurement was measuring the bug. **If the saving does not justify a format
+  version on its own, say so and close it** — this is one of only two tasks that can make
+  T3 necessary.
+- [ ] **T8 — Lossless item round-trip.** *(Design and measurement here; the bytes change
+  after T3.)* Unknown msgpack keys are dropped at the `Item` struct boundary, which is why
+  `debug dump-archive` reads raw msgpack instead. A format borge owns can make the round
+  trip total. Establish first what is actually being lost — round-trip the real corpora and
+  the borg-written archives and report which keys fall off — because "a format borge owns
+  could fix this" is a capability, not yet a reason. This is the other task that can make T3
+  necessary.
 - [ ] **T3 — The version bump, the migration, and the replacement gates. Only if anything
   above still needs it.** Moved here from third place on 2026-08-30. Repository version 5
   behind an explicit opt-in, `borge transfer`-based migration from version 4, and the three
   replacement gates wired into the suite. **Nothing that changes on-disk bytes may land
-  before this** — that rule is unchanged; what changed is that nothing above it changes
-  on-disk bytes until T5 and T8, and both of those have to survive their own measurement
-  first.
+  before this** — that rule is unchanged, and T5 and T8 sitting immediately above it does
+  not bend it. They are placed there because each is *investigated* before T3 and *lands*
+  after it: their measurements are what decide whether T3 happens at all, and a version bump
+  designed before them would be a bump for an unknown payload. So the phasing is: measure
+  T5 and T8, decide whether either justifies a format version, and only then build the bump
+  and land the bytes through it.
 
   It was third because the original plan assumed R0 would need a format change. Nothing
   measured since has needed one: T1 found the read order already optimal, T2 took 2.1x with
@@ -162,9 +172,16 @@ T1, T2, T4, T5, T6 and T7 are measurements before they are changes. Every one of
 come back "no", and a task list that cannot record a "no" is a list of intentions. Two have
 now come back: T1 no, T2 yes.
 
-**The order is deliberate and was changed once.** Everything that cannot break
-compatibility comes first, so that T3 - the version bump and its migration - is reached
-knowing exactly what it has to carry, or is never reached at all. As it stands **no
+**The order is deliberate and was changed twice.** Everything that cannot break
+compatibility comes first (T4, T6, T7, T9), then the only two tasks that can require a
+format version (T5, T8), then T3 itself. So T3 is reached knowing exactly what it has to
+carry, or is never reached at all - and the two tasks that could summon it sit directly
+above it, where the decision is visible rather than buried six items up.
+
+T5 and T8 straddle T3 rather than preceding it cleanly: each is *investigated* above the
+line and *lands* below it, because their measurements are what decide whether T3 happens.
+That is the only way to order them without either designing a migration for an unknown
+payload or landing bytes with no version to land them under. As it stands **no
 measurement in this project requires the format to move**, and the two tasks that would,
 T5 and T8, are each contingent on a measurement not yet taken.
 
