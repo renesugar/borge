@@ -37,8 +37,8 @@ func cmdRepoCompress(e *Env, args []string) int {
 	fs := newFlagSet(e, "repo-compress")
 	var common commonFlags
 	common.register(fs)
-	compression := fs.String("C", "lz4", "recompress everything to this spec, e.g. zstd,3")
-	fs.StringVar(compression, "compression", "lz4", "recompress everything to this spec")
+	compression := fs.String("C", compress.Default, "recompress everything to this spec, e.g. zstd,3")
+	fs.StringVar(compression, "compression", compress.Default, "recompress everything to this spec")
 	dryRun := fs.Bool("dry-run", false, "report what would be recompressed, change nothing (borge only on this command)")
 	stats := fs.Bool("stats", false, "print statistics when finished")
 	fs.BoolVar(stats, "s", false, "print statistics when finished")

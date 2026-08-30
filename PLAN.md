@@ -114,12 +114,10 @@ Sized so each is committable on its own, and ordered so the measurements that co
   closes.** Per-file restore cost is flat against directory size over a 2,400x range, so
   R0.2's requirement is met **with no format change**, and the restore-side batching and
   deferred-metadata ideas are not needed. Findings at the end of this file.
-- [ ] **T6 — zstd as the default compression** (borg #10085). Not a format change — both
-  codecs are already in the format and borge reads either — so it is a default change with
-  a compatibility cost only for readers older than borg 2. The encoders were pooled in
-  Stage 9 (3.0x, 139.8 to 420.1 MB/s on a 2 MiB buffer), which removes the objection that
-  the measurement would be reading a bug rather than the codec. Re-measure ratio *and*
-  speed against lz4 on the real corpora before switching.
+- [x] **T6 — zstd as the default compression. Done 2026-08-30: switched to `zstd,1`.**
+  A quarter smaller on compressible data for 28% more create time; `DIVERGENCES.md` #62 and
+  the findings at the end of this file. Not a format change — the codec is recorded per
+  chunk and borg reads zstd, so the interoperability gate passes in both directions.
 - [ ] **T7 — `bluge` for archive and file search.** A new capability, evaluated on its
   merits: `borge find` is a linear scan today. Be honest about the fit — bluge is an
   inverted-index search engine and the chunk index is a 256-bit-key hash table with a
@@ -511,3 +509,69 @@ still require one, and both are contingent on their own measurements.
   directory of n files, archive it, time the extraction", and the sizes, repetitions and
   device are recorded above so it can be rebuilt. T1's was kept because it encodes a cache
   model and a control that would be tedious to reconstruct.
+
+---
+
+## What T6 found, 2026-08-30
+
+**The default compression is now `zstd,1`, where borg uses lz4.** `DIVERGENCES.md` #62
+carries the decision; this is what was measured and what it cost.
+
+### The measurement
+
+Unencrypted, so the codec was the only variable, on two corpora chosen as opposites: 479 MB
+of small text files, and 106 MB of JPEGs that no codec can shrink.
+
+| spec | repository | vs lz4 | create wall | extract wall |
+|---|---:|---:|---:|---:|
+| lz4 | 188.7 MiB | — | 37.1 s | 20.4 s |
+| **zstd,1** | **141.4 MiB** | **−25.1%** | 47.5 s (+28%) | 21.4 s (+5%) |
+| zstd,3 | 138.2 MiB | −26.8% | 52.9 s (+43%) | 22.0 s (+8%) |
+| auto,zstd,3 | 138.2 MiB | −26.8% | 58.8 s (+59%) | 22.1 s (+8%) |
+
+On the JPEGs every spec produced the same repository to within 0.02%, at 6–11% more CPU for
+zstd. The ratio column only exists on data that compresses.
+
+### The reference claim was half right
+
+ROADMAP R0 item 3 said the reference numbers give zstd `SpeedFastest` "a better ratio *and*
+comparable speed versus lz4-class options". **Better ratio: yes, and by a lot. Comparable
+speed: no** — 28% more wall time on create. Recorded because the item is what justified
+doing this at all, and half of its premise did not survive contact with the corpus.
+
+### T2 made T6 cheaper, and the order mattered
+
+zstd costs **16% more extract CPU but only 5% more extract wall**, because R0 T2's writer
+pool overlaps decompression with the file creation that cannot be parallelised. Had T6 run
+before T2, the restore cost would have read as 16% and might reasonably have decided the
+question the other way. Two tasks whose independence was assumed and is not.
+
+### Why level 1, and why not auto
+
+Level 3 buys 1.7 more points of ratio for 14 more points of wall time. `auto,zstd,3` reaches
+exactly the same ratio as plain `zstd,3` while taking 59% longer than lz4 rather than 43%,
+because it compresses everything twice; it wins only on data nothing can compress, where
+every spec ties on size anyway.
+
+### Changing the default broke no test, which was the real finding
+
+The full suite passed with the default switched, before any new test existed. **Nothing
+anywhere asserted what borge compresses with when nobody asks** — the default could have
+been set to `lzma,9`, or reverted by a careless merge, and everything would still have been
+green. A default no test can see is a default nothing protects.
+
+`TestDefaultIsWhatItSaysItIs` now pins the codec *and* the level, and
+`TestDefaultActuallyCompresses` pins the property the default was chosen for, since a
+"default" that did not compress would satisfy the first test and still be wrong. Both are
+mutation-tested: reverting to lz4 fails three assertions, and a silent drift to `zstd,3`
+fails on the level with the trade quoted in the message.
+
+### Limits
+
+- Two corpora, one machine, `none-sha256`. Text and JPEGs bracket the range but do not
+  cover it — databases, VM images and already-compressed archives all sit somewhere between.
+- The saving is measured on stored bytes, not on transfer time to a remote backend, where
+  the argument for it is strongest. That case is untested.
+- The counter-argument from §12.3 — CPU is battery on mobile — is answered in #62 with the
+  observation that 25% fewer bytes is also 25% less radio. **That is an argument, not a
+  measurement**, and is labelled as one where it is made.

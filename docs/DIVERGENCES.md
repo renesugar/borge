@@ -2875,3 +2875,53 @@ is the same test that had been rewritten to stop asserting which backends were i
 itself with the bucket in the hostname. Getting that the wrong way round produces a DNS
 lookup for a name that does not exist, against a server that is running perfectly — which
 is how it presents rather than as a protocol error.
+
+---
+
+## 62. zstd is the default compression, where borg uses lz4 — **2026-08-30**
+
+**ROADMAP R0 T6 · `internal/compress/spec.go` · a decision, measured first**
+
+borg compresses with **lz4** unless told otherwise. borge compresses with **`zstd,1`**.
+
+This is the only entry here that changes what an ordinary `borge create` writes without
+being asked, so it earns its numbers. Measured unencrypted, so the codec was the only thing
+varying, on two corpora picked as opposites — 479 MB of small text files, and 106 MB of
+JPEGs that no codec can shrink:
+
+| spec | repository | vs lz4 | create | extract |
+|---|---:|---:|---:|---:|
+| lz4 | 188.7 MiB | — | 37.1 s | 20.4 s |
+| **zstd,1** | **141.4 MiB** | **−25.1%** | 47.5 s (+28%) | 21.4 s (+5%) |
+| zstd,3 | 138.2 MiB | −26.8% | 52.9 s (+43%) | 22.0 s (+8%) |
+| auto,zstd,3 | 138.2 MiB | −26.8% | 58.8 s (+59%) | 22.1 s (+8%) |
+
+On the JPEGs every spec produced the same repository to within 0.02%, and zstd cost 6–11%
+more CPU for it. So the ratio column is what decides this, and it only exists on data that
+compresses at all.
+
+**Why level 1 and not 3.** Level 3 buys 1.7 more points of ratio for 14 more points of wall
+time. Level 1 is zstd's `SpeedFastest`; borge's pure-Go encoder has four levels where
+libzstd has 22, so `zstd,1` and `zstd,2` are the same encoder (#16).
+
+**Why not `auto`.** `auto,zstd,3` reaches exactly the same ratio as plain `zstd,3` and takes
+59% longer than lz4 rather than 43%, because it compresses everything twice. It wins only on
+data nothing can compress — and there, every spec ties on size anyway.
+
+**Why the restore cost is small.** zstd decompression costs 16% more CPU than lz4 on this
+corpus but only 5% more wall time, because R0 T2's writer pool overlaps decompression with
+the file creation that cannot be parallelised. Before T2 this would have been a 16% slower
+restore.
+
+**It costs no interoperability, which is why it is allowed at all.** The codec is recorded
+per chunk in the object header, borg reads zstd, and the interoperability gate passes in
+both directions with this default. What changes is only what borge *chooses* when nobody
+says.
+
+**The reasoning, stated so it can be disagreed with.** Storage is paid for as long as an
+archive is kept; CPU is paid once when it is written. A quarter of the repository is a large
+and permanent saving, and on a remote backend it is also a quarter fewer bytes over the
+wire, which is usually the slower half of a backup. The counter-argument is `PORTING_PLAN`
+§12.3's mobile case, where CPU is battery — but the same 25% is 25% less radio, and radio is
+normally the more expensive of the two. That last point is an argument, not a measurement,
+and is flagged as such.

@@ -272,9 +272,14 @@ none", 10 to 18 MB on a million files — and that case is arithmetic, not a ben
    256-bit-key hash table with a 48-byte value — a different data structure for a
    different job. The likely outcome is **bluge for archive/file search, borghash
    retained for the chunk index**, but measure before concluding.
-3. **zstd as the default compression** (borg #10085) once the benchmark supports it —
+3. ~~**zstd as the default compression** (borg #10085) once the benchmark supports it —
    the reference numbers give zstd `SpeedFastest` a better ratio *and* comparable
-   speed versus lz4-class options.
+   speed versus lz4-class options.~~ **Done 2026-08-30 (R0 T6): the default is `zstd,1`.**
+   The reference claim was half right and the half that failed is worth keeping: the ratio
+   is real - a quarter smaller repository on text - but the speed is not comparable, at 28%
+   more wall time on create. Not a format change; the codec is recorded per chunk, borg
+   reads zstd, and the interoperability gate passes both ways. `DIVERGENCES.md` #62 has the
+   decision and the numbers.
 4. Any further on-disk changes the Stage 9 profiles justify.
 
 #### R0.1 borg quirks to fix once compatibility is lifted

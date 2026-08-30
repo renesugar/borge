@@ -912,8 +912,8 @@ func cmdDebugFormatObj(e *Env, args []string) int {
 	fs := newFlagSet(e, "debug format-obj")
 	var common commonFlags
 	common.register(fs)
-	compression := fs.String("C", "lz4", "compression spec, e.g. zstd,3")
-	fs.StringVar(compression, "compression", "lz4", "compression spec")
+	compression := fs.String("C", compress.Default, "compression spec, e.g. zstd,3")
+	fs.StringVar(compression, "compression", compress.Default, "compression spec")
 	if err := fs.Parse(args); err != nil {
 		return ExitError
 	}

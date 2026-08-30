@@ -53,6 +53,35 @@ var _ = helpText
 //borge:about parseSpec
 var _ = helpText
 
+// Default is what borge compresses with when nothing is asked for.
+//
+// **This diverges from borg, which defaults to lz4** (DIVERGENCES #46). Measured on 2026-08-30
+// by R0 T6, unencrypted so the codec was the only variable, on two corpora chosen as
+// opposites - 479 MB of small text files, and 106 MB of JPEGs that no codec can shrink:
+//
+//	spec          repo      vs lz4    create     extract
+//	lz4           188.7 MiB    -       37.1s      20.4s
+//	zstd,1        141.4 MiB  -25.1%    47.5s      21.4s
+//	zstd,3        138.2 MiB  -26.8%    52.9s      22.0s
+//	auto,zstd,3   138.2 MiB  -26.8%    58.8s      22.1s
+//
+// A quarter of the repository, for 28% more wall time on a backup. Storage is paid for as
+// long as the archive is kept and the CPU is paid once, and on a remote backend the same
+// 25% is 25% fewer bytes over the wire - which is usually the slower half of a backup.
+//
+// Level 1 rather than 3 because 3 buys 1.7 more points of ratio for 14 more points of wall
+// time. Level 1 is zstd's SpeedFastest; borge's pure-Go encoder has four levels where
+// libzstd has 22, so "zstd,1" and "zstd,2" are the same encoder (see the note on levels
+// below).
+//
+// Not auto,zstd,3, which reaches the same ratio as plain zstd,3 for 59% more wall time
+// because it compresses everything twice. It is the right choice only for data nothing can
+// compress, where it bails out after lz4 - and on the JPEG corpus every spec produced the
+// same repository to within 0.02%, so that case is decided by cost alone.
+//
+// This costs no interoperability: the codec is recorded per chunk and borg reads zstd.
+const Default = "zstd,1"
+
 // Spec is a parsed --compression argument.
 //
 // The accepted grammar, from borg:
@@ -252,8 +281,8 @@ type SpecDoc struct {
 func SpecDocs() []SpecDoc {
 	return []SpecDoc{
 		{"none", "none", "store the chunk as it is"},
-		{"lz4", "lz4", "very fast, modest ratio. borge's default."},
-		{"zstd[,LEVEL]", "zstd", "level -128 to 22, default 3"},
+		{"lz4", "lz4", "very fast, modest ratio. borg's default, and borge's until 2026-08-30."},
+		{"zstd[,LEVEL]", "zstd", "level -128 to 22, default 3. borge defaults to zstd,1, which is a quarter smaller than lz4 on text for about 28% more time."},
 		{"zlib[,LEVEL]", "zlib", "level 0 to 9, default 6"},
 		{"lzma[,LEVEL]", "lzma", "level 0 to 9, default 6"},
 		{"auto,SPEC", "auto", "try lz4 first, and use SPEC only if it compresses meaningfully better"},

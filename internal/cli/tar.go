@@ -43,8 +43,8 @@ func cmdImportTar(e *Env, args []string) int {
 	common.register(fs)
 	common.registerJSON(fs, "output stats as JSON (implies --stats)")
 	comment := fs.String("comment", "", "a comment to store with the archive")
-	compression := fs.String("C", "lz4", "compression spec, e.g. zstd,3")
-	fs.StringVar(compression, "compression", "lz4", "compression spec")
+	compression := fs.String("C", compress.Default, "compression spec, e.g. zstd,3")
+	fs.StringVar(compression, "compression", compress.Default, "compression spec")
 	chunkerParams := fs.String("chunker-params", "", "chunker parameters, e.g. fastcdc,19,23,21,2")
 	ignoreZeros := fs.Bool("ignore-zeros", false,
 		"keep reading past the end-of-archive marker, for concatenated tars")
