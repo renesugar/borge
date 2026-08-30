@@ -350,9 +350,17 @@ review of known items rather than a fresh audit.
   restoration (`archive.py:1112`). The same wrong sentence stood in DIVERGENCES #8 and in
   the stage 8 work list; this was the third copy, and all three are now fixed. It belongs
   in stage 8 as a fidelity gap, not here as a constraint of compatibility.
-- **Item decoding is lossy for unknown keys** at the `Item` struct boundary, which is why
+- ~~**Item decoding is lossy for unknown keys** at the `Item` struct boundary, which is why
   `debug dump-archive` reads the raw msgpack instead. A format borge owns can make the
-  round trip total.
+  round trip total.~~ **False, and corrected 2026-08-30 (R0 T8).** `Item.Unknown` keeps
+  every unrecognised key and writes it back; `item.TestUnknownKeysArePreserved` requires the
+  re-encoding to be byte-identical, and removing the code that does it makes that test fail.
+  The claim came from a stale comment on `RawItems`, now fixed — and it is worth recording
+  that the comment did more than mislead a reader: **it seeded this item, which then became
+  one of the two justifications for an on-disk format change that was never needed.** The
+  only genuinely lossy direction is a borg 1.x chunk entry's compressed size, which borg 2
+  does not read either and which borge cannot encounter, since it does not open borg 1.x
+  repositories (§0.6).
 - **Every item carries an empty `xattrs` dict and a zero `bsdflags`.** borg writes both on
   every item it examined, and the *presence* of each key is what says it looked: with
   `--noxattrs` or `--noflags` the key is absent instead. That is a real distinction —
@@ -538,5 +546,15 @@ produced by a hosted runner.
   every suite and size tested — so this is a double-check of a component that already
   agrees with a reference implementation, not an open defect. It is here rather than in the
   archive because an archive is not a place to look up what to do next.
+- **Watch [golang/go#81029][go81029] and re-evaluate AES-OCB**, tracked in
+  [issue #8](https://github.com/renesugar/borge/issues/8) rather than here, because what is
+  being tracked is *external state changing* and an issue is somewhere a change can be
+  noticed. Two things live there that would otherwise be lost in the archived porting plan:
+  §12.4's standing instruction not to start `avo` assembly before checking the issue's
+  state, and the finding that Go 1.27's experimental `simd`/`archsimd` exposes AES round
+  intrinsics as ordinary Go methods — which, if it stabilises and if it measures well, would
+  replace the `avo` plan with something better. Neither of those conditions is established
+  yet. Nothing blocks on it: ChaCha20-Poly1305 is within 1.7x of OpenSSL and is the right
+  default on mobile anyway.
 - Revisit this roadmap at every release. Work moved into the porting plan must be removed
   here so two trackers cannot disagree silently.

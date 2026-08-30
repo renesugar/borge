@@ -185,10 +185,24 @@ func (a *Archive) Items(fn func(*item.Item) error) error {
 
 // RawItems calls fn for each item as the decoded msgpack value, before it becomes an Item.
 //
-// Decoding to an Item is lossy in one direction that matters for debugging: a key borge
-// does not know about is dropped. `debug dump-archive` exists to show what is *actually*
-// in the repository - including a field written by a newer borg, which is exactly the case
-// somebody reaches for the command to investigate - so it reads the stream through here.
+// **Corrected 2026-08-30 by R0 T8.** This used to say that "a key borge does not know about
+// is dropped", and that was the stated reason for the command. It is not true and has not
+// been: Decode keeps unrecognised keys in Item.Unknown and writes them back out, and
+// item.TestUnknownKeysArePreserved requires the re-encoding to be byte-identical. The claim
+// was false while the code around it was correct, which is the failure mode §2.1 exists to
+// catch; it also seeded a roadmap item proposing a format change to fix a problem that was
+// not there.
+//
+// What is genuinely lost on the way to an Item is narrower: a borg 1.x chunk-list entry's
+// third element, the compressed size, which borg 2 does not read either
+// (TestChunkListDropsLegacyCompressedSize). borge cannot open a borg 1.x repository at all
+// (§0.6), so that path is unreachable in practice.
+//
+// The command is still right to read the stream through here, for a reason that survives
+// the correction: an Item renders the keys it models as named fields, so a key carried in
+// Unknown would not appear under its own name in the JSON. `debug dump-archive` exists to
+// show what is *actually* in the repository - byte order, exact encodings and all - which
+// is what somebody reaching for it is asking about.
 //
 // Returning ErrStopIteration from fn stops the iteration; that is not an error.
 func (a *Archive) RawItems(fn func(any) error) error {

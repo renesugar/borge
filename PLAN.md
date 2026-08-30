@@ -179,15 +179,26 @@ Sized so each is committable on its own, and ordered so the measurements that co
   earlier measurement was measuring the bug. **If the saving does not justify a format
   version on its own, say so and close it** — this is one of only two tasks that can make
   T3 necessary.
-- [ ] **T8 — Lossless item round-trip.** *(Design and measurement here; the bytes change
+- [x] **T8 — Measured 2026-08-30 and closed: the round trip is already lossless.** The
+  premise — "unknown msgpack keys are dropped at the `Item` struct boundary" — is false, and
+  came from a stale comment in `RawItems` that has now been corrected. **No format version
+  is justified**, which means neither of the two tasks that could require one does. Findings
+  at the end of this file. Original text:
+- ~~**T8 — Lossless item round-trip.**~~ *(Design and measurement here; the bytes change
   after T3.)* Unknown msgpack keys are dropped at the `Item` struct boundary, which is why
   `debug dump-archive` reads raw msgpack instead. A format borge owns can make the round
   trip total. Establish first what is actually being lost — round-trip the real corpora and
   the borg-written archives and report which keys fall off — because "a format borge owns
   could fix this" is a capability, not yet a reason. This is the other task that can make T3
   necessary.
-- [ ] **T3 — The version bump, the migration, and the replacement gates. Only if anything
-  above still needs it.** Moved here from third place on 2026-08-30. Repository version 5
+- [x] **T3 — Not reached, 2026-08-30, and that is the result.** The two tasks that could
+  have required a format version both closed on measurement: T5's saving is 0.4 MiB per
+  million files rather than 10 to 18 MB, and T8's premise was false — the round trip was
+  already lossless. **No repository version 5, no migration, and the interoperability gate
+  keeps covering everything borge writes.** The task text below stands unchanged as the
+  design, for whoever does reach it. Original text:
+- ~~**T3 — The version bump, the migration, and the replacement gates. Only if anything
+  above still needs it.**~~ Moved here from third place on 2026-08-30. Repository version 5
   behind an explicit opt-in, `borge transfer`-based migration from version 4, and the three
   replacement gates wired into the suite. **Nothing that changes on-disk bytes may land
   before this** — that rule is unchanged, and T5 and T8 sitting immediately above it does
@@ -918,3 +929,63 @@ confirm it. It was reasoning about the wrong layer. **An on-disk cost argued fro
 in-memory encoding is not an on-disk cost**, and the gap was a factor of 47. R0.1 was right
 that the question could only be asked from a faithful baseline; it turns out the answer also
 depended on asking it about bytes that actually reach the disk.
+
+---
+
+## What T8 found, 2026-08-30
+
+**Closed. The round trip is already total, and the task existed because a comment said
+otherwise.** T8 was the last of the two tasks that could make T3 necessary. Neither does.
+
+### The premise was false
+
+T8 says "unknown msgpack keys are dropped at the `Item` struct boundary, which is why
+`debug dump-archive` reads raw msgpack instead". `Item.Unknown` keeps every unrecognised
+key and writes it back, and `item.TestUnknownKeysArePreserved` requires the re-encoded item
+to be **byte-identical** to the original — a stronger check than the one T8 asked for.
+
+Verified rather than taken on trust, in both directions:
+
+- **Audited real archives.** Every item of a 118,867-item borge archive and of an archive
+  written by *real borg*: 0 keys lost, 0 values changed.
+- **Confirmed the audit can fail.** Removing the loop that re-emits `Unknown` makes
+  `TestUnknownKeysArePreserved` fail immediately, showing both halves of the round trip.
+
+### The audit is weaker than it looks, and now says so
+
+The archive audit passes **even with unknown-key preservation removed**, because neither a
+borge-written nor a borg-written archive contains a key borge does not already know. A clean
+run there proves that known keys survive and nothing more. That was established by mutation
+rather than reasoned about, and the test now prints a note saying so and pointing at the
+unit test that carries the real guarantee. An instrument that cannot fail on the data
+available should say which question it is not answering.
+
+### Where the premise came from, and the defect underneath
+
+`RawItems` carried this comment:
+
+> Decoding to an Item is lossy in one direction that matters for debugging: a key borge does
+> not know about is dropped.
+
+False, and false while the code beside it was correct — the failure mode §2.1 exists to
+catch. It is worth recording that this one did more than mislead a reader: **it seeded a
+roadmap item proposing an on-disk format change to fix a problem that did not exist**, and
+that item survived into R0 as one of the two justifications for a version bump.
+
+The comment is corrected. `debug dump-archive` is still right to read the raw stream, for a
+reason that survives: an `Item` renders modelled keys as named fields, so a key carried in
+`Unknown` would not appear under its own name in the JSON.
+
+### The one genuinely lossy direction, which changes nothing
+
+A borg 1.x chunk-list entry's third element — the compressed size — is dropped on re-encode
+(`TestChunkListDropsLegacyCompressedSize`). That is deliberate: borg 2 does not read it
+either, so keeping it would diverge. And borge cannot open a borg 1.x repository at all
+(§0.6), so the path is unreachable in practice.
+
+### The verdict, and what it settles
+
+Nothing is lost that a format borge owns could recover. **T8 closes with no change to the
+format, and with T5 already closed, no measurement in this project requires the format to
+move at all.** T3 is therefore not reached — which is the outcome the ordering was designed
+to make visible rather than assume.
